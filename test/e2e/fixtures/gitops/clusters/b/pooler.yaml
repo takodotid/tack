@@ -1,0 +1,25 @@
+# Read-write PgBouncer pooler for pg-b. It runs 1 instance while pg-b is the
+# primary and 0 while pg-b is a replica.
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: pg-b-pooler-rw
+  namespace: db
+spec:
+  cluster:
+    name: pg-b
+  type: rw
+  instances: 0
+  pgbouncer:
+    poolMode: session
+  template:
+    spec:
+      containers:
+        - name: pgbouncer
+          image: ghcr.io/cloudnative-pg/pgbouncer:1.25.2
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi

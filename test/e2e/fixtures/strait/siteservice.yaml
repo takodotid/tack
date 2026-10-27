@@ -1,0 +1,14 @@
+# The SiteService that routes the e2e workload's primary, at each site.
+apiVersion: strait.tako.id/v1alpha1
+kind: SiteService
+metadata:
+  name: postgres
+  namespace: db
+spec:
+  mode: Single
+  port: {name: postgres, port: 5432}
+  plugin:
+    cnpg: {role: primary}
+  members:
+  - {name: pg-a, site: a, cnpg: {cluster: pg-a}}
+  - {name: pg-b, site: b, cnpg: {cluster: pg-b}}

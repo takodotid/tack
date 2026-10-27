@@ -1,0 +1,216 @@
+---
+name: tack
+description: Plan and inspect switches of a stateful workload's primary between sites with the tack CLI, and read SiteFailover ledgers. Use when asked about a Tack run, a site switchover or failover, or a SiteFailover. Never start or resume a run without an explicit instruction from a human for that run.
+---
+
+# tack
+
+Switch a stateful workload's primary between sites, with GitOps kept in step.
+
+```text
+Tack switches a stateful workload's primary from one site to another: a
+planned switchover, or a failover after a site is lost. It acts through the
+workload's own API, keeps GitOps in step, and records every step in a
+SiteFailover ledger in the new primary's cluster.
+
+A run takes four phases, each step recorded before it starts and after it ends:
+
+  Hold             annotate only the objects the run changes with
+                   kustomize.toolkit.fluxcd.io/reconcile: disabled, so Flux
+                   stops applying them
+  Failover         change the live objects through the workload's API, in
+                   order, waiting for each condition
+  PromoteToGitOps  commit to Git the values that are now live
+  Release          check that Git equals live, remove the annotations, and
+                   check that Flux changed nothing
+
+The operator starts every run. Tack never decides to fail over by itself.
+
+Rules for AI agents:
+  - An agent never starts "tack run" or "tack resume" without an explicit
+    instruction from a human for that run.
+  - "tack plan" comes first. Show its output to the human before any run.
+  - An agent never passes --yes, --fence, --accept-git-head or --take-over
+    unless the human's instruction for that run names it.
+  - "tack plan" and "tack status" only read; an agent may run them freely.
+  - When a run stops, report its reason and message to the human and wait.
+
+Exit codes:
+  0  success
+  1  error
+  2  usage error
+  3  the run stopped and waits for the operator (see tack status)
+  4  the run waits for something outside it, such as Git (tack resume later)
+```
+
+## Commands
+
+### tack plan
+
+Print every step and change of a run, and change nothing.
+
+```text
+Plan prints every step and every change a run would make, in order, and
+changes nothing. It reads each reachable site and the Git repository.
+
+The plan names the objects Tack holds, the patches and waits of the
+workload's driver, the exact Git change (file, path and value), the checks
+before and after release, and the follow-ups left for the operator. Values
+captured during the run, such as a demotion token, appear as $(name).
+
+Run "tack plan" before every "tack run", and show its output to the human
+who decides.
+```
+
+Usage: `tack plan -f WORKLOAD --to SITE [--mode planned|site-loss] [flags]`
+
+| Flag | Meaning |
+|---|---|
+| `-f`, `--file` | the Workload file (required) |
+| `--from` | the site of the current primary (default: the primary the target site declares) |
+| `--mode` | planned: the old primary demotes and hands over its token; site-loss: promote without a token after the old site is lost (default `planned`) |
+| `-o`, `--output` | text, or yaml for the SiteFailover the run would create (default `text`) |
+| `--to` | the site that becomes primary (required) |
+
+Examples:
+
+```sh
+  # A planned switchover to site b
+  tack plan -f workload.yaml --to b
+
+  # A failover after site a is lost
+  tack plan -f workload.yaml --to b --mode site-loss
+
+  # The SiteFailover object the run would create
+  tack plan -f workload.yaml --to b -o yaml
+```
+
+### tack resume
+
+Continue a run from its ledger.
+
+```text
+Resume continues a run from its ledger, never from memory: it takes the
+remaining steps of the plan the run recorded when it started, with the
+workload configuration it recorded then.
+
+A step that was started but not recorded as done runs again; every step is
+safe to repeat. Steps deferred because their site was unreachable run once
+the site is back.
+
+When the run stopped, the ledger's reason says what the operator must
+decide. Each decision has its own flag:
+
+  GitChanged           Git moved during the run. Review the new commits, then
+                       --accept-git-head SHA makes that commit the new base.
+  FencedSiteIsPrimary  a lost site came back and answers as primary.
+                       --fence SITE lets the run demote it.
+  HeldByAnotherRun     another run holds an object. Finish that run, or
+                       start a new run with --take-over.
+
+An agent never starts "tack resume" without an explicit instruction from a
+human for that run, and never passes these flags unless that instruction
+names them.
+```
+
+Usage: `tack resume RUN (-f WORKLOAD | --context CONTEXT) [flags]`
+
+| Flag | Meaning |
+|---|---|
+| `--accept-git-head` | accept this commit, pushed during the run, as the run's new Git base |
+| `--context` | a kube context to read runs from, instead of --file |
+| `--fence` | demote this site although it answers as primary (repeatable) |
+| `-f`, `--file` | the Workload file: search every site of the workload for its runs |
+| `--namespace` | the ledger namespace, with --context (default `tack-system`) |
+| `--yes` | skip the confirmation; only when a human approved resuming this run |
+
+Examples:
+
+```sh
+  # Continue after Git is back (break-glass)
+  tack resume pg-main-20261027-101500 -f workload.yaml
+
+  # Accept a commit pushed during the run, after reviewing it
+  tack resume pg-main-20261027-101500 -f workload.yaml --accept-git-head 1a2b3c4
+
+  # Demote a lost site that came back as primary
+  tack resume pg-main-20261027-101500 -f workload.yaml --fence a
+```
+
+### tack run
+
+Start a run: hold Flux, switch the primary, commit to Git, release.
+
+```text
+Run starts a run: it prints the plan, asks for confirmation, creates the
+SiteFailover ledger at the target site, and takes the steps in order.
+
+Modes:
+  planned    the old primary demotes; its demotion token promotes the new one
+  site-loss  the new site promotes without a token; the old primary then
+             needs a rebuild. Use it only when the old site is lost.
+
+If Git cannot be reached (break-glass), the run still holds and switches the
+live objects, then waits with exit code 4; "tack resume" finishes it once Git
+is back. If anything unexpected happens, the run stops with exit code 3 and
+the ledger says why.
+
+An agent never starts "tack run" without an explicit instruction from a
+human for that run, and runs "tack plan" first.
+```
+
+Usage: `tack run -f WORKLOAD --to SITE [--mode planned|site-loss] [flags]`
+
+| Flag | Meaning |
+|---|---|
+| `-f`, `--file` | the Workload file (required) |
+| `--from` | the site of the current primary (default: the primary the target site declares) |
+| `--mode` | planned: the old primary demotes and hands over its token; site-loss: promote without a token after the old site is lost (default `planned`) |
+| `--take-over` | take over the holds of this earlier run, which can no longer finish |
+| `--to` | the site that becomes primary (required) |
+| `--yes` | skip the confirmation; only when a human approved this run |
+
+Examples:
+
+```sh
+  # A planned switchover to site b, after reviewing "tack plan"
+  tack run -f workload.yaml --to b
+
+  # A failover after site a is lost
+  tack run -f workload.yaml --to b --mode site-loss
+```
+
+### tack status
+
+Show runs and their steps from the ledger.
+
+```text
+Status shows runs from their ledgers. Without RUN it lists the runs of the
+workload at every reachable site. With RUN it shows that run's phases, steps,
+held objects, Git commits, captured values (by name only) and follow-ups.
+```
+
+Usage: `tack status [RUN] (-f WORKLOAD | --context CONTEXT) [flags]`
+
+| Flag | Meaning |
+|---|---|
+| `--context` | a kube context to read runs from, instead of --file |
+| `-f`, `--file` | the Workload file: search every site of the workload for its runs |
+| `--namespace` | the ledger namespace, with --context (default `tack-system`) |
+| `-o`, `--output` | text or yaml (default `text`) |
+
+Examples:
+
+```sh
+  # Every run of the workload
+  tack status -f workload.yaml
+
+  # One run, step by step
+  tack status pg-main-20261027-101500 -f workload.yaml
+```
+
+## Global flags
+
+| Flag | Meaning |
+|---|---|
+| `--kubeconfig` | kubeconfig file holding every site's context (default: the standard kubeconfig loading rules) |

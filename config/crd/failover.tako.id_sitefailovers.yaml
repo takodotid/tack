@@ -1,0 +1,1036 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.23.0
+  name: sitefailovers.failover.tako.id
+spec:
+  group: failover.tako.id
+  names:
+    kind: SiteFailover
+    listKind: SiteFailoverList
+    plural: sitefailovers
+    shortNames:
+    - sfo
+    singular: sitefailover
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.workload.name
+      name: Workload
+      type: string
+    - jsonPath: .spec.mode
+      name: Mode
+      type: string
+    - jsonPath: .spec.from
+      name: From
+      type: string
+    - jsonPath: .spec.to
+      name: To
+      type: string
+    - jsonPath: .status.state
+      name: State
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: 'SiteFailover is the ledger of one run: what it will do and what
+          it did.'
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              SiteFailoverSpec is the run's request and its plan. It never changes
+              after the run starts.
+            properties:
+              from:
+                description: From is the site of the current primary.
+                type: string
+              mode:
+                description: Mode is the kind of run.
+                enum:
+                - Planned
+                - SiteLoss
+                type: string
+              steps:
+                description: Steps is the plan, in the order the run takes them.
+                items:
+                  description: Step is one action of a run, as data. The field named
+                    by Type is set.
+                  properties:
+                    capture:
+                      description: CaptureStep copies one field of a live object into
+                        the ledger.
+                      properties:
+                        into:
+                          description: Into is the name the value gets in the ledger.
+                          type: string
+                        jsonPath:
+                          description: JSONPath selects the field.
+                          type: string
+                        object:
+                          description: ObjectRef names a live object.
+                          properties:
+                            apiVersion:
+                              type: string
+                            kind:
+                              type: string
+                            name:
+                              type: string
+                            namespace:
+                              type: string
+                          required:
+                          - apiVersion
+                          - kind
+                          - name
+                          - namespace
+                          type: object
+                      required:
+                      - into
+                      - jsonPath
+                      - object
+                      type: object
+                    deferrable:
+                      description: |-
+                        Deferrable lets the run go on while the step's site is unreachable.
+                        The step then waits for the site to come back.
+                      type: boolean
+                    description:
+                      description: Description is one line for the operator.
+                      type: string
+                    git:
+                      description: GitStep writes one commit that makes Git equal
+                        the live state.
+                      properties:
+                        changes:
+                          description: Changes are the fields the commit sets.
+                          items:
+                            description: GitChange sets one field in the repository.
+                            properties:
+                              document:
+                                description: Document is the index of the YAML document
+                                  in the file.
+                                format: int32
+                                type: integer
+                              field:
+                                type: string
+                              file:
+                                description: |-
+                                  File is the file, relative to the repository root. Empty until the
+                                  manifest is found, when Git could not be read at plan time.
+                                type: string
+                              object:
+                                description: ObjectRef names a live object.
+                                properties:
+                                  apiVersion:
+                                    type: string
+                                  kind:
+                                    type: string
+                                  name:
+                                    type: string
+                                  namespace:
+                                    type: string
+                                required:
+                                - apiVersion
+                                - kind
+                                - name
+                                - namespace
+                                type: object
+                              path:
+                                description: Path is the field's path in the file.
+                                type: string
+                              site:
+                                description: Site, Object and Field name the live
+                                  field this change mirrors.
+                                type: string
+                              value:
+                                description: |-
+                                  Value is the field's new value as JSON, such as "pg-b" or 2. It may
+                                  reference a captured value as $(name). Unset means remove the field.
+                                type: string
+                            required:
+                            - field
+                            - object
+                            - site
+                            type: object
+                          type: array
+                        message:
+                          description: Message is the commit message.
+                          type: string
+                      required:
+                      - changes
+                      - message
+                      type: object
+                    hold:
+                      description: ObjectStep acts on one object that Flux applies.
+                      properties:
+                        kustomization:
+                          description: |-
+                            Kustomization is the Flux Kustomization that applied the object at
+                            plan time. Unset when the site was unreachable. The step reads the
+                            object's own labels when it runs.
+                          properties:
+                            name:
+                              type: string
+                            namespace:
+                              type: string
+                          required:
+                          - name
+                          - namespace
+                          type: object
+                        object:
+                          description: ObjectRef names a live object.
+                          properties:
+                            apiVersion:
+                              type: string
+                            kind:
+                              type: string
+                            name:
+                              type: string
+                            namespace:
+                              type: string
+                          required:
+                          - apiVersion
+                          - kind
+                          - name
+                          - namespace
+                          type: object
+                      required:
+                      - object
+                      type: object
+                    id:
+                      description: ID is unique within the run.
+                      type: string
+                    patch:
+                      description: PatchStep applies a JSON merge patch to a live
+                        object.
+                      properties:
+                        merge:
+                          description: |-
+                            Merge is the JSON merge patch. A string value $(name) is replaced
+                            by the captured value of that name.
+                          type: string
+                        object:
+                          description: ObjectRef names a live object.
+                          properties:
+                            apiVersion:
+                              type: string
+                            kind:
+                              type: string
+                            name:
+                              type: string
+                            namespace:
+                              type: string
+                          required:
+                          - apiVersion
+                          - kind
+                          - name
+                          - namespace
+                          type: object
+                      required:
+                      - merge
+                      - object
+                      type: object
+                    phase:
+                      description: Phase is the phase the step belongs to.
+                      enum:
+                      - Hold
+                      - Failover
+                      - PromoteToGitOps
+                      - Release
+                      type: string
+                    reconcile:
+                      description: |-
+                        ReconcileStep asks Flux to reconcile and waits until Flux has handled
+                        the request. The Kustomizations' GitRepository is reconciled first.
+                      properties:
+                        kustomizations:
+                          description: |-
+                            Kustomizations are the Flux Kustomizations at the step's site. Empty
+                            means every Kustomization that applies an object this run holds at
+                            the site.
+                          items:
+                            description: ObjectKey names a namespaced object.
+                            properties:
+                              name:
+                                type: string
+                              namespace:
+                                type: string
+                            required:
+                            - name
+                            - namespace
+                            type: object
+                          type: array
+                        revision:
+                          description: |-
+                            Revision, when set, is the commit Flux must have applied. It may
+                            reference a captured value as $(name).
+                          type: string
+                        timeout:
+                          description: Timeout bounds the wait.
+                          type: string
+                      required:
+                      - timeout
+                      type: object
+                    release:
+                      description: ObjectStep acts on one object that Flux applies.
+                      properties:
+                        kustomization:
+                          description: |-
+                            Kustomization is the Flux Kustomization that applied the object at
+                            plan time. Unset when the site was unreachable. The step reads the
+                            object's own labels when it runs.
+                          properties:
+                            name:
+                              type: string
+                            namespace:
+                              type: string
+                          required:
+                          - name
+                          - namespace
+                          type: object
+                        object:
+                          description: ObjectRef names a live object.
+                          properties:
+                            apiVersion:
+                              type: string
+                            kind:
+                              type: string
+                            name:
+                              type: string
+                            namespace:
+                              type: string
+                          required:
+                          - apiVersion
+                          - kind
+                          - name
+                          - namespace
+                          type: object
+                      required:
+                      - object
+                      type: object
+                    routing:
+                      description: RoutingStep waits until Strait routes the workload
+                        to the new primary.
+                      properties:
+                        expected:
+                          description: Expected is the member Strait must route to.
+                          type: string
+                        service:
+                          description: Service is the Strait service at the step's
+                            site.
+                          properties:
+                            name:
+                              type: string
+                            namespace:
+                              type: string
+                          required:
+                          - name
+                          - namespace
+                          type: object
+                        timeout:
+                          type: string
+                      required:
+                      - expected
+                      - service
+                      - timeout
+                      type: object
+                    site:
+                      description: Site is the site the step acts on. Empty for a
+                        step on Git.
+                      type: string
+                    type:
+                      description: Type is the step's action.
+                      enum:
+                      - Hold
+                      - Reconcile
+                      - Patch
+                      - Wait
+                      - Capture
+                      - Git
+                      - VerifyGit
+                      - Release
+                      - VerifyNoop
+                      - Routing
+                      type: string
+                    verifyGit:
+                      description: VerifyStep checks the held objects at the step's
+                        site against Git.
+                      properties:
+                        fields:
+                          description: Fields are the fields this run changed.
+                          items:
+                            description: ObjectField is one field of one object.
+                            properties:
+                              field:
+                                type: string
+                              object:
+                                description: ObjectRef names a live object.
+                                properties:
+                                  apiVersion:
+                                    type: string
+                                  kind:
+                                    type: string
+                                  name:
+                                    type: string
+                                  namespace:
+                                    type: string
+                                required:
+                                - apiVersion
+                                - kind
+                                - name
+                                - namespace
+                                type: object
+                            required:
+                            - field
+                            - object
+                            type: object
+                          type: array
+                        objects:
+                          description: Objects are the objects to check.
+                          items:
+                            description: ObjectRef names a live object.
+                            properties:
+                              apiVersion:
+                                type: string
+                              kind:
+                                type: string
+                              name:
+                                type: string
+                              namespace:
+                                type: string
+                            required:
+                            - apiVersion
+                            - kind
+                            - name
+                            - namespace
+                            type: object
+                          type: array
+                      required:
+                      - objects
+                      type: object
+                    verifyNoop:
+                      description: VerifyStep checks the held objects at the step's
+                        site against Git.
+                      properties:
+                        fields:
+                          description: Fields are the fields this run changed.
+                          items:
+                            description: ObjectField is one field of one object.
+                            properties:
+                              field:
+                                type: string
+                              object:
+                                description: ObjectRef names a live object.
+                                properties:
+                                  apiVersion:
+                                    type: string
+                                  kind:
+                                    type: string
+                                  name:
+                                    type: string
+                                  namespace:
+                                    type: string
+                                required:
+                                - apiVersion
+                                - kind
+                                - name
+                                - namespace
+                                type: object
+                            required:
+                            - field
+                            - object
+                            type: object
+                          type: array
+                        objects:
+                          description: Objects are the objects to check.
+                          items:
+                            description: ObjectRef names a live object.
+                            properties:
+                              apiVersion:
+                                type: string
+                              kind:
+                                type: string
+                              name:
+                                type: string
+                              namespace:
+                                type: string
+                            required:
+                            - apiVersion
+                            - kind
+                            - name
+                            - namespace
+                            type: object
+                          type: array
+                      required:
+                      - objects
+                      type: object
+                    wait:
+                      description: WaitStep waits until every condition holds on a
+                        live object.
+                      properties:
+                        conditions:
+                          items:
+                            description: Condition compares one field of a live object.
+                            properties:
+                              jsonPath:
+                                description: JSONPath selects the field, such as {.status.currentPrimary}.
+                                type: string
+                              operator:
+                                description: Operator compares the field.
+                                enum:
+                                - Equals
+                                - NotEquals
+                                - NotEmpty
+                                - Empty
+                                - Contains
+                                type: string
+                              value:
+                                description: |-
+                                  Value is the operand of Equals and NotEquals. It may reference a
+                                  captured value as $(name).
+                                type: string
+                            required:
+                            - jsonPath
+                            - operator
+                            type: object
+                          type: array
+                        object:
+                          description: ObjectRef names a live object.
+                          properties:
+                            apiVersion:
+                              type: string
+                            kind:
+                              type: string
+                            name:
+                              type: string
+                            namespace:
+                              type: string
+                          required:
+                          - apiVersion
+                          - kind
+                          - name
+                          - namespace
+                          type: object
+                        timeout:
+                          type: string
+                      required:
+                      - conditions
+                      - object
+                      - timeout
+                      type: object
+                  required:
+                  - description
+                  - id
+                  - phase
+                  - type
+                  type: object
+                minItems: 1
+                type: array
+              to:
+                description: To is the site of the new primary.
+                type: string
+              workload:
+                description: Workload is the workload's configuration when the run
+                  started.
+                properties:
+                  name:
+                    description: Name is the Workload's name.
+                    type: string
+                  spec:
+                    description: Spec is the Workload's spec.
+                    properties:
+                      driver:
+                        description: Driver is the built-in driver that knows the
+                          workload's API.
+                        enum:
+                        - cnpg
+                        type: string
+                      git:
+                        description: Git is the GitOps repository that Flux applies
+                          at every site.
+                        properties:
+                          author:
+                            description: Author signs Tack's commits. Without it,
+                              git's own configuration applies.
+                            properties:
+                              email:
+                                type: string
+                              name:
+                                type: string
+                            required:
+                            - email
+                            - name
+                            type: object
+                          branch:
+                            description: Branch is the branch Flux applies.
+                            type: string
+                          fields:
+                            description: |-
+                              Fields maps object fields to places in the repository.
+                              A mapped field is written where its mapping says.
+                            items:
+                              description: FieldMapping says where one field of one
+                                object lives in the repository.
+                              properties:
+                                document:
+                                  description: |-
+                                    Document selects the YAML document by index when the file holds
+                                    several and none is the object itself.
+                                  format: int32
+                                  type: integer
+                                field:
+                                  description: Field is the field's path in the live
+                                    object, such as spec.replica.primary.
+                                  type: string
+                                file:
+                                  description: File is the file, relative to the repository
+                                    root.
+                                  type: string
+                                object:
+                                  description: Object is the live object.
+                                  properties:
+                                    apiVersion:
+                                      type: string
+                                    kind:
+                                      type: string
+                                    name:
+                                      type: string
+                                    namespace:
+                                      type: string
+                                  required:
+                                  - apiVersion
+                                  - kind
+                                  - name
+                                  - namespace
+                                  type: object
+                                path:
+                                  description: |-
+                                    Path is the field's path in the file, such as spec.replica.primary
+                                    or a Helm values key. Segments are separated by dots; [N] indexes a list.
+                                  type: string
+                                site:
+                                  description: Site is the site of the object.
+                                  type: string
+                              required:
+                              - field
+                              - file
+                              - object
+                              - path
+                              - site
+                              type: object
+                            type: array
+                          find:
+                            description: |-
+                              Find writes an unmapped field into the manifest that defines its
+                              object. Without it, every changed field needs a mapping.
+                            properties:
+                              paths:
+                                description: |-
+                                  Paths are the directories searched, per site. A site without an
+                                  entry searches the whole repository.
+                                items:
+                                  description: SitePath is a directory of the repository
+                                    that belongs to a site.
+                                  properties:
+                                    path:
+                                      type: string
+                                    site:
+                                      type: string
+                                  required:
+                                  - path
+                                  - site
+                                  type: object
+                                type: array
+                            type: object
+                          url:
+                            description: URL is the repository, as the git binary
+                              takes it.
+                            type: string
+                        required:
+                        - branch
+                        - url
+                        type: object
+                      ledger:
+                        description: Ledger sets where SiteFailover objects live.
+                        properties:
+                          namespace:
+                            default: tack-system
+                            description: Namespace holds the SiteFailover objects
+                              at every site.
+                            type: string
+                        type: object
+                      routing:
+                        description: Routing confirms that routing followed the switch.
+                        properties:
+                          strait:
+                            description: Strait reads Strait's status at each site.
+                            properties:
+                              members:
+                                description: |-
+                                  Members maps each Tack site to the name of its member in the
+                                  SiteServices.
+                                items:
+                                  description: StraitMember maps a Tack site to a
+                                    SiteService member.
+                                  properties:
+                                    member:
+                                      type: string
+                                    site:
+                                      type: string
+                                  required:
+                                  - member
+                                  - site
+                                  type: object
+                                minItems: 2
+                                type: array
+                              services:
+                                description: |-
+                                  Services are the SiteServices that route to the workload's primary,
+                                  one per site that runs Strait.
+                                items:
+                                  description: StraitService is the SiteService read
+                                    at one site.
+                                  properties:
+                                    name:
+                                      type: string
+                                    namespace:
+                                      type: string
+                                    site:
+                                      type: string
+                                  required:
+                                  - name
+                                  - namespace
+                                  - site
+                                  type: object
+                                minItems: 1
+                                type: array
+                            required:
+                            - members
+                            - services
+                            type: object
+                        type: object
+                      sites:
+                        description: Sites lists every site of the workload.
+                        items:
+                          description: Site is one Kubernetes cluster that runs a
+                            member of the workload.
+                          properties:
+                            cnpg:
+                              description: CNPG is the site's member for the cnpg
+                                driver.
+                              properties:
+                                cluster:
+                                  description: Cluster is the site's CloudNativePG
+                                    Cluster.
+                                  properties:
+                                    name:
+                                      type: string
+                                    namespace:
+                                      type: string
+                                  required:
+                                  - name
+                                  - namespace
+                                  type: object
+                                pooler:
+                                  description: |-
+                                    Pooler is the site's read-write Pooler. It runs only while its
+                                    Cluster is primary.
+                                  properties:
+                                    instances:
+                                      description: |-
+                                        Instances is the Pooler's instances while its Cluster is primary.
+                                        At every other site the Pooler has 0.
+                                      format: int32
+                                      minimum: 1
+                                      type: integer
+                                    name:
+                                      type: string
+                                    namespace:
+                                      type: string
+                                  required:
+                                  - instances
+                                  - name
+                                  - namespace
+                                  type: object
+                              required:
+                              - cluster
+                              type: object
+                            kubeContext:
+                              description: KubeContext is the kubeconfig context Tack
+                                uses for this site.
+                              type: string
+                            name:
+                              description: Name identifies the site in Tack's commands
+                                and ledger.
+                              maxLength: 63
+                              pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                              type: string
+                          required:
+                          - kubeContext
+                          - name
+                          type: object
+                        minItems: 2
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                      timeouts:
+                        description: Timeouts bound the waits of a run.
+                        properties:
+                          demotion:
+                            description: Demotion bounds the wait for the old primary
+                              to demote.
+                            type: string
+                          flux:
+                            description: Flux bounds the wait for a Flux reconcile.
+                            type: string
+                          promotion:
+                            description: Promotion bounds the wait for the new primary
+                              to promote.
+                            type: string
+                          routing:
+                            description: Routing bounds the wait for routing to follow.
+                            type: string
+                        type: object
+                    required:
+                    - driver
+                    - git
+                    - sites
+                    type: object
+                required:
+                - name
+                - spec
+                type: object
+            required:
+            - from
+            - mode
+            - steps
+            - to
+            - workload
+            type: object
+            x-kubernetes-validations:
+            - message: spec is immutable
+              rule: self == oldSelf
+          status:
+            description: SiteFailoverStatus records what the run did.
+            properties:
+              captured:
+                additionalProperties:
+                  type: string
+                description: Captured holds the values captured for later steps, such
+                  as tokens.
+                type: object
+              finishedAt:
+                description: FinishedAt is when the run succeeded.
+                format: date-time
+                type: string
+              followUps:
+                description: FollowUps are actions left for the operator after the
+                  run.
+                items:
+                  description: FollowUp is an action left for the operator.
+                  properties:
+                    action:
+                      description: Action is what to do, such as Rebuild.
+                      type: string
+                    reason:
+                      description: Reason says why.
+                      type: string
+                    site:
+                      type: string
+                  required:
+                  - action
+                  - reason
+                  - site
+                  type: object
+                type: array
+              git:
+                description: Git records the run's view of the repository.
+                properties:
+                  acceptedRevision:
+                    description: AcceptedRevision is a later commit the operator accepted
+                      as the base.
+                    type: string
+                  baseRevision:
+                    description: BaseRevision is the commit live matched when the
+                      run started.
+                    type: string
+                  commit:
+                    description: Commit is the run's own commit.
+                    type: string
+                type: object
+              held:
+                description: Held lists the objects this run holds or held.
+                items:
+                  description: HeldObject is an object the run holds or held.
+                  properties:
+                    generation:
+                      description: Generation is the object's generation at release.
+                      format: int64
+                      type: integer
+                    heldAt:
+                      description: HeldAt is when the run held the object.
+                      format: date-time
+                      type: string
+                    kustomization:
+                      description: Kustomization is the Flux Kustomization that applies
+                        the object.
+                      properties:
+                        name:
+                          type: string
+                        namespace:
+                          type: string
+                      required:
+                      - name
+                      - namespace
+                      type: object
+                    object:
+                      description: ObjectRef names a live object.
+                      properties:
+                        apiVersion:
+                          type: string
+                        kind:
+                          type: string
+                        name:
+                          type: string
+                        namespace:
+                          type: string
+                      required:
+                      - apiVersion
+                      - kind
+                      - name
+                      - namespace
+                      type: object
+                    releasedAt:
+                      description: ReleasedAt is when the run released it.
+                      format: date-time
+                      type: string
+                    site:
+                      type: string
+                  required:
+                  - kustomization
+                  - object
+                  - site
+                  type: object
+                type: array
+              message:
+                description: Message explains the state to the operator.
+                type: string
+              phase:
+                description: Phase is the phase of the current or last step.
+                enum:
+                - Hold
+                - Failover
+                - PromoteToGitOps
+                - Release
+                type: string
+              phases:
+                description: Phases records each phase's start and end.
+                items:
+                  description: PhaseStatus records one phase.
+                  properties:
+                    finishedAt:
+                      format: date-time
+                      type: string
+                    name:
+                      description: Phase is a phase of a run.
+                      enum:
+                      - Hold
+                      - Failover
+                      - PromoteToGitOps
+                      - Release
+                      type: string
+                    startedAt:
+                      format: date-time
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              reason:
+                description: Reason says why the run waits or stopped.
+                type: string
+              startedAt:
+                description: StartedAt is when the run started.
+                format: date-time
+                type: string
+              state:
+                description: State is the run's state.
+                enum:
+                - Running
+                - Waiting
+                - Stopped
+                - Succeeded
+                type: string
+              steps:
+                description: Steps records each step's start and end, in plan order.
+                items:
+                  description: StepStatus records one step.
+                  properties:
+                    attempts:
+                      description: Attempts counts the starts of the step.
+                      format: int32
+                      type: integer
+                    finishedAt:
+                      format: date-time
+                      type: string
+                    id:
+                      type: string
+                    message:
+                      description: Message is the step's last result or error.
+                      type: string
+                    startedAt:
+                      format: date-time
+                      type: string
+                    state:
+                      description: StepState is the state of a step.
+                      enum:
+                      - Pending
+                      - Running
+                      - Succeeded
+                      - Failed
+                      - Deferred
+                      type: string
+                  required:
+                  - id
+                  - state
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - id
+                x-kubernetes-list-type: map
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

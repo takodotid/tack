@@ -1,0 +1,85 @@
+# CloudNativePG Cluster at site b, in the distributed topology with pg-a.
+# The Secrets tack-e2e-server-ca, tack-e2e-client-ca and app-credentials are
+# created at runtime by test/e2e/env/up.sh. They are never in Git.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg-b
+  namespace: db
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.6-system-trixie
+  storage:
+    size: 1Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+  postgresql:
+    parameters:
+      shared_buffers: 64MB
+  certificates:
+    serverCASecret: tack-e2e-server-ca
+    clientCASecret: tack-e2e-client-ca
+    serverAltDNSNames:
+      - tack-e2e-b-control-plane
+  managed:
+    services:
+      additional:
+        - selectorType: rw
+          serviceTemplate:
+            metadata:
+              name: pg-b-rw-nodeport
+            spec:
+              type: NodePort
+              ports:
+                - name: postgres
+                  port: 5432
+                  targetPort: 5432
+                  nodePort: 30432
+  bootstrap:
+    pg_basebackup:
+      source: pg-a
+      database: app
+      owner: app
+      secret:
+        name: app-credentials
+  replica:
+    self: pg-b
+    primary: pg-a
+    source: pg-a
+  externalClusters:
+    - name: pg-a
+      connectionParameters:
+        host: tack-e2e-a-control-plane
+        port: "30432"
+        user: streaming_replica
+        dbname: postgres
+        sslmode: verify-full
+      sslKey:
+        name: pg-b-replication
+        key: tls.key
+      sslCert:
+        name: pg-b-replication
+        key: tls.crt
+      sslRootCert:
+        name: tack-e2e-server-ca
+        key: ca.crt
+    - name: pg-b
+      connectionParameters:
+        host: tack-e2e-b-control-plane
+        port: "30432"
+        user: streaming_replica
+        dbname: postgres
+        sslmode: verify-full
+      sslKey:
+        name: pg-b-replication
+        key: tls.key
+      sslCert:
+        name: pg-b-replication
+        key: tls.crt
+      sslRootCert:
+        name: tack-e2e-server-ca
+        key: ca.crt

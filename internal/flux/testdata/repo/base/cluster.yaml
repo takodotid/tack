@@ -1,0 +1,12 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg
+  annotations:
+    example.org/site: ${site}
+spec:
+  instances: 3
+  description: token ${token}
+  replica:
+    primary: pg-a
+    source: pg-a
