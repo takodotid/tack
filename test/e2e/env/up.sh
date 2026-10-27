@@ -340,6 +340,7 @@ site:
   name: $site
   spec:
     exchange: {pollInterval: 2s, peerTimeout: 6s}
+    gateway: {directService: {type: NodePort}}
 EOF
     helm upgrade --install strait "$WORK/cache/strait/deploy/helm/strait" \
       --kubeconfig "$KUBECONFIG_FILE" --kube-context "$(context_name "$site")" \

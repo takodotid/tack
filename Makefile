@@ -43,7 +43,7 @@ verify: generate
 test: tools-go
 	$(GO) test ./...
 
-## e2e: the end-to-end tests on kind clusters; see test/e2e/README.md
+## e2e: the end-to-end tests on kind clusters; see test/e2e/env/README.md
 e2e: tools-go
 	test/e2e/run.sh
 

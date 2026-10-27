@@ -1,0 +1,28 @@
+# On a tag vX.Y.Z: the CLI archives with the man pages and the CRD, and the GitHub release.
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: make verify test
+      - run: make dist VERSION="$GITHUB_REF_NAME"
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp config/crd/failover.tako.id_sitefailovers.yaml dist/
+          cd dist
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "Tack $GITHUB_REF_NAME" --generate-notes *.tar.gz SHA256SUMS failover.tako.id_sitefailovers.yaml
