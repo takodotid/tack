@@ -12,8 +12,9 @@ GIT_IMAGE=tack-e2e-gitserver:dev
 GIT_REPO=gitops
 GIT_INTERNAL_URL=http://$GIT_CONTAINER:8080/$GIT_REPO.git
 # A fixed host port: a run records the Git URL in its ledger, and the e2e
-# stops and starts the Git server.
-GIT_HOST_PORT=${TACK_E2E_GIT_PORT:-38180}
+# stops and starts the Git server. It is below the kernel's ephemeral port
+# range, so an outgoing connection cannot hold it when the server restarts.
+GIT_HOST_PORT=${TACK_E2E_GIT_PORT:-28180}
 
 KIND_NODE_IMAGE=kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
 FLUX_VERSION=v2.10.0

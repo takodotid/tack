@@ -465,7 +465,12 @@ func TestSiteLossBreakGlassAndReturn(t *testing.T) {
 		t.Fatalf("site b not fenced: declares %s", got)
 	}
 
-	docker(t, "start", gitContainer)
+	eventually(t, time.Minute, "the Git server starts", func() string {
+		if out, err := exec.Command("docker", "start", gitContainer).CombinedOutput(); err != nil {
+			return fmt.Sprintf("%v: %s", err, out)
+		}
+		return ""
+	})
 	eventually(t, time.Minute, "Git answers", func() string {
 		url, _ := gitURL()
 		if err := exec.Command("git", "ls-remote", url).Run(); err != nil {
