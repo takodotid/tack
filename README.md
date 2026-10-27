@@ -47,6 +47,8 @@ make e2e
 
 ## Use
 
+Each release publishes `tack` archives for Linux and macOS (amd64, arm64), with the man pages and the CRD, and `SHA256SUMS`, on the [releases page](https://github.com/takodotid/tack/releases).
+
 1. Install the CRD `config/crd/failover.tako.id_sitefailovers.yaml` and create the namespace `tack-system` at every site.
 2. Describe the workload in a Workload file: its sites, their kube contexts, the Git repository and where each field lives in it. See [RFC#0009](rfcs/RFC0009.md) and [RFC#0006](rfcs/RFC0006.md).
 3. Plan, then run:
