@@ -1,7 +1,7 @@
 //go:build e2e
 
-// Package e2e runs tack against two kind clusters with Flux, CloudNativePG
-// and a local Git server. test/e2e/env/up.sh builds them; test/e2e/run.sh
+// Package e2e runs tack against two kind clusters with Flux, CloudNativePG,
+// Strait and a local Git server. test/e2e/env/up.sh builds them; test/e2e/run.sh
 // runs everything. The scenarios run in order on one pair of clusters, the
 // destructive ones last.
 package e2e
