@@ -688,12 +688,31 @@ spec:
                           strait:
                             description: Strait reads Strait's status at each site.
                             properties:
-                              services:
-                                description: Services are the Strait services that
-                                  route to the workload's primary, per site.
+                              members:
+                                description: |-
+                                  Members maps each Tack site to the name of its member in the
+                                  SiteServices.
                                 items:
-                                  description: StraitService is the Strait service
-                                    of one site.
+                                  description: StraitMember maps a Tack site to a
+                                    SiteService member.
+                                  properties:
+                                    member:
+                                      type: string
+                                    site:
+                                      type: string
+                                  required:
+                                  - member
+                                  - site
+                                  type: object
+                                minItems: 2
+                                type: array
+                              services:
+                                description: |-
+                                  Services are the SiteServices that route to the workload's primary,
+                                  one per site that runs Strait.
+                                items:
+                                  description: StraitService is the SiteService read
+                                    at one site.
                                   properties:
                                     name:
                                       type: string
@@ -709,6 +728,7 @@ spec:
                                 minItems: 1
                                 type: array
                             required:
+                            - members
                             - services
                             type: object
                         type: object

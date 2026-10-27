@@ -134,6 +134,18 @@ func Validate(name string, s *v1alpha1.WorkloadSpec) error {
 				add("spec.routing.strait.services[%d].site %q is not a site", i, svc.Site)
 			}
 		}
+		members := map[string]bool{}
+		for i, m := range s.Routing.Strait.Members {
+			if !seen[m.Site] {
+				add("spec.routing.strait.members[%d].site %q is not a site", i, m.Site)
+			}
+			members[m.Site] = true
+		}
+		for _, site := range s.Sites {
+			if !members[site.Name] {
+				add("spec.routing.strait.members has no member for site %q", site.Name)
+			}
+		}
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("workload %q:\n  %s", name, strings.Join(errs, "\n  "))

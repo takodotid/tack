@@ -251,13 +251,22 @@ func Compose(in Inputs) (*v1alpha1.SiteFailover, error) {
 		})
 	}
 	if spec.Routing != nil && spec.Routing.Strait != nil {
+		expected := ""
+		for _, m := range spec.Routing.Strait.Members {
+			if m.Site == in.To {
+				expected = m.Member
+			}
+		}
+		if expected == "" {
+			return nil, fmt.Errorf("spec.routing.strait.members has no member for site %q", in.To)
+		}
 		for _, svc := range spec.Routing.Strait.Services {
 			add(v1alpha1.Step{
 				ID: "routing-" + svc.Site, Phase: v1alpha1.PhaseRelease, Type: v1alpha1.StepRouting, Site: svc.Site,
-				Description: fmt.Sprintf("wait for Strait at site %s to route %s/%s to site %s", svc.Site, svc.Namespace, svc.Name, in.To),
+				Description: fmt.Sprintf("wait for Strait at site %s to route %s/%s to member %s only", svc.Site, svc.Namespace, svc.Name, expected),
 				Routing: &v1alpha1.RoutingStep{
 					Service:  v1alpha1.ObjectKey{Namespace: svc.Namespace, Name: svc.Name},
-					Expected: in.To,
+					Expected: expected,
 					Timeout:  *spec.Timeouts.Routing.DeepCopy(),
 				},
 			})

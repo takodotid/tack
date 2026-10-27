@@ -158,16 +158,28 @@ type RoutingSpec struct {
 
 // StraitSpec names the Strait objects that route the workload.
 type StraitSpec struct {
-	// Services are the Strait services that route to the workload's primary, per site.
+	// Services are the SiteServices that route to the workload's primary,
+	// one per site that runs Strait.
 	// +kubebuilder:validation:MinItems=1
 	Services []StraitService `json:"services"`
+
+	// Members maps each Tack site to the name of its member in the
+	// SiteServices.
+	// +kubebuilder:validation:MinItems=2
+	Members []StraitMember `json:"members"`
 }
 
-// StraitService is the Strait service of one site.
+// StraitService is the SiteService read at one site.
 type StraitService struct {
 	Site      string `json:"site"`
 	Namespace string `json:"namespace"`
 	Name      string `json:"name"`
+}
+
+// StraitMember maps a Tack site to a SiteService member.
+type StraitMember struct {
+	Site   string `json:"site"`
+	Member string `json:"member"`
 }
 
 // Timeouts bound the waits of a run. Each is a Go duration such as 5m.
