@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -77,7 +78,7 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 	var notes []string
 	for _, s := range topo.Sites {
 		if !s.Reachable {
-			notes = append(notes, fmt.Sprintf("site %s is unreachable (%s): its steps wait for it to come back", s.Name, s.Error))
+			notes = append(notes, fmt.Sprintf("%s; the steps at site %s wait for it to come back", s.Error, s.Name))
 			continue
 		}
 		owners := map[v1alpha1.ObjectRef]v1alpha1.ObjectKey{}
@@ -104,7 +105,20 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	in.GitChanges, err = e.Git.Resolve(ctx, req.Spec, changes)
+	var required []driver.FieldChange
+	for _, c := range changes {
+		if !c.Optional {
+			required = append(required, c)
+			continue
+		}
+		if _, err := e.Git.Resolve(ctx, req.Spec, []driver.FieldChange{c}); errors.Is(err, ErrNoMapping) {
+			notes = append(notes, fmt.Sprintf("Git: no mapping for %s of %s at site %s: Tack leaves it as Git has it; the check before release stops the run if Git sets it",
+				c.Field, refString(c.Object), c.Site))
+			continue
+		}
+		required = append(required, c)
+	}
+	in.GitChanges, err = e.Git.Resolve(ctx, req.Spec, required)
 	if err != nil {
 		if in.GitChanges == nil {
 			return nil, err

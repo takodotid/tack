@@ -206,7 +206,7 @@ type PatchStep struct {
 }
 
 // Operator compares a value.
-// +kubebuilder:validation:Enum=Equals;NotEquals;NotEmpty;Empty
+// +kubebuilder:validation:Enum=Equals;NotEquals;NotEmpty;Empty;Contains
 type Operator string
 
 const (
@@ -214,6 +214,9 @@ const (
 	OpNotEquals Operator = "NotEquals"
 	OpNotEmpty  Operator = "NotEmpty"
 	OpEmpty     Operator = "Empty"
+	// OpContains holds when one of the space-separated values the
+	// JSONPath selects equals Value.
+	OpContains Operator = "Contains"
 )
 
 // Condition compares one field of a live object.

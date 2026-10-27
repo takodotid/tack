@@ -1,0 +1,33 @@
+apiVersion: failover.tako.id/v1alpha1
+kind: Workload
+metadata:
+  name: pg-main
+spec:
+  driver: cnpg
+  sites:
+  - name: a
+    kubeContext: site-a
+    cnpg:
+      cluster: {namespace: db, name: pg-a}
+  - name: b
+    kubeContext: site-b
+    cnpg:
+      cluster: {namespace: db, name: pg-b}
+  - name: c
+    kubeContext: site-c
+    cnpg:
+      cluster: {namespace: db, name: pg-c}
+  git:
+    url: https://git.example.com/gitops.git
+    branch: main
+    find: {}
+  routing:
+    strait:
+      services:
+      - {site: a, namespace: apps, name: postgres}
+      - {site: b, namespace: apps, name: postgres}
+      - {site: c, namespace: apps, name: postgres}
+      members:
+      - {site: a, member: pg-a}
+      - {site: b, member: pg-b}
+      - {site: c, member: pg-c}

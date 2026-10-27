@@ -59,6 +59,8 @@ type SiteState struct {
 	Summary string
 	// Objects are the live objects a run may change at this site.
 	Objects []v1alpha1.ObjectRef
+	// Facts are driver-specific values the driver read, for its own checks.
+	Facts map[string]string
 }
 
 // FieldChange is one field of one live object, and its value after the run.
@@ -70,6 +72,10 @@ type FieldChange struct {
 	// Value is the JSON value, or nil to remove the field. It may reference
 	// a captured value as $(name).
 	Value *string
+	// Optional marks a removal that is left out when no mapping or find
+	// covers it. The check before release still stops the run if Git sets
+	// the field.
+	Optional bool
 }
 
 // Driver supplies the workload-specific parts of a run.

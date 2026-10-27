@@ -506,6 +506,7 @@ spec:
                                 - NotEquals
                                 - NotEmpty
                                 - Empty
+                                - Contains
                                 type: string
                               value:
                                 description: |-

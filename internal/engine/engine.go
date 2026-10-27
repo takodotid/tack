@@ -5,6 +5,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"io"
 	"time"
 
@@ -64,6 +65,10 @@ type Git interface {
 	// Close removes local copies.
 	Close() error
 }
+
+// ErrNoMapping is wrapped by Git.Resolve when a change has neither a field
+// mapping nor find enabled.
+var ErrNoMapping = errors.New("no mapping for the field")
 
 // CommitRequest is the run's Git change, with captured values substituted.
 type CommitRequest struct {

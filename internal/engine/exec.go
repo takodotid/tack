@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -254,6 +255,8 @@ func (r *runner) conditionsHold(u *unstructured.Unstructured, conds []v1alpha1.C
 			ok = got != ""
 		case v1alpha1.OpEmpty:
 			ok = got == ""
+		case v1alpha1.OpContains:
+			ok = slices.Contains(strings.Fields(got), want)
 		default:
 			return false, "", fmt.Errorf("unknown operator %q", cond.Operator)
 		}

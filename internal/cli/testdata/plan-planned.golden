@@ -1,0 +1,127 @@
+Plan for workload pg-main: Planned, site a to site b
+Ledger: SiteFailover tack-system/pg-main-20261027-101500 at site b
+
+Sites:
+  a  Primary  declares a  healthy  Cluster db/pg-a: phase "Cluster in healthy state", declares pg-a primary, pod pg-a-1, timeline 1; Pooler pg-a-rw has 2 instances
+  b  Replica  declares a  healthy  Cluster db/pg-b: phase "Cluster in healthy state", declares pg-a primary, pod pg-b-1, timeline 1; Pooler pg-b-rw has 0 instances
+
+Hold
+   1. hold-a-cluster-pg-a  site a
+      hold Cluster db/pg-a at site a: Flux stops applying it
+        annotate Cluster db/pg-a: kustomize.toolkit.fluxcd.io/reconcile=disabled, failover.tako.id/held-by=pg-main-20261027-101500
+        applied by Flux Kustomization flux-system/a
+   2. hold-a-pooler-pg-a-rw  site a
+      hold Pooler db/pg-a-rw at site a: Flux stops applying it
+        annotate Pooler db/pg-a-rw: kustomize.toolkit.fluxcd.io/reconcile=disabled, failover.tako.id/held-by=pg-main-20261027-101500
+        applied by Flux Kustomization flux-system/a
+   3. reconcile-hold-a  site a
+      reconcile Flux at site a, so no apply started before the hold is still in flight
+        request a reconcile of Kustomizations flux-system/a and their GitRepository; wait up to 5m0s
+   4. hold-b-cluster-pg-b  site b
+      hold Cluster db/pg-b at site b: Flux stops applying it
+        annotate Cluster db/pg-b: kustomize.toolkit.fluxcd.io/reconcile=disabled, failover.tako.id/held-by=pg-main-20261027-101500
+        applied by Flux Kustomization flux-system/b
+   5. hold-b-pooler-pg-b-rw  site b
+      hold Pooler db/pg-b-rw at site b: Flux stops applying it
+        annotate Pooler db/pg-b-rw: kustomize.toolkit.fluxcd.io/reconcile=disabled, failover.tako.id/held-by=pg-main-20261027-101500
+        applied by Flux Kustomization flux-system/b
+   6. reconcile-hold-b  site b
+      reconcile Flux at site b, so no apply started before the hold is still in flight
+        request a reconcile of Kustomizations flux-system/b and their GitRepository; wait up to 5m0s
+Failover
+   7. demote-a  site a
+      demote Cluster pg-a: declare pg-b primary and drop any old token
+        patch Cluster db/pg-a (merge): {"spec":{"replica":{"primary":"pg-b","promotionToken":null}}}
+   8. wait-demoted-a  site a
+      wait until Cluster pg-a has demoted and published its demotion token
+        wait up to 10m0s on Cluster db/pg-a until:
+          {.status.demotionToken} is not empty
+          {.status.switchReplicaClusterStatus.inProgress} NotEquals "true"
+   9. capture-token  site a
+      record the demotion token of Cluster pg-a in the ledger
+        record {.status.demotionToken} of Cluster db/pg-a in the ledger as $(demotionToken)
+  10. promote-b  site b
+      promote Cluster pg-b with the demotion token, in one patch
+        patch Cluster db/pg-b (merge): {"spec":{"replica":{"primary":"pg-b","promotionToken":"$(demotionToken)"}}}
+  11. wait-promoted-b  site b
+      wait until Cluster pg-b has used the token and runs a healthy primary
+        wait up to 10m0s on Cluster db/pg-b until:
+          {.status.lastPromotionToken} Equals "$(demotionToken)"
+          {.status.instancesReportedState.*.isPrimary} Contains "true"
+          {.status.phase} Equals "Cluster in healthy state"
+  12. clear-token-b  site b
+      remove the used token from Cluster pg-b, so it can never apply again
+        patch Cluster db/pg-b (merge): {"spec":{"replica":{"promotionToken":null}}}
+  13. pooler-b  site b
+      set Pooler pg-b-rw to 2 instances
+        patch Pooler db/pg-b-rw (merge): {"spec":{"instances":2}}
+  14. wait-pooler-b  site b
+      wait until the Pooler pg-b-rw has 2 ready pods
+        wait up to 10m0s on Deployment db/pg-b-rw until:
+          {.status.readyReplicas} Equals "2"
+  15. pooler-a  site a
+      set Pooler pg-a-rw to 0 instances
+        patch Pooler db/pg-a-rw (merge): {"spec":{"instances":0}}
+  16. wait-pooler-a  site a
+      wait until the Pooler pg-a-rw runs no pod
+        wait up to 10m0s on Deployment db/pg-a-rw until:
+          {.status.replicas} is empty
+  17. verify-b  site b
+      verify that Cluster pg-b is a healthy primary and declares itself
+        wait up to 10m0s on Cluster db/pg-b until:
+          {.spec.replica.primary} Equals "pg-b"
+          {.status.instancesReportedState.*.isPrimary} Contains "true"
+          {.status.phase} Equals "Cluster in healthy state"
+PromoteToGitOps
+  18. git-commit  Git
+      commit the live state to https://git.example.com/gitops.git branch main
+        clusters/a/cluster.yaml: spec.replica.primary = "pg-b"  (site a, Cluster db/pg-a spec.replica.primary)
+        clusters/a/cluster.yaml: spec.replica.promotionToken removed  (site a, Cluster db/pg-a spec.replica.promotionToken)
+        clusters/a/pooler.yaml: spec.instances = 0  (site a, Pooler db/pg-a-rw spec.instances)
+        clusters/b/cluster.yaml: spec.replica.primary = "pg-b"  (site b, Cluster db/pg-b spec.replica.primary)
+        clusters/b/cluster.yaml: spec.replica.promotionToken removed  (site b, Cluster db/pg-b spec.replica.promotionToken)
+        clusters/b/pooler.yaml: spec.instances = 2  (site b, Pooler db/pg-b-rw spec.instances)
+        commit message: tack: pg-main primary a to b (planned)
+  19. reconcile-git-a  site a
+      wait for Flux at site a to apply the run's commit (held objects stay as they are)
+        request a reconcile of Kustomizations flux-system/a and their GitRepository; wait up to 5m0s
+        until Flux has applied $(git.commit)
+  20. reconcile-git-b  site b
+      wait for Flux at site b to apply the run's commit (held objects stay as they are)
+        request a reconcile of Kustomizations flux-system/b and their GitRepository; wait up to 5m0s
+        until Flux has applied $(git.commit)
+Release
+  21. verify-git-a  site a
+      check at site a that Git, as Flux renders it, equals live
+        render the run's commit as Flux would and diff it against 2 live objects; stop if they differ
+  22. release-a-cluster-pg-a  site a
+      release Cluster db/pg-a at site a: Flux applies it again
+        remove from Cluster db/pg-a: kustomize.toolkit.fluxcd.io/reconcile, failover.tako.id/held-by
+  23. release-a-pooler-pg-a-rw  site a
+      release Pooler db/pg-a-rw at site a: Flux applies it again
+        remove from Pooler db/pg-a-rw: kustomize.toolkit.fluxcd.io/reconcile, failover.tako.id/held-by
+  24. reconcile-release-a  site a
+      reconcile Flux at site a with the released objects
+        request a reconcile of Kustomizations flux-system/a and their GitRepository; wait up to 5m0s
+        until Flux has applied $(git.commit)
+  25. verify-noop-a  site a
+      check at site a that Flux changed nothing
+        check that the generation of 2 released objects did not change
+  26. verify-git-b  site b
+      check at site b that Git, as Flux renders it, equals live
+        render the run's commit as Flux would and diff it against 2 live objects; stop if they differ
+  27. release-b-cluster-pg-b  site b
+      release Cluster db/pg-b at site b: Flux applies it again
+        remove from Cluster db/pg-b: kustomize.toolkit.fluxcd.io/reconcile, failover.tako.id/held-by
+  28. release-b-pooler-pg-b-rw  site b
+      release Pooler db/pg-b-rw at site b: Flux applies it again
+        remove from Pooler db/pg-b-rw: kustomize.toolkit.fluxcd.io/reconcile, failover.tako.id/held-by
+  29. reconcile-release-b  site b
+      reconcile Flux at site b with the released objects
+        request a reconcile of Kustomizations flux-system/b and their GitRepository; wait up to 5m0s
+        until Flux has applied $(git.commit)
+  30. verify-noop-b  site b
+      check at site b that Flux changed nothing
+        check that the generation of 2 released objects did not change
+
+Nothing was changed. To run this plan: tack run -f testdata/workload.yaml --to b --from a --mode planned

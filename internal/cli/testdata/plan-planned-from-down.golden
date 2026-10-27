@@ -1,0 +1,1 @@
+tack: site "a" is unreachable: a planned switchover needs it; use --mode site-loss if the site is lost
