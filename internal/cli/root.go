@@ -115,12 +115,12 @@ func NewRoot(f Factory) *cobra.Command {
 }
 
 // Execute runs the command line and returns the exit code.
-func Execute(f Factory, args []string, stdout, stderr io.Writer) int {
+func Execute(ctx context.Context, f Factory, args []string, stdout, stderr io.Writer) int {
 	root := NewRoot(f)
 	root.SetArgs(args)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
-	err := root.Execute()
+	err := root.ExecuteContext(ctx)
 	if err == nil {
 		return ExitOK
 	}

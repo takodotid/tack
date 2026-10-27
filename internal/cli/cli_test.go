@@ -61,7 +61,7 @@ func run(t *testing.T, f Factory, args ...string) (string, int) {
 	t.Helper()
 	nowFunc = func() time.Time { return fixedNow }
 	var out bytes.Buffer
-	code := Execute(f, args, &out, &out)
+	code := Execute(context.Background(), f, args, &out, &out)
 	return out.String(), code
 }
 
