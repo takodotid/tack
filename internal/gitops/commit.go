@@ -184,13 +184,11 @@ func noIdentity(stderr string) bool {
 	return false
 }
 
-// push pushes HEAD to the branch without force.
+// push pushes HEAD to the branch without force. A status line that starts
+// with ! is a rejected ref, whatever git's exit status.
 func (r *Repo) push(ctx context.Context, c *clone, commit string) error {
 	out, err := r.git(ctx, c.dir, nil, "", "push", "--porcelain", "--no-verify", "origin", "HEAD:refs/heads/"+c.branch)
-	if err == nil {
-		return nil
-	}
-	if ctx.Err() != nil {
+	if err != nil && ctx.Err() != nil {
 		return err
 	}
 	for _, l := range strings.Split(out, "\n") {
@@ -202,9 +200,12 @@ func (r *Repo) push(ctx context.Context, c *clone, commit string) error {
 			return stop.Ask(v1alpha1.ReasonGitChanged,
 				"the push of %s to branch %s of %s was rejected because the branch moved: Git changed during the run (%s)", commit, c.branch, Redact(c.url), status)
 		}
-		return fmt.Errorf("the remote refused the push of %s to branch %s: %s: %v", commit, c.branch, status, err)
+		return fmt.Errorf("the remote refused the push of %s to branch %s: %s", commit, c.branch, status)
 	}
-	return stop.Wait(v1alpha1.ReasonGitUnreachable, "%v: %v", ErrUnreachable, err)
+	if err != nil {
+		return stop.Wait(v1alpha1.ReasonGitUnreachable, "%v: %v", ErrUnreachable, err)
+	}
+	return nil
 }
 
 // ranBy reports whether commit is the run's own commit on top of base.
