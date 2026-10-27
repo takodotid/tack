@@ -88,6 +88,10 @@ func setup() error {
 	if err != nil {
 		return err
 	}
+	// A clone left by an earlier environment follows another repository.
+	if err := os.RemoveAll(gitDir); err != nil {
+		return err
+	}
 	w := fmt.Sprintf(workloadTemplate, url)
 	return os.WriteFile(workload, []byte(w), 0o644)
 }
@@ -526,15 +530,15 @@ func TestRebuildAndSwitchBack(t *testing.T) {
 	}
 }
 
-// TestRoutingFromStrait runs a switch with the routing check on, against
-// Strait's real SiteService CRD. The test plays Strait: it moves the route
-// once the run waits for it.
+// TestRoutingFromStrait runs a switch with the routing check on, against the
+// Strait that up.sh installs at both sites. Strait routes to pg-b before the
+// run; the run succeeds only once Strait routes to pg-a at both sites.
 func TestRoutingFromStrait(t *testing.T) {
 	for _, s := range []string{"a", "b"} {
-		kubectl(t, s, "apply", "--server-side", "-f", filepath.Join(repo, "test/e2e/fixtures/strait/siteservices.yaml"))
-		kubectl(t, s, "wait", "--for=condition=Established", "crd/siteservices.strait.tako.id", "--timeout=60s")
 		kubectl(t, s, "apply", "-f", filepath.Join(repo, "test/e2e/fixtures/strait/siteservice.yaml"))
-		setRoute(t, s, "pg-b")
+	}
+	for _, s := range []string{"a", "b"} {
+		eventually(t, 3*time.Minute, "Strait at site "+s+" routes to pg-b", func() string { return routeTo(s, "pg-b") })
 	}
 	b, err := os.ReadFile(workload)
 	if err != nil {
@@ -550,53 +554,12 @@ func TestRoutingFromStrait(t *testing.T) {
       - {site: a, member: pg-a}
       - {site: b, member: pg-b}
   timeouts:`, 1)
-	w = strings.Replace(w, "flux: 4m}", "flux: 4m, routing: 5m}", 1)
+	w = strings.Replace(w, "flux: 4m}", "flux: 4m, routing: 2m}", 1)
 	if err := os.WriteFile(routed, []byte(w), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	type result struct {
-		out  string
-		code int
-	}
-	done := make(chan result, 1)
-	go func() {
-		cmd := exec.Command(tackBin, "--kubeconfig", kubeconfig, "run", "-f", routed, "--to", "a", "--yes")
-		var out bytes.Buffer
-		cmd.Stdout, cmd.Stderr = &out, &out
-		err := cmd.Run()
-		code := 0
-		if ee, ok := err.(*exec.ExitError); ok {
-			code = ee.ExitCode()
-		}
-		done <- result{out.String(), code}
-	}()
-
-	// The run must wait at the routing step until Strait routes to pg-a.
-	eventually(t, 8*time.Minute, "the run waits for Strait", func() string {
-		select {
-		case r := <-done:
-			t.Fatalf("the run ended before Strait routed to the new primary: exit %d\n%s", r.code, r.out)
-		default:
-		}
-		sf := latestRun(t, "a")
-		if stepState(sf, "routing-a") != "Running" {
-			return "routing-a is " + stepState(sf, "routing-a")
-		}
-		return ""
-	})
-	for _, s := range []string{"a", "b"} {
-		setRoute(t, s, "pg-a")
-	}
-	select {
-	case r := <-done:
-		t.Logf("tack run (exit %d)\n%s", r.code, r.out)
-		if r.code != 0 {
-			t.Fatalf("run exit %d", r.code)
-		}
-	case <-time.After(5 * time.Minute):
-		t.Fatal("the run did not end after Strait routed to the new primary")
-	}
+	tackOK(t, "run", "-f", routed, "--to", "a", "--yes")
 	assertPrimary(t, "a", "b")
 	sf := latestRun(t, "a")
 	for _, id := range []string{"routing-a", "routing-b"} {
@@ -604,12 +567,40 @@ func TestRoutingFromStrait(t *testing.T) {
 			t.Errorf("%s is %s", id, got)
 		}
 	}
+	for _, s := range []string{"a", "b"} {
+		if why := routeTo(s, "pg-a"); why != "" {
+			t.Errorf("Strait at site %s: %s", s, why)
+		}
+	}
 }
 
-// setRoute writes a SiteService status as Strait would.
-func setRoute(t *testing.T, site, member string) {
-	t.Helper()
-	gen := jsonpath(t, site, "siteservice", "postgres", "{.metadata.generation}")
-	patch := fmt.Sprintf(`{"status":{"observedGeneration":%s,"route":{"members":[%q],"reason":"Active","message":"set by the e2e test"}}}`, gen, member)
-	kubectl(t, site, "-n", ns, "patch", "siteservice", "postgres", "--subresource=status", "--type=merge", "-p", patch)
+// routeTo returns "" when the site's SiteService is current and Strait routes
+// it to the member only, with reason Active; else what it shows.
+func routeTo(site, member string) string {
+	out, err := kubectlE(site, "-n", ns, "get", "siteservice", "postgres", "-o", "json")
+	if err != nil {
+		return fmt.Sprintf("%v: %s", err, out)
+	}
+	var ss struct {
+		Metadata struct {
+			Generation int64 `json:"generation"`
+		} `json:"metadata"`
+		Status struct {
+			ObservedGeneration int64 `json:"observedGeneration"`
+			Route              struct {
+				Members []string `json:"members"`
+				Reason  string   `json:"reason"`
+				Message string   `json:"message"`
+			} `json:"route"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(out), &ss); err != nil {
+		return err.Error()
+	}
+	r := ss.Status.Route
+	if ss.Status.ObservedGeneration == ss.Metadata.Generation && len(r.Members) == 1 && r.Members[0] == member && r.Reason == "Active" {
+		return ""
+	}
+	return fmt.Sprintf("generation %d, observed %d, route %v, reason %q: %s",
+		ss.Metadata.Generation, ss.Status.ObservedGeneration, r.Members, r.Reason, r.Message)
 }

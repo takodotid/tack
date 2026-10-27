@@ -1,6 +1,6 @@
 # End-to-end environment
 
-Two sites, each a single-node kind cluster deployed by Flux from one local Git repository. Each site runs one CloudNativePG `Cluster` in the distributed topology and one read-write PgBouncer `Pooler`. Site a is the primary at the start.
+Two sites, each a single-node kind cluster deployed by Flux from one local Git repository. Each site runs one CloudNativePG `Cluster` in the distributed topology, one read-write PgBouncer `Pooler`, and Strait. Site a is the primary at the start.
 
 ## Use
 
@@ -24,6 +24,9 @@ Two sites, each a single-node kind cluster deployed by Flux from one local Git r
 | Flux sync | `GitRepository/tack-e2e`, `Kustomization/site-a` or `site-b` | Namespace `flux-system`. Path `./clusters/<site>`. Interval 30s. |
 | CloudNativePG | v1.30.1 | Release manifest, checked against a pinned SHA-256. |
 | Runtime Secrets | `tack-e2e-server-ca`, `tack-e2e-client-ca`, `app-credentials` | Namespace `db` at both sites. Generated once into `.e2e/secrets/`. Never in Git. |
+| Strait image | `tack-e2e-strait:<commit>` | Built once from Strait's source at `STRAIT_COMMIT` in `lib.sh`, loaded into both nodes from an archive. |
+| Strait | Helm release `strait`, namespace `strait-system` | Chart from the same commit. Pod Security `privileged`, for the gateway's `NET_ADMIN`. Exchange polls every 2s, peer timeout 6s. |
+| Strait links | `SitePeer` and `SiteLink <peer>-direct` at each site | One direct link to the other node's address on `tack-e2e`. No WireGuard link, so no WireGuard key. |
 
 ## Sites
 
@@ -34,6 +37,8 @@ Two sites, each a single-node kind cluster deployed by Flux from one local Git r
 | Initial `.spec.replica.primary` | `pg-a` | `pg-a` |
 | Pooler | `db/pg-a-pooler-rw`, 1 instance | `db/pg-b-pooler-rw`, 0 instances |
 | Node container | `tack-e2e-a-control-plane` | `tack-e2e-b-control-plane` |
+| Pod subnet | 10.210.0.0/16 | 10.220.0.0/16 |
+| Service subnet | 10.211.0.0/16 | 10.221.0.0/16 |
 | PostgreSQL NodePort | 30432 | 30432 |
 
 ## Cross-site replication
@@ -60,7 +65,7 @@ Two sites, each a single-node kind cluster deployed by Flux from one local Git r
 | `.e2e/kubeconfig` | Both contexts. `kubeconfig-a` and `kubeconfig-b` are its sources. |
 | `.e2e/env` | Variables for tests. |
 | `.e2e/secrets/` | CA keys and the app password. Mode 0600. |
-| `.e2e/cache/` | The CloudNativePG manifest. |
-| `.e2e/logs/` | Output of kind and Flux installs. |
+| `.e2e/cache/` | The CloudNativePG manifest, Strait's source and image archive. |
+| `.e2e/logs/` | Output of the kind, Flux and Strait installs. |
 
-`down.sh` deletes only the two kind clusters, the `tack-e2e-git` container and the `tack-e2e` network. It leaves the work dir and the `tack-e2e-gitserver:dev` image.
+`down.sh` deletes only the two kind clusters, the `tack-e2e-git` container and the `tack-e2e` network. It leaves the work dir and the `tack-e2e-gitserver:dev` and `tack-e2e-strait` images.

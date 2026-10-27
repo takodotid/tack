@@ -7,6 +7,7 @@ DEST=${1:-bin/tools}
 KIND_VERSION=v0.33.0
 KUBECTL_VERSION=v1.37.1
 FLUX_VERSION=2.10.0
+HELM_VERSION=v4.3.1
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)
 case "$ARCH" in x86_64) ARCH=amd64 ;; aarch64 | arm64) ARCH=arm64 ;; esac
@@ -26,5 +27,10 @@ curl -fsSLo "$tmp/$archive" "https://github.com/fluxcd/flux2/releases/download/v
 (cd "$tmp" && curl -fsSL "https://github.com/fluxcd/flux2/releases/download/v$FLUX_VERSION/flux_${FLUX_VERSION}_checksums.txt" | grep " $archive\$" | sha256sum -c -)
 tar -C "$tmp" -xzf "$tmp/$archive" flux
 
-install -m 0755 "$tmp/kind" "$tmp/kubectl" "$tmp/flux" "$DEST/"
-echo "installed kind, kubectl and flux into $DEST"
+archive=helm-$HELM_VERSION-$OS-$ARCH.tar.gz
+curl -fsSLo "$tmp/$archive" "https://get.helm.sh/$archive"
+(cd "$tmp" && curl -fsSL "https://get.helm.sh/$archive.sha256sum" | sha256sum -c -)
+tar -C "$tmp" -xzf "$tmp/$archive" --strip-components 1 "$OS-$ARCH/helm"
+
+install -m 0755 "$tmp/kind" "$tmp/kubectl" "$tmp/flux" "$tmp/helm" "$DEST/"
+echo "installed kind, kubectl, flux and helm into $DEST"

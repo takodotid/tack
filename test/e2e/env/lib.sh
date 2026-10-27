@@ -23,6 +23,14 @@ CNPG_VERSION=1.30.1
 CNPG_MANIFEST_URL=https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$CNPG_VERSION/cnpg-$CNPG_VERSION.yaml
 CNPG_MANIFEST_SHA256=37237f145d8138256ea25ae830f87759255665ff08f8d552fdd8224a5ec032fb
 
+# Strait, built from its source at a pinned commit of its branch v1. The
+# image is loaded into the nodes from an archive; Envoy is pulled in them.
+STRAIT_GIT_URL=https://github.com/takodotid/strait.git
+STRAIT_COMMIT=ceafa3488a2ed65b3e21e975e1d766645f260f4e
+STRAIT_IMAGE=tack-e2e-strait:${STRAIT_COMMIT:0:12}
+STRAIT_NAMESPACE=strait-system
+ENVOY_IMAGE=envoyproxy/envoy:distroless-v1.40.2
+
 # Images pulled inside both nodes in the background while the controllers
 # install, so that pods start sooner.
 PREPULL_IMAGES=(
@@ -31,9 +39,14 @@ PREPULL_IMAGES=(
   ghcr.io/cloudnative-pg/pgbouncer:1.25.2
   ghcr.io/fluxcd/source-controller:v1.10.1
   ghcr.io/fluxcd/kustomize-controller:v1.10.1
+  "$ENVOY_IMAGE"
 )
 
 DB_NAMESPACE=db
+
+# Pod and Service subnets per site. Strait needs them distinct between sites.
+declare -A POD_SUBNET=([a]=10.210.0.0/16 [b]=10.220.0.0/16)
+declare -A SERVICE_SUBNET=([a]=10.211.0.0/16 [b]=10.221.0.0/16)
 
 cluster_name() { echo "tack-e2e-$1"; }
 context_name() { echo "kind-tack-e2e-$1"; }

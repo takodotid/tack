@@ -125,7 +125,7 @@ Commit and push only when the operator asks.
 ## Current state
 
 - Started on 2026-10-27. RFC0001 to RFC0009 are Draft. v1 is on branch `v1`.
-- Tack reads Strait's `SiteService` status from Strait's Draft API ([RFC#0008](rfcs/RFC0008.md)).
+- Tack reads Strait's `SiteService` status from Strait's Draft API ([RFC#0008](rfcs/RFC0008.md)). The e2e runs Strait built from the commit pinned in `test/e2e/env/lib.sh`.
 
 | Command | Does |
 |---|---|
@@ -133,4 +133,4 @@ Commit and push only when the operator asks.
 | `make test` | unit and golden tests; `go test ./internal/cli -update` rewrites the golden files |
 | `make verify` | regenerates the CRD and deepcopy code, checks gofmt and vet, fails on stale generated files |
 | `make dist` | static binaries for Linux and macOS, man pages, the CRD |
-| `make e2e` | the end-to-end test on kind; it creates only `tack-e2e*` clusters, networks and containers |
+| `make e2e` | the end-to-end test on kind; it creates only `tack-e2e*` clusters, networks, containers and images |

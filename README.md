@@ -8,7 +8,7 @@ v1 supports CloudNativePG in its distributed topology, deployed by Flux.
 
 ## Quick start: the end-to-end test
 
-The end-to-end test builds two kind clusters with Flux, CloudNativePG and a local Git server, then switches the primary between them.
+The end-to-end test builds two kind clusters with Flux, CloudNativePG, Strait and a local Git server, then switches the primary between them.
 
 | Needs | Version |
 |---|---|
@@ -17,6 +17,8 @@ The end-to-end test builds two kind clusters with Flux, CloudNativePG and a loca
 | kind | v0.33.0 |
 | kubectl | v1.37 |
 | flux CLI | v2.10.0 |
+| helm | v4 |
+| Strait's source | cloned from `takodotid/strait` at the commit pinned in `test/e2e/env/lib.sh` |
 
 ```sh
 make e2e
@@ -30,9 +32,9 @@ make e2e
 | Site loss with Git down | Tack switches live and waits for Git (break-glass) |
 | A site coming back | a lost site that answers as primary stops the run until the operator fences it |
 | Rebuild and switch back | a planned run to the failed-over site is refused until it is rebuilt; then it becomes primary again |
-| Routing from Strait | with Strait's `SiteService` CRD installed, a run waits until the route names the new primary |
+| Routing from Strait | with Strait running at both sites, a run ends once Strait routes to the new primary |
 
-`make e2e-up` keeps the environment for a look around; `make e2e-down` removes it. Everything it creates is named `tack-e2e*`.
+`make e2e-up` keeps the environment for a look around; `make e2e-down` removes it. Everything it creates is named `tack-e2e*`. `test/e2e/install-tools.sh` installs kind, kubectl, flux and helm at these versions.
 
 ## Build
 

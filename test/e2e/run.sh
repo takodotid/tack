@@ -6,7 +6,7 @@ set -euo pipefail
 E2E_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd "$E2E_DIR/../.." && pwd)
 
-for tool in docker kind kubectl flux go git; do
+for tool in docker kind kubectl flux helm go git; do
   command -v "$tool" >/dev/null || { echo "e2e: $tool is not installed (see README.md)" >&2; exit 1; }
 done
 
