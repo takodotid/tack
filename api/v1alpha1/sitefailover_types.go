@@ -232,8 +232,8 @@ type Condition struct {
 
 // WaitStep waits until every condition holds on a live object.
 type WaitStep struct {
-	Object     ObjectRef   `json:"object"`
-	Conditions []Condition `json:"conditions"`
+	Object     ObjectRef       `json:"object"`
+	Conditions []Condition     `json:"conditions"`
 	Timeout    metav1.Duration `json:"timeout"`
 }
 
@@ -330,14 +330,14 @@ const (
 
 // Reasons a run stops or waits.
 const (
-	ReasonGitUnreachable     = "GitUnreachable"
-	ReasonGitChanged         = "GitChanged"
-	ReasonGitDiffersFromLive = "GitDiffersFromLive"
-	ReasonTokenMissing       = "TokenMissing"
+	ReasonGitUnreachable      = "GitUnreachable"
+	ReasonGitChanged          = "GitChanged"
+	ReasonGitDiffersFromLive  = "GitDiffersFromLive"
+	ReasonTokenMissing        = "TokenMissing"
 	ReasonFencedSiteIsPrimary = "FencedSiteIsPrimary"
-	ReasonHeldByAnotherRun   = "HeldByAnotherRun"
-	ReasonFluxChanged        = "FluxChanged"
-	ReasonStepFailed         = "StepFailed"
+	ReasonHeldByAnotherRun    = "HeldByAnotherRun"
+	ReasonFluxChanged         = "FluxChanged"
+	ReasonStepFailed          = "StepFailed"
 )
 
 // StepState is the state of a step.
