@@ -130,6 +130,14 @@ func (o *options) makePlan(ctx context.Context, p *planFlags, progress io.Writer
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	env.Runs = func(ctx context.Context) ([]v1alpha1.SiteFailover, error) {
+		found, err := findRuns(ctx, o, &w.Spec, w.Name)
+		var runs []v1alpha1.SiteFailover
+		for _, r := range found {
+			runs = append(runs, *r.sf)
+		}
+		return runs, err
+	}
 	if req.From == "" {
 		topo, err := env.Driver.Discover(ctx, &w.Spec, env.Clients)
 		if err != nil {

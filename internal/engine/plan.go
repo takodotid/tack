@@ -77,6 +77,15 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 	}
 	in := Inputs{Request: req, Topology: topo, Owners: map[string]map[v1alpha1.ObjectRef]v1alpha1.ObjectKey{}}
 	var notes []string
+	if e.Runs != nil {
+		runs, err := e.Runs(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if err := checkRebuilt(req, to, runs, &notes); err != nil {
+			return nil, err
+		}
+	}
 	for _, s := range topo.Sites {
 		if !s.Reachable {
 			notes = append(notes, fmt.Sprintf("%s; the steps at site %s wait for it to come back", s.Error, s.Name))
@@ -131,6 +140,35 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 		return nil, err
 	}
 	return &Plan{SiteFailover: sf, Topology: topo, Notes: notes}, nil
+}
+
+// FollowUpRebuild is the follow-up that asks the operator to recreate a
+// site's member.
+const FollowUpRebuild = "Rebuild"
+
+// checkRebuilt refuses a planned run to a site whose member an earlier run
+// left to rebuild, until the member was created again after that run.
+// The workload's status cannot tell such a member from a healthy replica.
+func checkRebuilt(req Request, to *driver.SiteState, runs []v1alpha1.SiteFailover, notes *[]string) error {
+	for _, r := range runs {
+		if r.Status.StartedAt == nil {
+			continue
+		}
+		for _, f := range r.Status.FollowUps {
+			if f.Site != req.To || f.Action != FollowUpRebuild {
+				continue
+			}
+			if !to.Created.IsZero() && to.Created.After(r.Status.StartedAt.Time) {
+				continue
+			}
+			msg := fmt.Sprintf("run %s left site %s to rebuild (%s), and its member was not created again since", r.Name, req.To, f.Reason)
+			if req.Mode == v1alpha1.ModePlanned {
+				return fmt.Errorf("%s: rebuild it before a planned switchover (docs/runbooks/rebuild-old-primary.md)", msg)
+			}
+			*notes = append(*notes, msg)
+		}
+	}
+	return nil
 }
 
 func checkRequest(req Request) error {

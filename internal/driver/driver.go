@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/takodotid/tack/api/v1alpha1"
 	"github.com/takodotid/tack/internal/kube"
@@ -61,6 +62,8 @@ type SiteState struct {
 	Objects []v1alpha1.ObjectRef
 	// Facts are driver-specific values the driver read, for its own checks.
 	Facts map[string]string
+	// Created is when the site's member was created. A rebuild recreates it.
+	Created time.Time
 }
 
 // FieldChange is one field of one live object, and its value after the run.

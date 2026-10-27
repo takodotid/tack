@@ -106,6 +106,8 @@ type Env struct {
 	Git     Git
 	Routing Routing
 	Ledger  Ledger
+	// Runs lists the workload's earlier runs at every reachable site.
+	Runs func(ctx context.Context) ([]v1alpha1.SiteFailover, error)
 	// Out receives progress lines.
 	Out io.Writer
 	// Now returns the time. Tests replace it.

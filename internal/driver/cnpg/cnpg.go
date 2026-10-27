@@ -16,6 +16,7 @@ import (
 
 	"github.com/takodotid/tack/api/v1alpha1"
 	"github.com/takodotid/tack/internal/driver"
+	"github.com/takodotid/tack/internal/engine"
 	"github.com/takodotid/tack/internal/kube"
 )
 
@@ -48,7 +49,6 @@ const (
 	factInProgress    = "inProgress"
 	factMinApplyDelay = "minApplyDelay"
 	factIsPrimary     = "isPrimary"
-	factTimeline      = "timeline"
 )
 
 func init() { driver.Register(Driver{}) }
@@ -132,6 +132,7 @@ func (Driver) Discover(ctx context.Context, w *v1alpha1.WorkloadSpec, c kube.Cli
 			return nil, fmt.Errorf("site %s: read Cluster %s/%s: %w", s.Name, s.CNPG.Cluster.Namespace, s.CNPG.Cluster.Name, err)
 		}
 		read(&st, u, byCluster)
+		st.Created = u.GetCreationTimestamp().Time
 		if s.CNPG.Pooler != nil {
 			p := &unstructured.Unstructured{}
 			p.SetAPIVersion(APIVersion)
@@ -185,7 +186,6 @@ func read(st *driver.SiteState, u *unstructured.Unstructured, byCluster map[stri
 		}
 	}
 	f[factIsPrimary] = fmt.Sprint(isPrimary)
-	f[factTimeline] = fmt.Sprint(timeline)
 	current, _, _ := unstructured.NestedString(u.Object, "status", "currentPrimary")
 
 	replica := hasReplica && (hasEnabled && enabled || !hasEnabled && hasPrimary && self != primary)
@@ -251,10 +251,6 @@ func (d Driver) Plan(w *v1alpha1.WorkloadSpec, t *driver.Topology, r driver.Requ
 		if toSt.Facts[factMinApplyDelay] != "" {
 			return nil, nil, fmt.Errorf("site %s: Cluster sets spec.replica.minApplyDelay, which CloudNativePG does not allow with a promotion token", r.To)
 		}
-		if ft, tt := fromSt.Facts[factTimeline], toSt.Facts[factTimeline]; ft != "0" && tt != "0" && ft != tt {
-			return nil, nil, fmt.Errorf("site %s is on timeline %s and the primary at site %s on timeline %s: it does not follow the primary, and may need a rebuild (docs/runbooks/rebuild-old-primary.md)",
-				r.To, tt, r.From, ft)
-		}
 		if from.CNPG.Pooler != nil {
 			b.scale(from, 0)
 		}
@@ -303,7 +299,7 @@ func (d Driver) Plan(w *v1alpha1.WorkloadSpec, t *driver.Topology, r driver.Requ
 		}
 		follow = append(follow, v1alpha1.FollowUp{
 			Site:   from.Name,
-			Action: "Rebuild",
+			Action: engine.FollowUpRebuild,
 			Reason: fmt.Sprintf("Cluster %s was promoted without a token, so Cluster %s may hold writes that %s lacks and cannot follow it: recreate %s from %s (docs/runbooks/rebuild-old-primary.md)",
 				toName, from.CNPG.Cluster.Name, toName, from.CNPG.Cluster.Name, toName),
 		})

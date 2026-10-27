@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -134,13 +135,21 @@ func TestPlanGolden(t *testing.T) {
 			code:    ExitError,
 		},
 		{
-			name: "plan-planned-diverged",
+			name: "plan-planned-not-rebuilt",
 			objects: map[string][]client.Object{
-				"a": {promotedTwice(testenv.Cluster("a", "a", true, nil)), testenv.Pooler("a", 2)},
-				"b": {testenv.Cluster("b", "a", false, nil), testenv.Pooler("b", 0)},
+				"a": {testenv.Cluster("a", "b", false, nil), testenv.Pooler("a", 0)},
+				"b": {testenv.Cluster("b", "b", true, nil), testenv.Pooler("b", 2), siteLossRun("a", fixedNow.Add(-time.Hour))},
 			},
-			args: []string{"plan", "-f", "testdata/workload.yaml", "--to", "b"},
+			args: []string{"plan", "-f", "testdata/workload.yaml", "--to", "a"},
 			code: ExitError,
+		},
+		{
+			name: "plan-planned-rebuilt",
+			objects: map[string][]client.Object{
+				"a": {created(testenv.Cluster("a", "b", false, nil), fixedNow.Add(-time.Minute)), testenv.Pooler("a", 0)},
+				"b": {testenv.Cluster("b", "b", true, nil), testenv.Pooler("b", 2), siteLossRun("a", fixedNow.Add(-time.Hour))},
+			},
+			args: []string{"plan", "-f", "testdata/workload.yaml", "--to", "a"},
 		},
 		{
 			name:    "plan-bad-mode",
@@ -165,10 +174,22 @@ func TestPlanGolden(t *testing.T) {
 	}
 }
 
-// promotedTwice puts the primary on timeline 2, as after a failover that
-// left the other site's member behind on timeline 1.
-func promotedTwice(u *unstructured.Unstructured) *unstructured.Unstructured {
-	_ = unstructured.SetNestedField(u.Object, int64(2), "status", "instancesReportedState", "pg-a-1", "timeLineID")
+// siteLossRun is a succeeded site-loss run that left site lost to rebuild.
+func siteLossRun(lost string, started time.Time) *v1alpha1.SiteFailover {
+	t := metav1.NewTime(started)
+	return &v1alpha1.SiteFailover{
+		ObjectMeta: metav1.ObjectMeta{Name: "pg-main-earlier", Namespace: "tack-system", Labels: map[string]string{engine.LabelWorkload: "pg-main"}},
+		Spec:       v1alpha1.SiteFailoverSpec{Mode: v1alpha1.ModeSiteLoss, From: lost, To: "b"},
+		Status: v1alpha1.SiteFailoverStatus{
+			State: v1alpha1.RunSucceeded, StartedAt: &t,
+			FollowUps: []v1alpha1.FollowUp{{Site: lost, Action: engine.FollowUpRebuild, Reason: "promoted without a token"}},
+		},
+	}
+}
+
+// created sets an object's creation time, as a rebuild does.
+func created(u *unstructured.Unstructured, at time.Time) *unstructured.Unstructured {
+	u.SetCreationTimestamp(metav1.NewTime(at))
 	return u
 }
 

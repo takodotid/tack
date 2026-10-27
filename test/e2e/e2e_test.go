@@ -488,7 +488,12 @@ func TestSiteLossBreakGlassAndReturn(t *testing.T) {
 
 func TestRebuildAndSwitchBack(t *testing.T) {
 	// The runbook docs/runbooks/rebuild-old-primary.md, then a planned
-	// switchover back to the rebuilt site.
+	// switchover back to the rebuilt site. Before the rebuild, Tack
+	// refuses it.
+	out, code := tack(t, nil, "plan", "-f", workload, "--to", "b")
+	if code == 0 || !strings.Contains(out, "rebuild it before a planned switchover") {
+		t.Fatalf("plan to the failed-over site: exit %d, want a refusal", code)
+	}
 	gitPull(t)
 	path := filepath.Join(gitDir, "clusters", "b", "cluster.yaml")
 	b, err := os.ReadFile(path)
