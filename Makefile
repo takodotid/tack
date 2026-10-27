@@ -28,16 +28,17 @@ dist: tools-go
 	done
 	cd dist && sha256sum *.tar.gz > SHA256SUMS
 
-## generate: deepcopy code and the CRD, from api/
+## generate: deepcopy code and the CRD, from api/, and the chart's copy of the CRD
 generate: tools-go
 	$(GO) tool controller-gen object:headerFile=hack/boilerplate.go.txt paths=./api/...
 	$(GO) tool controller-gen crd paths=./api/... output:crd:artifacts:config=config/crd
+	rm -rf deploy/helm/tack/files/crds && mkdir -p deploy/helm/tack/files/crds && cp config/crd/*.yaml deploy/helm/tack/files/crds/
 
 ## verify: generated files are current, code is formatted and vetted
 verify: generate
 	@test -z "$$(gofmt -l .)" || { echo "gofmt needed:"; gofmt -l .; exit 1; }
 	$(GO) vet ./...
-	@git diff --exit-code -- api config || { echo "generated files are stale: run make generate and commit"; exit 1; }
+	@git diff --exit-code -- api config deploy/helm/tack/files || { echo "generated files are stale: run make generate and commit"; exit 1; }
 
 ## test: unit and golden tests
 test: tools-go
