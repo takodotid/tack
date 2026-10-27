@@ -148,10 +148,8 @@ func TestPlanGolden(t *testing.T) {
 				t.Fatalf("exit code %d, want %d\n%s", code, tt.code, out)
 			}
 			golden(t, tt.name, out)
-			for _, c := range f.flux.Calls {
-				if !strings.HasPrefix(c, "Owner") {
-					t.Errorf("plan changed something: %s", c)
-				}
+			if len(f.flux.Calls) > 0 || len(f.git.Commits) > 0 {
+				t.Errorf("plan changed something: Flux %v, Git %d commits", f.flux.Calls, len(f.git.Commits))
 			}
 		})
 	}
