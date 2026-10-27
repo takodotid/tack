@@ -113,6 +113,13 @@ func TestPlanGolden(t *testing.T) {
 			args:    []string{"plan", "-f", "testdata/workload.yaml", "--to", "b", "--mode", "site-loss"},
 		},
 		{
+			name:    "plan-planned-git-down",
+			objects: map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": testenv.Site("b", "a", 0)},
+			gitDown: true,
+			args:    []string{"plan", "-f", "testdata/workload.yaml", "--to", "b"},
+			code:    ExitError,
+		},
+		{
 			name: "plan-three-sites-strait",
 			objects: map[string][]client.Object{
 				"a": {testenv.Cluster("a", "a", true, nil)},

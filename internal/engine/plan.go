@@ -133,6 +133,9 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 		if in.GitChanges == nil {
 			return nil, err
 		}
+		if req.Mode == v1alpha1.ModePlanned {
+			return nil, fmt.Errorf("Git cannot be read (%v): a planned switchover needs Git; break-glass is for a site loss", err)
+		}
 		notes = append(notes, fmt.Sprintf("Git: %v; the Git step waits for Git (break-glass)", err))
 	}
 	sf, err := Compose(in)
