@@ -26,5 +26,5 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Install kind, kubectl and flux
-        run: test/e2e/install-tools.sh
+        run: test/e2e/install-tools.sh "$RUNNER_TEMP/tools" && echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
       - run: make e2e
