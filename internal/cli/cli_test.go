@@ -148,8 +148,8 @@ func TestPlanGolden(t *testing.T) {
 				t.Fatalf("exit code %d, want %d\n%s", code, tt.code, out)
 			}
 			golden(t, tt.name, out)
-			if len(f.flux.Calls) > 0 || len(f.git.Commits) > 0 {
-				t.Errorf("plan changed something: Flux %v, Git %d commits", f.flux.Calls, len(f.git.Commits))
+			if len(f.flux.Calls) > 0 || len(f.git.Commits) > 0 || f.clients.Writes > 0 {
+				t.Errorf("plan changed something: Flux %v, Git %d commits, %d cluster writes", f.flux.Calls, len(f.git.Commits), f.clients.Writes)
 			}
 		})
 	}

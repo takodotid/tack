@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -269,7 +270,11 @@ func (r *runner) endPhase(p v1alpha1.Phase, now metav1.Time) {
 	}
 }
 
+// write records the status. It outlives a cancelled run, so an interrupt
+// is still recorded.
 func (e *Env) write(ctx context.Context, sf *v1alpha1.SiteFailover) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
 	if err := e.Ledger.UpdateStatus(ctx, sf); err != nil {
 		return fmt.Errorf("write the ledger (another tack process may be running this run): %w", err)
 	}

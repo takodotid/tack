@@ -181,6 +181,9 @@ func TestPlannedRun(t *testing.T) {
 	if len(f.flux.Held) != 0 {
 		t.Errorf("objects still held: %v", f.flux.Held)
 	}
+	if f.clients.Writes == 0 {
+		t.Error("the fake clients counted no write")
+	}
 	if len(sf.Status.Phases) != 4 {
 		t.Errorf("phases %v", sf.Status.Phases)
 	}

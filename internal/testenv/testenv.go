@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/takodotid/tack/api/v1alpha1"
 	"github.com/takodotid/tack/internal/driver"
@@ -36,15 +37,44 @@ type Clients struct {
 	mu    sync.Mutex
 	Sites map[string]client.Client
 	Down  map[string]bool
+	// Writes counts the writes made through Client.
+	Writes int
 }
 
 // NewClients returns fake clients for the sites, seeded with objects.
+// Writes through Client are counted in Writes.
 func NewClients(objects map[string][]client.Object) *Clients {
 	c := &Clients{Sites: map[string]client.Client{}, Down: map[string]bool{}}
 	for site, objs := range objects {
 		c.Sites[site] = NewClient(objs...)
 	}
 	return c
+}
+
+func (c *Clients) counted(cl client.Client) client.Client {
+	count := func() { c.mu.Lock(); c.Writes++; c.mu.Unlock() }
+	return interceptor.NewClient(cl.(client.WithWatch), interceptor.Funcs{
+		Create: func(ctx context.Context, cl client.WithWatch, o client.Object, opts ...client.CreateOption) error {
+			count()
+			return cl.Create(ctx, o, opts...)
+		},
+		Update: func(ctx context.Context, cl client.WithWatch, o client.Object, opts ...client.UpdateOption) error {
+			count()
+			return cl.Update(ctx, o, opts...)
+		},
+		Patch: func(ctx context.Context, cl client.WithWatch, o client.Object, p client.Patch, opts ...client.PatchOption) error {
+			count()
+			return cl.Patch(ctx, o, p, opts...)
+		},
+		Delete: func(ctx context.Context, cl client.WithWatch, o client.Object, opts ...client.DeleteOption) error {
+			count()
+			return cl.Delete(ctx, o, opts...)
+		},
+		SubResourceUpdate: func(ctx context.Context, cl client.Client, sub string, o client.Object, opts ...client.SubResourceUpdateOption) error {
+			count()
+			return cl.SubResource(sub).Update(ctx, o, opts...)
+		},
+	})
 }
 
 // NewClient returns a fake client that knows the GVKs.
@@ -79,7 +109,7 @@ func (c *Clients) Client(site string) (client.Client, error) {
 	if !ok {
 		return nil, fmt.Errorf("site %q has no fake client", site)
 	}
-	return cl, nil
+	return c.counted(cl), nil
 }
 
 // Reachable implements kube.Clients.
