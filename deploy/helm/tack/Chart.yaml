@@ -1,0 +1,9 @@
+apiVersion: v2
+name: tack
+description: The CRD of Tack's ledger, the SiteFailover resource.
+type: application
+version: 0.1.0
+appVersion: dev
+home: https://github.com/takodotid/tack
+sources:
+  - https://github.com/takodotid/tack

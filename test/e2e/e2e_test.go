@@ -66,8 +66,8 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// setup builds tack with the fault hook, installs the CRD and the ledger
-// namespace at both sites, and writes the Workload.
+// setup builds tack with the fault hook, installs the chart (the CRD) in the
+// ledger namespace at both sites, and writes the Workload.
 func setup() error {
 	build := exec.Command("go", "build", "-tags", "e2efault", "-o", tackBin, "./cmd/tack")
 	build.Dir = repo
@@ -76,12 +76,11 @@ func setup() error {
 		return fmt.Errorf("build tack: %w", err)
 	}
 	for _, s := range []string{"a", "b"} {
-		if out, err := kubectlE(s, "apply", "-f", filepath.Join(repo, "config/crd")); err != nil {
-			return fmt.Errorf("site %s: apply CRD: %v: %s", s, err, out)
-		}
-		out, _ := kubectlE(s, "create", "namespace", ledgerNS, "--dry-run=client", "-o", "yaml")
-		if o, err := kubectlIn(s, out, "apply", "-f", "-"); err != nil {
-			return fmt.Errorf("site %s: ledger namespace: %v: %s", s, err, o)
+		helm := exec.Command("helm", "--kubeconfig", kubeconfig, "--kube-context", context(s),
+			"upgrade", "--install", "tack", filepath.Join(repo, "deploy/helm/tack"),
+			"--namespace", ledgerNS, "--create-namespace", "--wait")
+		if out, err := helm.CombinedOutput(); err != nil {
+			return fmt.Errorf("site %s: install chart: %v: %s", s, err, out)
 		}
 	}
 	url, err := gitURL()

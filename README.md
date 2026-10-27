@@ -49,7 +49,7 @@ The ledger is a `SiteFailover` object at the new primary's site, in the namespac
 | AI agents | `tack --help` and `tack --skill` tell agents never to start `tack run` or `tack resume` without a human's explicit instruction for that run, and to run `tack plan` first. |
 | No secrets | Git access comes from the operator's own `git` configuration. The ledger holds no secret, and `tack status` prints captured values by name only. |
 
-## What v0.1.0 supports
+## What v0.1 supports
 
 | Area | Support |
 |---|---|
@@ -61,14 +61,14 @@ The ledger is a `SiteFailover` object at the new primary's site, in the namespac
 
 ## Status
 
-v0.1.0 is the first release. The API is `failover.tako.id/v1alpha1`, for both the `SiteFailover` ledger and the Workload file. It may change in later releases; a change that would break a user comes as a new API version.
+The latest release is v0.1.1. The API is `failover.tako.id/v1alpha1`, for both the `SiteFailover` ledger and the Workload file. It may change in later releases; a change that would break a user comes as a new API version.
 
 ## Install
 
-Each release on the [releases page](https://github.com/takodotid/tack/releases) has an archive per platform, `SHA256SUMS`, and the CRD. Each archive holds `tack`, its man pages and the CRD.
+Each release on the [releases page](https://github.com/takodotid/tack/releases) has an archive per platform, `SHA256SUMS`, the CRD, and a Helm chart of the CRD. Each archive holds `tack`, its man pages and the CRD. The chart is also published at `oci://ghcr.io/takodotid/charts/tack`.
 
 ```sh
-VERSION=v0.1.0
+VERSION=v0.1.1
 OS=linux      # or darwin
 ARCH=amd64    # or arm64
 NAME=tack-$VERSION-$OS-$ARCH
@@ -83,14 +83,16 @@ sudo cp $NAME/man/man1/*.1 /usr/local/share/man/man1/
 
 To build from source instead: `make build` writes `bin/tack`.
 
-At every site, install the CRD and create the ledger namespace. The namespace must match `spec.ledger.namespace` in the Workload file.
+At every site, install the CRD with the chart, in the ledger namespace. The namespace must match `spec.ledger.namespace` in the Workload file.
 
 ```sh
 for ctx in site-a site-b; do
-  kubectl --context "$ctx" apply -f $NAME/failover.tako.id_sitefailovers.yaml
-  kubectl --context "$ctx" create namespace tack-system
+  helm --kube-context "$ctx" upgrade --install tack oci://ghcr.io/takodotid/charts/tack --version "${VERSION#v}" \
+    --namespace tack-system --create-namespace
 done
 ```
+
+The same command upgrades the CRD to a new release. `helm uninstall` keeps the CRD, because deleting it deletes every ledger: set `crds.keep=false` to change that. Without Helm, apply the CRD instead: `kubectl --context "$ctx" apply --server-side -f $NAME/failover.tako.id_sitefailovers.yaml`, then create the namespace.
 
 Tack also needs:
 

@@ -1,0 +1,5 @@
+crds:
+  # Install and upgrade the SiteFailover CRD with this release.
+  install: true
+  # Keep the CRD when the release is uninstalled. Deleting the CRD deletes every SiteFailover ledger with it.
+  keep: true
