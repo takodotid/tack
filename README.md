@@ -29,7 +29,8 @@ make e2e
 | Git changed during a run | the run stops; it goes on once the operator accepts the new head |
 | Site loss with Git down | Tack switches live and waits for Git (break-glass) |
 | A site coming back | a lost site that answers as primary stops the run until the operator fences it |
-| Rebuild and switch back | the old primary is rebuilt from the new one, then becomes primary again |
+| Rebuild and switch back | a planned run to the failed-over site is refused until it is rebuilt; then it becomes primary again |
+| Routing from Strait | with Strait's `SiteService` CRD installed, a run waits until the route names the new primary |
 
 `make e2e-up` keeps the environment for a look around; `make e2e-down` removes it. Everything it creates is named `tack-e2e*`.
 
