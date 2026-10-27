@@ -90,7 +90,7 @@ func (r *runner) run(ctx context.Context) error {
 		if step.Site != "" {
 			if err := r.siteReachable(ctx, step.Site); err != nil {
 				if !step.Deferrable {
-					return r.end(ctx, step, st, stop.Ask(v1alpha1.ReasonStepFailed, "site %s is unreachable: %v", step.Site, err))
+					return r.end(ctx, step, stop.Ask(v1alpha1.ReasonStepFailed, "site %s is unreachable: %v", step.Site, err))
 				}
 				if st.State != v1alpha1.StepDeferred {
 					st.State, st.Message = v1alpha1.StepDeferred, fmt.Sprintf("site %s unreachable", step.Site)
@@ -103,11 +103,11 @@ func (r *runner) run(ctx context.Context) error {
 			}
 			if st.State == v1alpha1.StepDeferred {
 				if err := r.gate(ctx, step.Site); err != nil {
-					return r.end(ctx, step, st, err)
+					return r.end(ctx, step, err)
 				}
 			}
 		}
-		if err := r.runStep(ctx, step, st); err != nil {
+		if err := r.runStep(ctx, step); err != nil {
 			return err
 		}
 	}
@@ -136,9 +136,12 @@ func (r *runner) gate(ctx context.Context, site string) error {
 	return nil
 }
 
-func (r *runner) runStep(ctx context.Context, step *v1alpha1.Step, st *v1alpha1.StepStatus) error {
+// runStep runs one step. Every ledger write replaces the status, so the
+// step's status is looked up again after each write.
+func (r *runner) runStep(ctx context.Context, step *v1alpha1.Step) error {
 	now := metav1.NewTime(r.now())
 	r.startPhase(step.Phase, now)
+	st := r.stepStatus(step.ID)
 	st.State = v1alpha1.StepRunning
 	st.StartedAt = &now
 	st.FinishedAt = nil
@@ -152,9 +155,10 @@ func (r *runner) runStep(ctx context.Context, step *v1alpha1.Step, st *v1alpha1.
 	msg, err := r.exec(ctx, step)
 	fault.Point(step.ID, "after")
 	if err != nil {
-		return r.end(ctx, step, st, err)
+		return r.end(ctx, step, err)
 	}
 	done := metav1.NewTime(r.now())
+	st = r.stepStatus(step.ID)
 	st.State, st.FinishedAt, st.Message = v1alpha1.StepSucceeded, &done, msg
 	r.endPhase(step.Phase, done)
 	if err := r.write(ctx, r.sf); err != nil {
@@ -169,11 +173,12 @@ func (r *runner) runStep(ctx context.Context, step *v1alpha1.Step, st *v1alpha1.
 }
 
 // end records why the run cannot go on.
-func (r *runner) end(ctx context.Context, step *v1alpha1.Step, st *v1alpha1.StepStatus, err error) error {
+func (r *runner) end(ctx context.Context, step *v1alpha1.Step, err error) error {
 	se, ok := stop.As(err)
 	if !ok {
 		se = &stop.Error{Reason: v1alpha1.ReasonStepFailed, Message: err.Error()}
 	}
+	st := r.stepStatus(step.ID)
 	st.Message = se.Message
 	ret := ErrStopped
 	if se.Wait {
