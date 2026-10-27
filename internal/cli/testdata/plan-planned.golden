@@ -29,43 +29,43 @@ Hold
       reconcile Flux at site b, so no apply started before the hold is still in flight
         request a reconcile of Kustomizations flux-system/b and their GitRepository; wait up to 5m0s
 Failover
-   7. demote-a  site a
+   7. pooler-a  site a
+      set Pooler pg-a-rw to 0 instances
+        patch Pooler db/pg-a-rw (merge): {"spec":{"instances":0}}
+   8. wait-pooler-a  site a
+      wait until the Pooler pg-a-rw runs no pod
+        wait up to 10m0s on Deployment db/pg-a-rw until:
+          {.status.replicas} is empty
+   9. demote-a  site a
       demote Cluster pg-a: declare pg-b primary and drop any old token
         patch Cluster db/pg-a (merge): {"spec":{"replica":{"primary":"pg-b","promotionToken":null}}}
-   8. wait-demoted-a  site a
+  10. wait-demoted-a  site a
       wait until Cluster pg-a has demoted and published its demotion token
         wait up to 10m0s on Cluster db/pg-a until:
           {.status.demotionToken} is not empty
           {.status.switchReplicaClusterStatus.inProgress} NotEquals "true"
-   9. capture-token  site a
+  11. capture-token  site a
       record the demotion token of Cluster pg-a in the ledger
         record {.status.demotionToken} of Cluster db/pg-a in the ledger as $(demotionToken)
-  10. promote-b  site b
+  12. promote-b  site b
       promote Cluster pg-b with the demotion token, in one patch
         patch Cluster db/pg-b (merge): {"spec":{"replica":{"primary":"pg-b","promotionToken":"$(demotionToken)"}}}
-  11. wait-promoted-b  site b
+  13. wait-promoted-b  site b
       wait until Cluster pg-b has used the token and runs a healthy primary
         wait up to 10m0s on Cluster db/pg-b until:
           {.status.lastPromotionToken} Equals "$(demotionToken)"
           {.status.instancesReportedState.*.isPrimary} Contains "true"
           {.status.phase} Equals "Cluster in healthy state"
-  12. clear-token-b  site b
+  14. clear-token-b  site b
       remove the used token from Cluster pg-b, so it can never apply again
         patch Cluster db/pg-b (merge): {"spec":{"replica":{"promotionToken":null}}}
-  13. pooler-b  site b
+  15. pooler-b  site b
       set Pooler pg-b-rw to 2 instances
         patch Pooler db/pg-b-rw (merge): {"spec":{"instances":2}}
-  14. wait-pooler-b  site b
+  16. wait-pooler-b  site b
       wait until the Pooler pg-b-rw has 2 ready pods
         wait up to 10m0s on Deployment db/pg-b-rw until:
           {.status.readyReplicas} Equals "2"
-  15. pooler-a  site a
-      set Pooler pg-a-rw to 0 instances
-        patch Pooler db/pg-a-rw (merge): {"spec":{"instances":0}}
-  16. wait-pooler-a  site a
-      wait until the Pooler pg-a-rw runs no pod
-        wait up to 10m0s on Deployment db/pg-a-rw until:
-          {.status.replicas} is empty
   17. verify-b  site b
       verify that Cluster pg-b is a healthy primary and declares itself
         wait up to 10m0s on Cluster db/pg-b until:

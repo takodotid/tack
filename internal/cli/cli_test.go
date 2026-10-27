@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/takodotid/tack/api/v1alpha1"
@@ -133,6 +134,15 @@ func TestPlanGolden(t *testing.T) {
 			code:    ExitError,
 		},
 		{
+			name: "plan-planned-diverged",
+			objects: map[string][]client.Object{
+				"a": {promotedTwice(testenv.Cluster("a", "a", true, nil)), testenv.Pooler("a", 2)},
+				"b": {testenv.Cluster("b", "a", false, nil), testenv.Pooler("b", 0)},
+			},
+			args: []string{"plan", "-f", "testdata/workload.yaml", "--to", "b"},
+			code: ExitError,
+		},
+		{
 			name:    "plan-bad-mode",
 			objects: map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": testenv.Site("b", "a", 0)},
 			args:    []string{"plan", "-f", "testdata/workload.yaml", "--to", "b", "--mode", "fast"},
@@ -153,6 +163,13 @@ func TestPlanGolden(t *testing.T) {
 			}
 		})
 	}
+}
+
+// promotedTwice puts the primary on timeline 2, as after a failover that
+// left the other site's member behind on timeline 1.
+func promotedTwice(u *unstructured.Unstructured) *unstructured.Unstructured {
+	_ = unstructured.SetNestedField(u.Object, int64(2), "status", "instancesReportedState", "pg-a-1", "timeLineID")
+	return u
 }
 
 func TestSkill(t *testing.T) {

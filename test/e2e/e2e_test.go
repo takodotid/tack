@@ -84,12 +84,26 @@ func setup() error {
 			return fmt.Errorf("site %s: ledger namespace: %v: %s", s, err, o)
 		}
 	}
-	gitURL, err := os.ReadFile(filepath.Join(work, "git-url"))
+	url, err := gitURL()
 	if err != nil {
-		return fmt.Errorf("read the Git URL that up.sh wrote: %w", err)
+		return err
 	}
-	w := fmt.Sprintf(workloadTemplate, strings.TrimSpace(string(gitURL)))
+	w := fmt.Sprintf(workloadTemplate, url)
 	return os.WriteFile(workload, []byte(w), 0o644)
+}
+
+// gitURL reads the Git URL that up.sh wrote into the work dir's env file.
+func gitURL() (string, error) {
+	b, err := os.ReadFile(filepath.Join(work, "env"))
+	if err != nil {
+		return "", fmt.Errorf("read the env file that up.sh wrote: %w", err)
+	}
+	for _, l := range strings.Split(string(b), "\n") {
+		if v, ok := strings.CutPrefix(l, "export TACK_E2E_GIT_URL="); ok {
+			return strings.TrimSpace(v), nil
+		}
+	}
+	return "", fmt.Errorf("no TACK_E2E_GIT_URL in %s", filepath.Join(work, "env"))
 }
 
 // The Pooler instances at site b use a field mapping (b); every other
@@ -257,7 +271,7 @@ func assertGitMatches(t *testing.T, to string, sites ...string) string {
 		}
 	}
 	for _, s := range sites {
-		rev := strings.TrimSpace(kubectl(t, s, "-n", "flux-system", "get", "kustomization", "site", "-o", "jsonpath={.status.lastAppliedRevision}"))
+		rev := strings.TrimSpace(kubectl(t, s, "-n", "flux-system", "get", "kustomization", "site-"+s, "-o", "jsonpath={.status.lastAppliedRevision}"))
 		if !strings.HasSuffix(rev, head) {
 			t.Errorf("Flux at site %s applied %s, Git head is %s", s, rev, head)
 		}
@@ -281,9 +295,12 @@ func gitCmd(t *testing.T, dir string, args ...string) string {
 // gitPull refreshes the local clone and returns the head commit.
 func gitPull(t *testing.T) string {
 	t.Helper()
-	url, _ := os.ReadFile(filepath.Join(work, "git-url"))
+	url, err := gitURL()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := os.Stat(gitDir); err != nil {
-		gitCmd(t, work, "clone", "-q", strings.TrimSpace(string(url)), gitDir)
+		gitCmd(t, work, "clone", "-q", url, gitDir)
 	}
 	gitCmd(t, gitDir, "fetch", "-q", "origin")
 	gitCmd(t, gitDir, "reset", "-q", "--hard", "origin/main")
@@ -450,8 +467,8 @@ func TestSiteLossBreakGlassAndReturn(t *testing.T) {
 
 	docker(t, "start", gitContainer)
 	eventually(t, time.Minute, "Git answers", func() string {
-		url, _ := os.ReadFile(filepath.Join(work, "git-url"))
-		if err := exec.Command("git", "ls-remote", strings.TrimSpace(string(url))).Run(); err != nil {
+		url, _ := gitURL()
+		if err := exec.Command("git", "ls-remote", url).Run(); err != nil {
 			return err.Error()
 		}
 		return ""
@@ -483,7 +500,7 @@ func TestRebuildAndSwitchBack(t *testing.T) {
 		t.Fatalf("clusters/b/cluster.yaml does not bootstrap from the other site:\n%s", s)
 	}
 	kubectl(t, "b", "-n", ns, "delete", "cluster", "pg-b", "--wait=true")
-	kubectl(t, "b", "-n", "flux-system", "annotate", "--overwrite", "kustomization", "site", "reconcile.fluxcd.io/requestedAt="+time.Now().Format(time.RFC3339Nano))
+	kubectl(t, "b", "-n", "flux-system", "annotate", "--overwrite", "kustomization", "site-b", "reconcile.fluxcd.io/requestedAt="+time.Now().Format(time.RFC3339Nano))
 	eventually(t, 15*time.Minute, "site b rebuilt as a healthy replica", func() string {
 		p, err := kubectlE("b", "-n", ns, "get", "cluster", "pg-b", "-o", "jsonpath={.status.phase}")
 		if err != nil || strings.TrimSpace(p) != "Cluster in healthy state" {

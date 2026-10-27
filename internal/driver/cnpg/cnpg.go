@@ -48,6 +48,7 @@ const (
 	factInProgress    = "inProgress"
 	factMinApplyDelay = "minApplyDelay"
 	factIsPrimary     = "isPrimary"
+	factTimeline      = "timeline"
 )
 
 func init() { driver.Register(Driver{}) }
@@ -167,16 +168,25 @@ func read(st *driver.SiteState, u *unstructured.Unstructured, byCluster map[stri
 	f[factPhase] = phase
 	inProgress, _, _ := unstructured.NestedBool(u.Object, "status", "switchReplicaClusterStatus", "inProgress")
 	f[factInProgress] = fmt.Sprint(inProgress)
-	isPrimary := false
+	// The instances report their own timeline; status.timelineID is stale
+	// on a demoted Cluster.
+	isPrimary, timeline := false, int64(0)
 	states, _, _ := unstructured.NestedMap(u.Object, "status", "instancesReportedState")
 	for _, v := range states {
-		if m, ok := v.(map[string]any); ok && m["isPrimary"] == true {
+		m, ok := v.(map[string]any)
+		if !ok {
+			continue
+		}
+		if m["isPrimary"] == true {
 			isPrimary = true
+		}
+		if tl, ok := m["timeLineID"].(int64); ok && tl > timeline {
+			timeline = tl
 		}
 	}
 	f[factIsPrimary] = fmt.Sprint(isPrimary)
+	f[factTimeline] = fmt.Sprint(timeline)
 	current, _, _ := unstructured.NestedString(u.Object, "status", "currentPrimary")
-	timeline, _, _ := unstructured.NestedInt64(u.Object, "status", "timelineID")
 
 	replica := hasReplica && (hasEnabled && enabled || !hasEnabled && hasPrimary && self != primary)
 	switch {
@@ -240,6 +250,13 @@ func (d Driver) Plan(w *v1alpha1.WorkloadSpec, t *driver.Topology, r driver.Requ
 		}
 		if toSt.Facts[factMinApplyDelay] != "" {
 			return nil, nil, fmt.Errorf("site %s: Cluster sets spec.replica.minApplyDelay, which CloudNativePG does not allow with a promotion token", r.To)
+		}
+		if ft, tt := fromSt.Facts[factTimeline], toSt.Facts[factTimeline]; ft != "0" && tt != "0" && ft != tt {
+			return nil, nil, fmt.Errorf("site %s is on timeline %s and the primary at site %s on timeline %s: it does not follow the primary, and may need a rebuild (docs/runbooks/rebuild-old-primary.md)",
+				r.To, tt, r.From, ft)
+		}
+		if from.CNPG.Pooler != nil {
+			b.scale(from, 0)
 		}
 		b.patch("demote-"+from.Name, from, ClusterRef(from), "demote Cluster "+from.CNPG.Cluster.Name+": declare "+toName+" primary and drop any old token",
 			replicaPatch(toName, nil))
@@ -400,14 +417,15 @@ func (b *builder) declareOthers(r driver.Request) {
 	}
 }
 
-// poolers runs the read-write Pooler only at the new primary's site.
+// poolers runs the read-write Pooler at the new primary's site, and at
+// no site other than from, whose Pooler went to 0 before the demotion.
 func (b *builder) poolers(r driver.Request) {
 	if to := siteByName(b.w, r.To); to.CNPG.Pooler != nil {
 		b.scale(to, to.CNPG.Pooler.Instances)
 	}
 	for i := range b.w.Sites {
 		s := &b.w.Sites[i]
-		if s.Name != r.To && s.CNPG.Pooler != nil {
+		if s.Name != r.To && s.Name != r.From && s.CNPG.Pooler != nil {
 			b.scale(s, 0)
 		}
 	}
