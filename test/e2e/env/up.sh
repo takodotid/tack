@@ -293,7 +293,7 @@ build_strait_image() {
     git clone -q "$STRAIT_GIT_URL" "$src"
   fi
   if ! git -C "$src" cat-file -e "$STRAIT_COMMIT^{commit}" 2>/dev/null; then
-    git -C "$src" fetch -q origin v1
+    git -C "$src" fetch -q origin "$STRAIT_COMMIT"
   fi
   git -C "$src" checkout -q --detach "$STRAIT_COMMIT"
   [[ $(git -C "$src" rev-parse HEAD) == "$STRAIT_COMMIT" ]] ||

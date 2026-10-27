@@ -23,10 +23,10 @@ CNPG_VERSION=1.30.1
 CNPG_MANIFEST_URL=https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$CNPG_VERSION/cnpg-$CNPG_VERSION.yaml
 CNPG_MANIFEST_SHA256=37237f145d8138256ea25ae830f87759255665ff08f8d552fdd8224a5ec032fb
 
-# Strait, built from its source at a pinned commit of its branch v1. The
+# Strait, built from its source at a pinned commit, fetched by its SHA. The
 # image is loaded into the nodes from an archive; Envoy is pulled in them.
 STRAIT_GIT_URL=https://github.com/takodotid/strait.git
-STRAIT_COMMIT=ceafa3488a2ed65b3e21e975e1d766645f260f4e
+STRAIT_COMMIT=620302b88e449d8103253d6c1275bf6c946fedcf
 STRAIT_IMAGE=tack-e2e-strait:${STRAIT_COMMIT:0:12}
 STRAIT_NAMESPACE=strait-system
 ENVOY_IMAGE=envoyproxy/envoy:distroless-v1.40.2
