@@ -29,7 +29,7 @@ var (
 
 	// ErrNoMapping means a changed field has no spec.git.fields entry and
 	// spec.git.find is not set.
-	ErrNoMapping = errors.New("no Git mapping for the field")
+	ErrNoMapping = engine.ErrNoMapping
 
 	// errNoBranch means the remote answered without the branch.
 	errNoBranch = errors.New("the branch does not exist")

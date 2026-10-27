@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -212,7 +213,7 @@ func Compose(in Inputs) (*v1alpha1.SiteFailover, error) {
 	}
 	add(v1alpha1.Step{
 		ID: "git-commit", Phase: v1alpha1.PhasePromoteToGitOps, Type: v1alpha1.StepGit,
-		Description: fmt.Sprintf("commit the live state to %s branch %s", spec.Git.URL, spec.Git.Branch),
+		Description: fmt.Sprintf("commit the live state to %s branch %s", redact(spec.Git.URL), spec.Git.Branch),
 		Git: &v1alpha1.GitStep{
 			Changes: in.GitChanges,
 			Message: fmt.Sprintf("tack: %s primary %s to %s (%s)\n\nRun %s, mode %s.", in.Workload, in.From, in.To, strings.ToLower(string(in.Mode)), in.Run, in.Mode),
@@ -313,6 +314,11 @@ func Compose(in Inputs) (*v1alpha1.SiteFailover, error) {
 	}
 	return sf, nil
 }
+
+var userinfo = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/\s]+@`)
+
+// redact hides the user and password of a URL.
+func redact(s string) string { return userinfo.ReplaceAllString(s, "${1}***@") }
 
 func stepID(verb, site string, obj v1alpha1.ObjectRef) string {
 	return strings.ToLower(fmt.Sprintf("%s-%s-%s-%s", verb, site, obj.Kind, obj.Name))
