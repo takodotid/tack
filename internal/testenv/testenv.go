@@ -193,16 +193,16 @@ func (f *Flux) Release(_ context.Context, site string, obj v1alpha1.ObjectRef, r
 }
 
 // Reconcile implements engine.Flux.
-func (f *Flux) Reconcile(_ context.Context, site string, _ []v1alpha1.ObjectKey, revision string, _ time.Duration) (string, error) {
+func (f *Flux) Reconcile(_ context.Context, site string, _ []v1alpha1.ObjectKey, revision string, _ time.Duration) (string, []string, error) {
 	if err := f.call("Reconcile", site, " ", revision); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if revision != "" {
-		return "main@sha1:" + revision, nil
+		return "main@sha1:" + revision, nil, nil
 	}
-	return f.Revision, nil
+	return f.Revision, nil, nil
 }
 
 // VerifyGit implements engine.Flux.

@@ -98,9 +98,16 @@ func (r *runner) reconcile(ctx context.Context, s *v1alpha1.Step) (string, error
 			return "", err
 		}
 	}
-	applied, err := r.Flux.Reconcile(ctx, s.Site, ks, rev, s.Reconcile.Timeout.Duration)
+	applied, notes, err := r.Flux.Reconcile(ctx, s.Site, ks, rev, s.Reconcile.Timeout.Duration)
 	if err != nil {
 		return "", err
+	}
+	msg := "Flux applied " + applied
+	if applied == "" {
+		msg = "nothing to reconcile"
+	}
+	if len(notes) > 0 {
+		msg += "; " + strings.Join(notes, "; ")
 	}
 	if s.Phase == v1alpha1.PhaseHold {
 		g := &r.sf.Status.Git
@@ -113,7 +120,7 @@ func (r *runner) reconcile(ctx context.Context, s *v1alpha1.Step) (string, error
 				"Flux at site %s applied %s, but the run's base is %s: Git changed during the run", s.Site, applied, g.BaseRevision)
 		}
 	}
-	return "Flux applied " + applied, nil
+	return msg, nil
 }
 
 func (r *runner) git(ctx context.Context, s *v1alpha1.Step) (string, error) {

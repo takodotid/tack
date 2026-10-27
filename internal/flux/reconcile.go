@@ -25,10 +25,16 @@ const ReasonSucceeded = "ReconciliationSucceeded"
 // requests each Kustomization and waits until each is done. A source that
 // fails to fetch does not stop the wait: the Kustomization runs on the
 // artifact it has, which is enough when no revision is expected.
-func (f *Flux) Reconcile(ctx context.Context, site string, ks []v1alpha1.ObjectKey, revision string, timeout time.Duration) (string, error) {
+func (f *Flux) Reconcile(ctx context.Context, site string, ks []v1alpha1.ObjectKey, revision string, timeout time.Duration) (string, []string, error) {
+	var notes []string
+	note := func(format string, a ...any) {
+		n := fmt.Sprintf(format, a...)
+		notes = append(notes, n)
+		f.note("%s", n)
+	}
 	c, err := f.Clients.Client(site)
 	if err != nil {
-		return "", err
+		return "", notes, err
 	}
 	deadline := f.now().Add(timeout)
 
@@ -42,10 +48,10 @@ func (f *Flux) Reconcile(ctx context.Context, site string, ks []v1alpha1.ObjectK
 		seen[k] = true
 		u, err := getKind(ctx, c, KustomizationGVK, k)
 		if err != nil {
-			return "", err
+			return "", notes, err
 		}
 		if suspended(u) {
-			f.note("Kustomization %s at site %s is suspended: not reconciled", keyString(k), site)
+			note("Kustomization %s at site %s is suspended: not reconciled", keyString(k), site)
 			continue
 		}
 		active = append(active, k)
@@ -55,7 +61,7 @@ func (f *Flux) Reconcile(ctx context.Context, site string, ks []v1alpha1.ObjectK
 		}
 	}
 	if len(active) == 0 {
-		return "", nil
+		return "", notes, nil
 	}
 
 	// Fetch Git first, so the Kustomizations run on the newest artifact.
@@ -63,15 +69,15 @@ func (f *Flux) Reconcile(ctx context.Context, site string, ks []v1alpha1.ObjectK
 	for _, s := range sources {
 		u, err := getKind(ctx, c, GitRepositoryGVK, s)
 		if err != nil {
-			return "", err
+			return "", notes, err
 		}
 		if suspended(u) {
-			f.note("GitRepository %s at site %s is suspended: not fetched", keyString(s), site)
+			note("GitRepository %s at site %s is suspended: not fetched", keyString(s), site)
 			continue
 		}
 		tok, err := f.request(ctx, c, u)
 		if err != nil {
-			return "", err
+			return "", notes, err
 		}
 		pending[s] = tok
 	}
@@ -85,7 +91,7 @@ func (f *Flux) Reconcile(ctx context.Context, site string, ks []v1alpha1.ObjectK
 			}
 			delete(pending, s)
 			if st, reason, msg := ready(u); st != "True" {
-				f.note("GitRepository %s at site %s did not fetch (%s: %s); Flux applies the artifact it has, %s",
+				note("GitRepository %s at site %s did not fetch (%s: %s); Flux applies the artifact it has, %s",
 					keyString(s), site, reason, msg, artifactRevision(u))
 			}
 		}
@@ -94,12 +100,12 @@ func (f *Flux) Reconcile(ctx context.Context, site string, ks []v1alpha1.ObjectK
 		}
 		if f.now().After(sourceDeadline) {
 			for s := range pending {
-				f.note("GitRepository %s at site %s did not handle the reconcile request in %s", keyString(s), site, timeout/2)
+				note("GitRepository %s at site %s did not handle the reconcile request in %s", keyString(s), site, timeout/2)
 			}
 			break
 		}
 		if err := f.sleep(ctx); err != nil {
-			return "", err
+			return "", notes, err
 		}
 	}
 
@@ -107,11 +113,11 @@ func (f *Flux) Reconcile(ctx context.Context, site string, ks []v1alpha1.ObjectK
 	for _, k := range active {
 		u, err := getKind(ctx, c, KustomizationGVK, k)
 		if err != nil {
-			return "", err
+			return "", notes, err
 		}
 		tok, err := f.request(ctx, c, u)
 		if err != nil {
-			return "", err
+			return "", notes, err
 		}
 		tokens[k] = tok
 	}
@@ -129,7 +135,7 @@ func (f *Flux) Reconcile(ctx context.Context, site string, ks []v1alpha1.ObjectK
 				continue
 			}
 			if suspended(u) {
-				f.note("Kustomization %s at site %s was suspended during the wait: not reconciled", keyString(k), site)
+				note("Kustomization %s at site %s was suspended during the wait: not reconciled", keyString(k), site)
 				delete(tokens, k)
 				continue
 			}
@@ -151,10 +157,10 @@ func (f *Flux) Reconcile(ctx context.Context, site string, ks []v1alpha1.ObjectK
 					parts = append(parts, fmt.Sprintf("Kustomization %s: %s", keyString(k), why[k]))
 				}
 			}
-			return "", fmt.Errorf("timed out after %s waiting for Flux at site %s: %s", timeout, site, strings.Join(parts, "; "))
+			return "", notes, fmt.Errorf("timed out after %s waiting for Flux at site %s: %s", timeout, site, strings.Join(parts, "; "))
 		}
 		if err := f.sleep(ctx); err != nil {
-			return "", err
+			return "", notes, err
 		}
 	}
 
@@ -169,12 +175,12 @@ func (f *Flux) Reconcile(ctx context.Context, site string, ks []v1alpha1.ObjectK
 			continue
 		}
 		if !engine.SameRevision(rev, r) {
-			return "", stop.Ask(v1alpha1.ReasonGitChanged,
+			return "", notes, stop.Ask(v1alpha1.ReasonGitChanged,
 				"Kustomizations at site %s applied different revisions: %s applied %s, %s applied %s",
 				site, keyString(first), rev, keyString(k), r)
 		}
 	}
-	return rev, nil
+	return rev, notes, nil
 }
 
 // request sets a fresh reconcile token on a Flux object and returns it.

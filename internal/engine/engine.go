@@ -38,8 +38,9 @@ type Flux interface {
 
 	// Reconcile asks Flux to fetch Git and reconcile the Kustomizations,
 	// and waits until each has handled the request. When revision is set,
-	// each must have applied it. It returns the revision Flux applied.
-	Reconcile(ctx context.Context, site string, ks []v1alpha1.ObjectKey, revision string, timeout time.Duration) (string, error)
+	// each must have applied it. It returns the revision Flux applied, and
+	// notes for the ledger, such as a GitRepository that could not fetch.
+	Reconcile(ctx context.Context, site string, ks []v1alpha1.ObjectKey, revision string, timeout time.Duration) (string, []string, error)
 
 	// VerifyGit renders the objects from the repository checked out at dir,
 	// as Flux would, and checks that applying them changes nothing live.
