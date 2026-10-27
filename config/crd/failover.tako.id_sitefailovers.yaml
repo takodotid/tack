@@ -188,8 +188,10 @@ spec:
                       description: ObjectStep acts on one object that Flux applies.
                       properties:
                         kustomization:
-                          description: Kustomization is the Flux Kustomization that
-                            applies the object.
+                          description: |-
+                            Kustomization is the Flux Kustomization that applied the object at
+                            plan time. Unset when the site was unreachable. The step reads the
+                            object's own labels when it runs.
                           properties:
                             name:
                               type: string
@@ -217,7 +219,6 @@ spec:
                           - namespace
                           type: object
                       required:
-                      - kustomization
                       - object
                       type: object
                     id:
@@ -263,50 +264,45 @@ spec:
                       type: string
                     reconcile:
                       description: |-
-                        ReconcileStep asks Flux to reconcile a Kustomization and waits until
-                        Flux has handled the request.
+                        ReconcileStep asks Flux to reconcile and waits until Flux has handled
+                        the request. The Kustomizations' GitRepository is reconciled first.
                       properties:
-                        kustomization:
-                          description: Kustomization is the Flux Kustomization.
-                          properties:
-                            name:
-                              type: string
-                            namespace:
-                              type: string
-                          required:
-                          - name
-                          - namespace
-                          type: object
+                        kustomizations:
+                          description: |-
+                            Kustomizations are the Flux Kustomizations at the step's site. Empty
+                            means every Kustomization that applies an object this run holds at
+                            the site.
+                          items:
+                            description: ObjectKey names a namespaced object.
+                            properties:
+                              name:
+                                type: string
+                              namespace:
+                                type: string
+                            required:
+                            - name
+                            - namespace
+                            type: object
+                          type: array
                         revision:
                           description: |-
                             Revision, when set, is the commit Flux must have applied. It may
                             reference a captured value as $(name).
                           type: string
-                        source:
-                          description: Source is the Kustomization's GitRepository.
-                            It is reconciled first.
-                          properties:
-                            name:
-                              type: string
-                            namespace:
-                              type: string
-                          required:
-                          - name
-                          - namespace
-                          type: object
                         timeout:
                           description: Timeout bounds the wait.
                           type: string
                       required:
-                      - kustomization
                       - timeout
                       type: object
                     release:
                       description: ObjectStep acts on one object that Flux applies.
                       properties:
                         kustomization:
-                          description: Kustomization is the Flux Kustomization that
-                            applies the object.
+                          description: |-
+                            Kustomization is the Flux Kustomization that applied the object at
+                            plan time. Unset when the site was unreachable. The step reads the
+                            object's own labels when it runs.
                           properties:
                             name:
                               type: string
@@ -334,7 +330,6 @@ spec:
                           - namespace
                           type: object
                       required:
-                      - kustomization
                       - object
                       type: object
                     routing:
@@ -382,11 +377,11 @@ spec:
                       - Routing
                       type: string
                     verifyGit:
-                      description: VerifyStep checks objects against Git.
+                      description: VerifyStep checks the held objects at the step's
+                        site against Git.
                       properties:
                         fields:
-                          description: Fields are the fields this run changed, per
-                            object, as paths.
+                          description: Fields are the fields this run changed.
                           items:
                             description: ObjectField is one field of one object.
                             properties:
@@ -414,20 +409,8 @@ spec:
                             - object
                             type: object
                           type: array
-                        kustomization:
-                          description: Kustomization applies the objects.
-                          properties:
-                            name:
-                              type: string
-                            namespace:
-                              type: string
-                          required:
-                          - name
-                          - namespace
-                          type: object
                         objects:
-                          description: Objects are the held objects at the step's
-                            site.
+                          description: Objects are the objects to check.
                           items:
                             description: ObjectRef names a live object.
                             properties:
@@ -447,15 +430,14 @@ spec:
                             type: object
                           type: array
                       required:
-                      - kustomization
                       - objects
                       type: object
                     verifyNoop:
-                      description: VerifyStep checks objects against Git.
+                      description: VerifyStep checks the held objects at the step's
+                        site against Git.
                       properties:
                         fields:
-                          description: Fields are the fields this run changed, per
-                            object, as paths.
+                          description: Fields are the fields this run changed.
                           items:
                             description: ObjectField is one field of one object.
                             properties:
@@ -483,20 +465,8 @@ spec:
                             - object
                             type: object
                           type: array
-                        kustomization:
-                          description: Kustomization applies the objects.
-                          properties:
-                            name:
-                              type: string
-                            namespace:
-                              type: string
-                          required:
-                          - name
-                          - namespace
-                          type: object
                         objects:
-                          description: Objects are the held objects at the step's
-                            site.
+                          description: Objects are the objects to check.
                           items:
                             description: ObjectRef names a live object.
                             properties:
@@ -516,7 +486,6 @@ spec:
                             type: object
                           type: array
                       required:
-                      - kustomization
                       - objects
                       type: object
                     wait:

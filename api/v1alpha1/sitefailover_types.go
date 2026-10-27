@@ -171,19 +171,21 @@ type ObjectRef struct {
 type ObjectStep struct {
 	Object ObjectRef `json:"object"`
 
-	// Kustomization is the Flux Kustomization that applies the object.
-	Kustomization ObjectKey `json:"kustomization"`
+	// Kustomization is the Flux Kustomization that applied the object at
+	// plan time. Unset when the site was unreachable. The step reads the
+	// object's own labels when it runs.
+	// +optional
+	Kustomization *ObjectKey `json:"kustomization,omitempty"`
 }
 
-// ReconcileStep asks Flux to reconcile a Kustomization and waits until
-// Flux has handled the request.
+// ReconcileStep asks Flux to reconcile and waits until Flux has handled
+// the request. The Kustomizations' GitRepository is reconciled first.
 type ReconcileStep struct {
-	// Kustomization is the Flux Kustomization.
-	Kustomization ObjectKey `json:"kustomization"`
-
-	// Source is the Kustomization's GitRepository. It is reconciled first.
+	// Kustomizations are the Flux Kustomizations at the step's site. Empty
+	// means every Kustomization that applies an object this run holds at
+	// the site.
 	// +optional
-	Source *ObjectKey `json:"source,omitempty"`
+	Kustomizations []ObjectKey `json:"kustomizations,omitempty"`
 
 	// Revision, when set, is the commit Flux must have applied. It may
 	// reference a captured value as $(name).
@@ -281,17 +283,14 @@ type GitChange struct {
 	Value *string `json:"value,omitempty"`
 }
 
-// VerifyStep checks objects against Git.
+// VerifyStep checks the held objects at the step's site against Git.
 type VerifyStep struct {
-	// Objects are the held objects at the step's site.
+	// Objects are the objects to check.
 	Objects []ObjectRef `json:"objects"`
 
-	// Fields are the fields this run changed, per object, as paths.
+	// Fields are the fields this run changed.
 	// +optional
 	Fields []ObjectField `json:"fields,omitempty"`
-
-	// Kustomization applies the objects.
-	Kustomization ObjectKey `json:"kustomization"`
 }
 
 // ObjectField is one field of one object.
