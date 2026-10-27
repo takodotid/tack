@@ -50,7 +50,7 @@ Two sites, each a single-node kind cluster deployed by Flux from one local Git r
 | Endpoint | Where |
 |---|---|
 | Kubernetes API | `.e2e/kubeconfig`, bound to 127.0.0.1. |
-| Git | `TACK_E2E_GIT_URL` in `.e2e/env`. Docker picks a free port on 127.0.0.1 when the container starts. |
+| Git | `TACK_E2E_GIT_URL` in `.e2e/env`: port 28180 on 127.0.0.1, or `TACK_E2E_GIT_PORT`. The port is fixed because a run records the Git URL in its ledger and the e2e restarts the server; it is below the kernel's ephemeral range, so an outgoing connection cannot hold it. |
 | Git from pods | `http://tack-e2e-git:8080/gitops.git` |
 
 ## Work dir
