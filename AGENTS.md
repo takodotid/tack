@@ -124,7 +124,7 @@ Commit and push only when the operator asks.
 
 ## Current state
 
-- Started on 2026-10-27. RFC0001 to RFC0009 are Draft. v1 is on branch `v1`.
+- Started on 2026-10-27. RFC0001 to RFC0009 are Draft.
 - Tack reads Strait's `SiteService` status from Strait's Draft API ([RFC#0008](rfcs/RFC0008.md)). The e2e runs Strait built from the commit pinned in `test/e2e/env/lib.sh`.
 
 | Command | Does |
