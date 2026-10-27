@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"github.com/spf13/cobra"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/yaml"
 
 	"github.com/takodotid/tack/api/v1alpha1"

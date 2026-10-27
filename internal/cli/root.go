@@ -84,9 +84,9 @@ Exit codes:
 
 // Hooks that tests replace.
 var (
-	nowFunc               = time.Now
-	stdin       io.Reader = os.Stdin
-	isTerminal            = stdinIsTerminal
+	nowFunc              = time.Now
+	stdin      io.Reader = os.Stdin
+	isTerminal           = stdinIsTerminal
 )
 
 // NewRoot returns the tack command.

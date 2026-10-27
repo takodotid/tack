@@ -117,12 +117,14 @@ type Flux struct {
 }
 
 // NewFlux returns a fake Flux at a revision.
-func NewFlux(rev string) *Flux { return &Flux{Revision: rev, Held: map[string]string{}, Fail: map[string]error{}} }
+func NewFlux(rev string) *Flux {
+	return &Flux{Revision: rev, Held: map[string]string{}, Fail: map[string]error{}}
+}
 
 func (f *Flux) call(name string, a ...any) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.Calls = append(f.Calls, fmt.Sprintf(name+" "+fmt.Sprint(a...)))
+	f.Calls = append(f.Calls, name+" "+fmt.Sprint(a...))
 	return f.Fail[name]
 }
 
