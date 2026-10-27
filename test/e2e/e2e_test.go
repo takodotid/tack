@@ -520,3 +520,91 @@ func TestRebuildAndSwitchBack(t *testing.T) {
 		t.Errorf("site b lacks a write made at site a during the site loss: %q", got)
 	}
 }
+
+// TestRoutingFromStrait runs a switch with the routing check on, against
+// Strait's real SiteService CRD. The test plays Strait: it moves the route
+// once the run waits for it.
+func TestRoutingFromStrait(t *testing.T) {
+	for _, s := range []string{"a", "b"} {
+		kubectl(t, s, "apply", "--server-side", "-f", filepath.Join(repo, "test/e2e/fixtures/strait/siteservices.yaml"))
+		kubectl(t, s, "wait", "--for=condition=Established", "crd/siteservices.strait.tako.id", "--timeout=60s")
+		kubectl(t, s, "apply", "-f", filepath.Join(repo, "test/e2e/fixtures/strait/siteservice.yaml"))
+		setRoute(t, s, "pg-b")
+	}
+	b, err := os.ReadFile(workload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	routed := filepath.Join(work, "workload-strait.yaml")
+	w := strings.Replace(string(b), "  timeouts:", `  routing:
+    strait:
+      services:
+      - {site: a, namespace: db, name: postgres}
+      - {site: b, namespace: db, name: postgres}
+      members:
+      - {site: a, member: pg-a}
+      - {site: b, member: pg-b}
+  timeouts:`, 1)
+	w = strings.Replace(w, "flux: 4m}", "flux: 4m, routing: 5m}", 1)
+	if err := os.WriteFile(routed, []byte(w), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	type result struct {
+		out  string
+		code int
+	}
+	done := make(chan result, 1)
+	go func() {
+		cmd := exec.Command(tackBin, "--kubeconfig", kubeconfig, "run", "-f", routed, "--to", "a", "--yes")
+		var out bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &out, &out
+		err := cmd.Run()
+		code := 0
+		if ee, ok := err.(*exec.ExitError); ok {
+			code = ee.ExitCode()
+		}
+		done <- result{out.String(), code}
+	}()
+
+	// The run must wait at the routing step until Strait routes to pg-a.
+	eventually(t, 8*time.Minute, "the run waits for Strait", func() string {
+		select {
+		case r := <-done:
+			t.Fatalf("the run ended before Strait routed to the new primary: exit %d\n%s", r.code, r.out)
+		default:
+		}
+		sf := latestRun(t, "a")
+		if stepState(sf, "routing-a") != "Running" {
+			return "routing-a is " + stepState(sf, "routing-a")
+		}
+		return ""
+	})
+	for _, s := range []string{"a", "b"} {
+		setRoute(t, s, "pg-a")
+	}
+	select {
+	case r := <-done:
+		t.Logf("tack run (exit %d)\n%s", r.code, r.out)
+		if r.code != 0 {
+			t.Fatalf("run exit %d", r.code)
+		}
+	case <-time.After(5 * time.Minute):
+		t.Fatal("the run did not end after Strait routed to the new primary")
+	}
+	assertPrimary(t, "a", "b")
+	sf := latestRun(t, "a")
+	for _, id := range []string{"routing-a", "routing-b"} {
+		if got := stepState(sf, id); got != "Succeeded" {
+			t.Errorf("%s is %s", id, got)
+		}
+	}
+}
+
+// setRoute writes a SiteService status as Strait would.
+func setRoute(t *testing.T, site, member string) {
+	t.Helper()
+	gen := jsonpath(t, site, "siteservice", "postgres", "{.metadata.generation}")
+	patch := fmt.Sprintf(`{"status":{"observedGeneration":%s,"route":{"members":[%q],"reason":"Active","message":"set by the e2e test"}}}`, gen, member)
+	kubectl(t, site, "-n", ns, "patch", "siteservice", "postgres", "--subresource=status", "--type=merge", "-p", patch)
+}
