@@ -104,7 +104,7 @@ Tack also needs:
 
 ## Upgrading from v0.1.x
 
-1. At every site, upgrade the CRD with the same `helm upgrade --install` as above, or `kubectl apply --server-side`. Do this before running tack v1.0.0 against the site: tack v1.0.0 reads ledgers as `v1`, and against a site still on the v0.1.x CRD it stops and says to upgrade the CRD.
+1. At every site, upgrade the CRD the way it was installed: the `helm upgrade --install` above, or `kubectl apply --server-side` of the new CRD. Do this before running tack v1.0.0 against the site: tack v1.0.0 reads ledgers as `v1`, and against a site still on the v0.1.x CRD it stops and says to upgrade the CRD.
 2. Install tack v1.0.0.
 3. In each Workload file, set `apiVersion: failover.tako.id/v1`. Nothing else changes. Tack still reads `failover.tako.id/v1alpha1`, with a warning.
 
