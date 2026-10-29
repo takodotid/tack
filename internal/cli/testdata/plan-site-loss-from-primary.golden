@@ -1,1 +1,1 @@
-tack: site a answers as primary (Cluster db/pg-a: phase "Cluster in healthy state", declares pg-a primary, pod pg-a-1, timeline 1; Pooler pg-a-rw has 2 instances): use a planned switchover, or stop it first
+tack: site a answers as primary (Cluster db/pg-a: phase "Cluster in healthy state", declares pg-a primary, pod pg-a-1, timeline 1; Pooler pg-a-pooler-rw has 2 instances): use a planned switchover, or stop it first
