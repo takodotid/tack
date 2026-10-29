@@ -27,7 +27,7 @@ var GVKs = []schema.GroupVersionKind{
 	{Group: "postgresql.cnpg.io", Version: "v1", Kind: "Pooler"},
 	{Group: "kustomize.toolkit.fluxcd.io", Version: "v1", Kind: "Kustomization"},
 	{Group: "source.toolkit.fluxcd.io", Version: "v1", Kind: "GitRepository"},
-	{Group: "strait.tako.id", Version: "v1alpha1", Kind: "SiteService"},
+	{Group: "strait.tako.id", Version: "v1", Kind: "SiteService"},
 	{Group: "apps", Version: "v1", Kind: "Deployment"},
 	{Group: "failover.tako.id", Version: "v1", Kind: "SiteFailover"},
 }

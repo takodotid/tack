@@ -55,7 +55,7 @@ The ledger is a `SiteFailover` object at the new primary's site, in the namespac
 |---|---|
 | Workload | CloudNativePG in the distributed topology: one `Cluster` per site, the primary named by `.spec.replica.primary`, and an optional read-write `Pooler` per site. Driver `cnpg`. |
 | GitOps | Flux kustomize-controller with a `GitRepository` source, one Git repository for all sites. |
-| Routing check | Optional. Reads the `SiteService` status of [Strait](https://github.com/takodotid/strait), which routes clients to the primary. |
+| Routing check | Optional. Reads the `SiteService` status of [Strait](https://github.com/takodotid/strait) v1.0.0 or later, which routes clients to the primary. |
 | Platforms | Linux and macOS, amd64 and arm64. |
 | Tested with | CloudNativePG v1.30.1, Flux v2.10.0 and Kubernetes v1.37, in the end-to-end test. |
 
