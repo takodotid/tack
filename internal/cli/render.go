@@ -7,7 +7,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/takodotid/tack/api/v1alpha1"
+	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/engine"
 )
 
@@ -56,13 +56,13 @@ func printPlan(w io.Writer, p *engine.Plan) {
 }
 
 // printSteps writes the steps by phase, with their state when withState.
-func printSteps(w io.Writer, sf *v1alpha1.SiteFailover, withState bool) {
-	state := map[string]v1alpha1.StepStatus{}
+func printSteps(w io.Writer, sf *failoverv1.SiteFailover, withState bool) {
+	state := map[string]failoverv1.StepStatus{}
 	for _, st := range sf.Status.Steps {
 		state[st.ID] = st
 	}
 	n := 0
-	for _, phase := range v1alpha1.Phases {
+	for _, phase := range failoverv1.Phases {
 		header := false
 		for _, s := range sf.Spec.Steps {
 			if s.Phase != phase {
@@ -101,18 +101,18 @@ func printSteps(w io.Writer, sf *v1alpha1.SiteFailover, withState bool) {
 }
 
 // stepDetail lists exactly what a step changes or waits for.
-func stepDetail(s *v1alpha1.Step, run string) []string {
+func stepDetail(s *failoverv1.Step, run string) []string {
 	switch s.Type {
-	case v1alpha1.StepHold:
+	case failoverv1.StepHold:
 		return []string{
 			fmt.Sprintf("annotate %s: %s=disabled, %s=%s", ref(s.Hold.Object), annReconcile, annHeldBy, run),
 			"applied by " + kustomization(s.Hold.Kustomization),
 		}
-	case v1alpha1.StepRelease:
+	case failoverv1.StepRelease:
 		return []string{
 			fmt.Sprintf("remove from %s: %s, %s", ref(s.Release.Object), annReconcile, annHeldBy),
 		}
-	case v1alpha1.StepReconcile:
+	case failoverv1.StepReconcile:
 		var ks []string
 		for _, k := range s.Reconcile.Kustomizations {
 			ks = append(ks, k.Namespace+"/"+k.Name)
@@ -127,18 +127,18 @@ func stepDetail(s *v1alpha1.Step, run string) []string {
 			out = append(out, "until Flux has applied "+s.Reconcile.Revision)
 		}
 		return out
-	case v1alpha1.StepPatch:
+	case failoverv1.StepPatch:
 		return []string{fmt.Sprintf("patch %s (merge): %s", ref(s.Patch.Object), s.Patch.Merge)}
-	case v1alpha1.StepWait:
+	case failoverv1.StepWait:
 		var out []string
 		out = append(out, fmt.Sprintf("wait up to %s on %s until:", s.Wait.Timeout.Duration, ref(s.Wait.Object)))
 		for _, c := range s.Wait.Conditions {
 			out = append(out, "  "+condition(c))
 		}
 		return out
-	case v1alpha1.StepCapture:
+	case failoverv1.StepCapture:
 		return []string{fmt.Sprintf("record %s of %s in the ledger as $(%s)", s.Capture.JSONPath, ref(s.Capture.Object), s.Capture.Into)}
-	case v1alpha1.StepGit:
+	case failoverv1.StepGit:
 		var out []string
 		for _, c := range s.Git.Changes {
 			loc := c.File
@@ -160,11 +160,11 @@ func stepDetail(s *v1alpha1.Step, run string) []string {
 		}
 		out = append(out, "commit message: "+firstLine(s.Git.Message))
 		return out
-	case v1alpha1.StepVerifyGit:
+	case failoverv1.StepVerifyGit:
 		return []string{fmt.Sprintf("render the run's commit as Flux would and diff it against %d live objects; stop if they differ", len(s.VerifyGit.Objects))}
-	case v1alpha1.StepVerifyNoop:
+	case failoverv1.StepVerifyNoop:
 		return []string{fmt.Sprintf("check that the generation of %d released objects did not change", len(s.VerifyNoop.Objects))}
-	case v1alpha1.StepRouting:
+	case failoverv1.StepRouting:
 		return []string{fmt.Sprintf("read SiteService %s/%s until status.route.members is [%s] with reason Active; wait up to %s",
 			s.Routing.Service.Namespace, s.Routing.Service.Name, s.Routing.Expected, s.Routing.Timeout.Duration)}
 	}
@@ -172,7 +172,7 @@ func stepDetail(s *v1alpha1.Step, run string) []string {
 }
 
 // printStatus writes a ledger.
-func printStatus(w io.Writer, sf *v1alpha1.SiteFailover) {
+func printStatus(w io.Writer, sf *failoverv1.SiteFailover) {
 	st := sf.Status
 	fmt.Fprintf(w, "Run %s/%s: workload %s, %s, site %s to site %s\n", sf.Namespace, sf.Name, sf.Spec.Workload.Name, sf.Spec.Mode, sf.Spec.From, sf.Spec.To)
 	fmt.Fprintf(w, "State: %s", orPendingRun(st.State))
@@ -238,19 +238,19 @@ func printRuns(w io.Writer, runs []foundRun) {
 	tw.Flush()
 }
 
-func condition(c v1alpha1.Condition) string {
+func condition(c failoverv1.Condition) string {
 	switch c.Operator {
-	case v1alpha1.OpNotEmpty:
+	case failoverv1.OpNotEmpty:
 		return c.JSONPath + " is not empty"
-	case v1alpha1.OpEmpty:
+	case failoverv1.OpEmpty:
 		return c.JSONPath + " is empty"
 	}
 	return fmt.Sprintf("%s %s %q", c.JSONPath, c.Operator, c.Value)
 }
 
-func ref(o v1alpha1.ObjectRef) string { return fmt.Sprintf("%s %s/%s", o.Kind, o.Namespace, o.Name) }
+func ref(o failoverv1.ObjectRef) string { return fmt.Sprintf("%s %s/%s", o.Kind, o.Namespace, o.Name) }
 
-func kustomization(k *v1alpha1.ObjectKey) string {
+func kustomization(k *failoverv1.ObjectKey) string {
 	if k == nil {
 		return "the Flux Kustomization on the object's labels (read when the step runs)"
 	}
@@ -264,14 +264,14 @@ func orNone(s string) string {
 	return s
 }
 
-func orPending(s v1alpha1.StepState) v1alpha1.StepState {
+func orPending(s failoverv1.StepState) failoverv1.StepState {
 	if s == "" {
-		return v1alpha1.StepPending
+		return failoverv1.StepPending
 	}
 	return s
 }
 
-func orPendingRun(s v1alpha1.RunState) string {
+func orPendingRun(s failoverv1.RunState) string {
 	if s == "" {
 		return "NotStarted"
 	}

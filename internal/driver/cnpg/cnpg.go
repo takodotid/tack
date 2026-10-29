@@ -14,7 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/takodotid/tack/api/v1alpha1"
+	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/driver"
 	"github.com/takodotid/tack/internal/engine"
 	"github.com/takodotid/tack/internal/kube"
@@ -60,7 +60,7 @@ type Driver struct{}
 func (Driver) Name() string { return Name }
 
 // Validate implements driver.Driver.
-func (Driver) Validate(w *v1alpha1.WorkloadSpec) error {
+func (Driver) Validate(w *failoverv1.WorkloadSpec) error {
 	var errs []string
 	names := map[string]string{}
 	for _, s := range w.Sites {
@@ -83,22 +83,22 @@ func (Driver) Validate(w *v1alpha1.WorkloadSpec) error {
 }
 
 // ClusterRef is the site's Cluster.
-func ClusterRef(s *v1alpha1.Site) v1alpha1.ObjectRef {
-	return v1alpha1.ObjectRef{APIVersion: APIVersion, Kind: "Cluster", Namespace: s.CNPG.Cluster.Namespace, Name: s.CNPG.Cluster.Name}
+func ClusterRef(s *failoverv1.Site) failoverv1.ObjectRef {
+	return failoverv1.ObjectRef{APIVersion: APIVersion, Kind: "Cluster", Namespace: s.CNPG.Cluster.Namespace, Name: s.CNPG.Cluster.Name}
 }
 
 // PoolerRef is the site's read-write Pooler.
-func PoolerRef(s *v1alpha1.Site) v1alpha1.ObjectRef {
-	return v1alpha1.ObjectRef{APIVersion: APIVersion, Kind: "Pooler", Namespace: s.CNPG.Pooler.Namespace, Name: s.CNPG.Pooler.Name}
+func PoolerRef(s *failoverv1.Site) failoverv1.ObjectRef {
+	return failoverv1.ObjectRef{APIVersion: APIVersion, Kind: "Pooler", Namespace: s.CNPG.Pooler.Namespace, Name: s.CNPG.Pooler.Name}
 }
 
 // deploymentRef is the Deployment CloudNativePG runs for a Pooler.
-func deploymentRef(s *v1alpha1.Site) v1alpha1.ObjectRef {
-	return v1alpha1.ObjectRef{APIVersion: "apps/v1", Kind: "Deployment", Namespace: s.CNPG.Pooler.Namespace, Name: s.CNPG.Pooler.Name}
+func deploymentRef(s *failoverv1.Site) failoverv1.ObjectRef {
+	return failoverv1.ObjectRef{APIVersion: "apps/v1", Kind: "Deployment", Namespace: s.CNPG.Pooler.Namespace, Name: s.CNPG.Pooler.Name}
 }
 
-func objects(s *v1alpha1.Site) []v1alpha1.ObjectRef {
-	out := []v1alpha1.ObjectRef{ClusterRef(s)}
+func objects(s *failoverv1.Site) []failoverv1.ObjectRef {
+	out := []failoverv1.ObjectRef{ClusterRef(s)}
 	if s.CNPG.Pooler != nil {
 		out = append(out, PoolerRef(s))
 	}
@@ -106,7 +106,7 @@ func objects(s *v1alpha1.Site) []v1alpha1.ObjectRef {
 }
 
 // Discover implements driver.Driver.
-func (Driver) Discover(ctx context.Context, w *v1alpha1.WorkloadSpec, c kube.Clients) (*driver.Topology, error) {
+func (Driver) Discover(ctx context.Context, w *failoverv1.WorkloadSpec, c kube.Clients) (*driver.Topology, error) {
 	byCluster := map[string]string{}
 	for _, s := range w.Sites {
 		byCluster[s.CNPG.Cluster.Name] = s.Name
@@ -213,7 +213,7 @@ func read(st *driver.SiteState, u *unstructured.Unstructured, byCluster map[stri
 }
 
 // Plan implements driver.Driver.
-func (d Driver) Plan(w *v1alpha1.WorkloadSpec, t *driver.Topology, r driver.Request) ([]v1alpha1.Step, []v1alpha1.FollowUp, error) {
+func (d Driver) Plan(w *failoverv1.WorkloadSpec, t *driver.Topology, r driver.Request) ([]failoverv1.Step, []failoverv1.FollowUp, error) {
 	from, to, err := sites(w, r)
 	if err != nil {
 		return nil, nil, err
@@ -233,10 +233,10 @@ func (d Driver) Plan(w *v1alpha1.WorkloadSpec, t *driver.Topology, r driver.Requ
 	}
 	toName := to.CNPG.Cluster.Name
 	b := &builder{w: w, toName: toName}
-	var follow []v1alpha1.FollowUp
+	var follow []failoverv1.FollowUp
 
 	switch r.Mode {
-	case v1alpha1.ModePlanned:
+	case failoverv1.ModePlanned:
 		if fromSt == nil || !fromSt.Reachable {
 			return nil, nil, fmt.Errorf("site %s is unreachable: a planned switchover needs it", r.From)
 		}
@@ -258,27 +258,27 @@ func (d Driver) Plan(w *v1alpha1.WorkloadSpec, t *driver.Topology, r driver.Requ
 			replicaPatch(toName, nil))
 		b.wait("wait-demoted-"+from.Name, from, ClusterRef(from), "wait until Cluster "+from.CNPG.Cluster.Name+" has demoted and published its demotion token",
 			w.Timeouts.Demotion.Duration,
-			cond("{.status.demotionToken}", v1alpha1.OpNotEmpty, ""),
-			cond("{.status.switchReplicaClusterStatus.inProgress}", v1alpha1.OpNotEquals, "true"))
-		b.add(v1alpha1.Step{
-			ID: "capture-token", Type: v1alpha1.StepCapture, Site: from.Name,
+			cond("{.status.demotionToken}", failoverv1.OpNotEmpty, ""),
+			cond("{.status.switchReplicaClusterStatus.inProgress}", failoverv1.OpNotEquals, "true"))
+		b.add(failoverv1.Step{
+			ID: "capture-token", Type: failoverv1.StepCapture, Site: from.Name,
 			Description: "record the demotion token of Cluster " + from.CNPG.Cluster.Name + " in the ledger",
-			Capture:     &v1alpha1.CaptureStep{Object: ClusterRef(from), JSONPath: "{.status.demotionToken}", Into: TokenKey},
+			Capture:     &failoverv1.CaptureStep{Object: ClusterRef(from), JSONPath: "{.status.demotionToken}", Into: TokenKey},
 		})
 		token := "$(" + TokenKey + ")"
 		b.patch("promote-"+to.Name, to, ClusterRef(to), "promote Cluster "+toName+" with the demotion token, in one patch",
 			replicaPatch(toName, &token))
 		b.wait("wait-promoted-"+to.Name, to, ClusterRef(to), "wait until Cluster "+toName+" has used the token and runs a healthy primary",
 			w.Timeouts.Promotion.Duration,
-			cond("{.status.lastPromotionToken}", v1alpha1.OpEquals, token),
-			cond("{.status.instancesReportedState.*.isPrimary}", v1alpha1.OpContains, "true"),
-			cond("{.status.phase}", v1alpha1.OpEquals, PhaseHealthy))
+			cond("{.status.lastPromotionToken}", failoverv1.OpEquals, token),
+			cond("{.status.instancesReportedState.*.isPrimary}", failoverv1.OpContains, "true"),
+			cond("{.status.phase}", failoverv1.OpEquals, PhaseHealthy))
 		b.patch("clear-token-"+to.Name, to, ClusterRef(to), "remove the used token from Cluster "+toName+", so it can never apply again",
 			`{"spec":{"replica":{"promotionToken":null}}}`)
 		b.declareOthers(r)
 		b.poolers(r)
 
-	case v1alpha1.ModeSiteLoss:
+	case failoverv1.ModeSiteLoss:
 		if fromSt != nil && fromSt.Reachable && fromSt.Role == driver.RolePrimary {
 			return nil, nil, fmt.Errorf("site %s answers as primary (%s): use a planned switchover, or stop it first", r.From, fromSt.Summary)
 		}
@@ -291,13 +291,13 @@ func (d Driver) Plan(w *v1alpha1.WorkloadSpec, t *driver.Topology, r driver.Requ
 			replicaPatch(toName, nil))
 		b.wait("wait-promoted-"+to.Name, to, ClusterRef(to), "wait until Cluster "+toName+" runs a healthy primary",
 			w.Timeouts.Promotion.Duration,
-			cond("{.status.instancesReportedState.*.isPrimary}", v1alpha1.OpContains, "true"),
-			cond("{.status.phase}", v1alpha1.OpEquals, PhaseHealthy))
+			cond("{.status.instancesReportedState.*.isPrimary}", failoverv1.OpContains, "true"),
+			cond("{.status.phase}", failoverv1.OpEquals, PhaseHealthy))
 		b.declareOthers(r)
 		if to.CNPG.Pooler != nil {
 			b.scale(to, to.CNPG.Pooler.Instances)
 		}
-		follow = append(follow, v1alpha1.FollowUp{
+		follow = append(follow, failoverv1.FollowUp{
 			Site:   from.Name,
 			Action: engine.FollowUpRebuild,
 			Reason: fmt.Sprintf("Cluster %s was promoted without a token, so Cluster %s may hold writes that %s lacks and cannot follow it: recreate %s from %s (docs/runbooks/rebuild-old-primary.md)",
@@ -330,7 +330,7 @@ func checkTarget(toSt *driver.SiteState, r driver.Request) error {
 // GitChange implements driver.Driver. Git never holds a promotion token:
 // a used token that comes back after removal makes CloudNativePG refuse to
 // run the cluster.
-func (Driver) GitChange(w *v1alpha1.WorkloadSpec, _ *driver.Topology, r driver.Request) ([]driver.FieldChange, error) {
+func (Driver) GitChange(w *failoverv1.WorkloadSpec, _ *driver.Topology, r driver.Request) ([]driver.FieldChange, error) {
 	_, to, err := sites(w, r)
 	if err != nil {
 		return nil, err
@@ -356,7 +356,7 @@ func (Driver) GitChange(w *v1alpha1.WorkloadSpec, _ *driver.Topology, r driver.R
 
 // Verify implements driver.Driver: the new primary's Cluster runs a healthy
 // primary; any other site's Cluster declares it.
-func (Driver) Verify(w *v1alpha1.WorkloadSpec, r driver.Request, site string) ([]v1alpha1.Step, error) {
+func (Driver) Verify(w *failoverv1.WorkloadSpec, r driver.Request, site string) ([]failoverv1.Step, error) {
 	_, to, err := sites(w, r)
 	if err != nil {
 		return nil, err
@@ -369,36 +369,36 @@ func (Driver) Verify(w *v1alpha1.WorkloadSpec, r driver.Request, site string) ([
 	if site == r.To {
 		b.wait("verify-"+site, s, ClusterRef(s), "verify that Cluster "+s.CNPG.Cluster.Name+" is a healthy primary and declares itself",
 			w.Timeouts.Promotion.Duration,
-			cond("{.spec.replica.primary}", v1alpha1.OpEquals, to.CNPG.Cluster.Name),
-			cond("{.status.instancesReportedState.*.isPrimary}", v1alpha1.OpContains, "true"),
-			cond("{.status.phase}", v1alpha1.OpEquals, PhaseHealthy))
+			cond("{.spec.replica.primary}", failoverv1.OpEquals, to.CNPG.Cluster.Name),
+			cond("{.status.instancesReportedState.*.isPrimary}", failoverv1.OpContains, "true"),
+			cond("{.status.phase}", failoverv1.OpEquals, PhaseHealthy))
 	} else {
 		b.wait("verify-"+site, s, ClusterRef(s), "verify that Cluster "+s.CNPG.Cluster.Name+" declares "+to.CNPG.Cluster.Name+" primary",
 			w.Timeouts.Promotion.Duration,
-			cond("{.spec.replica.primary}", v1alpha1.OpEquals, to.CNPG.Cluster.Name))
+			cond("{.spec.replica.primary}", failoverv1.OpEquals, to.CNPG.Cluster.Name))
 	}
 	return b.steps, nil
 }
 
 type builder struct {
-	w      *v1alpha1.WorkloadSpec
+	w      *failoverv1.WorkloadSpec
 	toName string
-	steps  []v1alpha1.Step
+	steps  []failoverv1.Step
 }
 
-func (b *builder) add(s v1alpha1.Step) {
-	s.Phase = v1alpha1.PhaseFailover
+func (b *builder) add(s failoverv1.Step) {
+	s.Phase = failoverv1.PhaseFailover
 	b.steps = append(b.steps, s)
 }
 
-func (b *builder) patch(id string, s *v1alpha1.Site, obj v1alpha1.ObjectRef, desc, merge string) {
-	b.add(v1alpha1.Step{ID: id, Type: v1alpha1.StepPatch, Site: s.Name, Description: desc,
-		Patch: &v1alpha1.PatchStep{Object: obj, Merge: merge}})
+func (b *builder) patch(id string, s *failoverv1.Site, obj failoverv1.ObjectRef, desc, merge string) {
+	b.add(failoverv1.Step{ID: id, Type: failoverv1.StepPatch, Site: s.Name, Description: desc,
+		Patch: &failoverv1.PatchStep{Object: obj, Merge: merge}})
 }
 
-func (b *builder) wait(id string, s *v1alpha1.Site, obj v1alpha1.ObjectRef, desc string, timeout time.Duration, conds ...v1alpha1.Condition) {
-	b.add(v1alpha1.Step{ID: id, Type: v1alpha1.StepWait, Site: s.Name, Description: desc,
-		Wait: &v1alpha1.WaitStep{Object: obj, Conditions: conds, Timeout: metav1.Duration{Duration: timeout}}})
+func (b *builder) wait(id string, s *failoverv1.Site, obj failoverv1.ObjectRef, desc string, timeout time.Duration, conds ...failoverv1.Condition) {
+	b.add(failoverv1.Step{ID: id, Type: failoverv1.StepWait, Site: s.Name, Description: desc,
+		Wait: &failoverv1.WaitStep{Object: obj, Conditions: conds, Timeout: metav1.Duration{Duration: timeout}}})
 }
 
 // declareOthers makes every other site's Cluster declare the new primary.
@@ -427,16 +427,16 @@ func (b *builder) poolers(r driver.Request) {
 	}
 }
 
-func (b *builder) scale(s *v1alpha1.Site, n int32) {
+func (b *builder) scale(s *failoverv1.Site, n int32) {
 	b.patch(fmt.Sprintf("pooler-%s", s.Name), s, PoolerRef(s), fmt.Sprintf("set Pooler %s to %d instances", s.CNPG.Pooler.Name, n),
 		fmt.Sprintf(`{"spec":{"instances":%d}}`, n))
 	if n == 0 {
 		b.wait("wait-pooler-"+s.Name, s, deploymentRef(s), fmt.Sprintf("wait until the Pooler %s runs no pod", s.CNPG.Pooler.Name),
-			b.w.Timeouts.Promotion.Duration, cond("{.status.replicas}", v1alpha1.OpEmpty, ""))
+			b.w.Timeouts.Promotion.Duration, cond("{.status.replicas}", failoverv1.OpEmpty, ""))
 		return
 	}
 	b.wait("wait-pooler-"+s.Name, s, deploymentRef(s), fmt.Sprintf("wait until the Pooler %s has %d ready pods", s.CNPG.Pooler.Name, n),
-		b.w.Timeouts.Promotion.Duration, cond("{.status.readyReplicas}", v1alpha1.OpEquals, fmt.Sprint(n)))
+		b.w.Timeouts.Promotion.Duration, cond("{.status.readyReplicas}", failoverv1.OpEquals, fmt.Sprint(n)))
 }
 
 func replicaPatch(primary string, token *string) string {
@@ -447,11 +447,11 @@ func replicaPatch(primary string, token *string) string {
 	return fmt.Sprintf(`{"spec":{"replica":{"primary":%s,"promotionToken":%s}}}`, jsonString(primary), tok)
 }
 
-func cond(path string, op v1alpha1.Operator, value string) v1alpha1.Condition {
-	return v1alpha1.Condition{JSONPath: path, Operator: op, Value: value}
+func cond(path string, op failoverv1.Operator, value string) failoverv1.Condition {
+	return failoverv1.Condition{JSONPath: path, Operator: op, Value: value}
 }
 
-func sites(w *v1alpha1.WorkloadSpec, r driver.Request) (from, to *v1alpha1.Site, err error) {
+func sites(w *failoverv1.WorkloadSpec, r driver.Request) (from, to *failoverv1.Site, err error) {
 	from, to = siteByName(w, r.From), siteByName(w, r.To)
 	if from == nil || to == nil {
 		return nil, nil, fmt.Errorf("sites %q and %q must both be in the workload", r.From, r.To)
@@ -459,7 +459,7 @@ func sites(w *v1alpha1.WorkloadSpec, r driver.Request) (from, to *v1alpha1.Site,
 	return from, to, nil
 }
 
-func siteByName(w *v1alpha1.WorkloadSpec, name string) *v1alpha1.Site {
+func siteByName(w *failoverv1.WorkloadSpec, name string) *failoverv1.Site {
 	for i := range w.Sites {
 		if w.Sites[i].Name == name {
 			return &w.Sites[i]

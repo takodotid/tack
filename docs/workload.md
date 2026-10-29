@@ -7,7 +7,7 @@ A Workload file describes one workload: its sites, the Git repository Flux appli
 Two sites, `a` and `b`, each running one CloudNativePG `Cluster` and one read-write `Pooler` in namespace `db`. Site a is the primary.
 
 ```yaml
-apiVersion: failover.tako.id/v1alpha1
+apiVersion: failover.tako.id/v1
 kind: Workload
 metadata:
   name: pg-main
@@ -85,7 +85,7 @@ Required fields have no default. Durations are Go durations, such as `90s`, `15m
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
-| `apiVersion` | yes | | `failover.tako.id/v1alpha1` |
+| `apiVersion` | yes | | `failover.tako.id/v1`. Tack still reads `failover.tako.id/v1alpha1`, the version of v0.1.x, with a warning. |
 | `kind` | yes | | `Workload` |
 | `metadata.name` | yes | | The workload's name. A run is named `<name>-<UTC yyyymmdd-hhmmss>` and labelled `failover.tako.id/workload: <name>`, and the operator types the name to confirm a run. Use lowercase letters, digits and `-`. |
 | `spec.driver` | yes | | The built-in driver that knows the workload's API. Only `cnpg`. |

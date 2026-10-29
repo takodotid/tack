@@ -49,7 +49,7 @@ The ledger is a `SiteFailover` object at the new primary's site, in the namespac
 | AI agents | `tack --help` and `tack --skill` tell agents never to start `tack run` or `tack resume` without a human's explicit instruction for that run, and to run `tack plan` first. |
 | No secrets | Git access comes from the operator's own `git` configuration. The ledger holds no secret, and `tack status` prints captured values by name only. |
 
-## What v0.1 supports
+## What v1 supports
 
 | Area | Support |
 |---|---|
@@ -61,14 +61,14 @@ The ledger is a `SiteFailover` object at the new primary's site, in the namespac
 
 ## Status
 
-The latest release is v0.1.1. The API is `failover.tako.id/v1alpha1`, for both the `SiteFailover` ledger and the Workload file. It may change in later releases; a change that would break a user comes as a new API version.
+The latest release is v1.0.0. The API is `failover.tako.id/v1`, for both the `SiteFailover` ledger and the Workload file. A change that would break a user comes as a new API version. `failover.tako.id/v1alpha1`, the API of v0.1.x, is deprecated and still served: see [Upgrading from v0.1.x](#upgrading-from-v01x).
 
 ## Install
 
 Each release on the [releases page](https://github.com/takodotid/tack/releases) has an archive per platform, `SHA256SUMS`, the CRD, and a Helm chart of the CRD. Each archive holds `tack`, its man pages and the CRD. The chart is also published at `oci://ghcr.io/takodotid/charts/tack`.
 
 ```sh
-VERSION=v0.1.1
+VERSION=v1.0.0
 OS=linux      # or darwin
 ARCH=amd64    # or arm64
 NAME=tack-$VERSION-$OS-$ARCH
@@ -101,6 +101,19 @@ Tack also needs:
 | A kube context per site | All in one kubeconfig (`--kubeconfig`, or the standard loading rules). To combine one file per cluster, see [docs/workload.md](docs/workload.md#every-sites-context-in-one-kubeconfig). The permissions are listed in [docs/operations.md](docs/operations.md#permissions). |
 | Git access | Through the operator's `git` configuration, such as an SSH agent or a credential helper. Tack runs `git` with `GIT_TERMINAL_PROMPT=0` and stores no credential. The branch must accept a push from those credentials. |
 | A Workload file | The sites, their contexts, the Git repository and where each field lives in it: [docs/workload.md](docs/workload.md). |
+
+## Upgrading from v0.1.x
+
+1. At every site, upgrade the CRD with the same `helm upgrade --install` as above, or `kubectl apply --server-side`. Do this before running tack v1.0.0 against the site: tack v1.0.0 reads ledgers as `v1`, and against a site still on the v0.1.x CRD it stops and says to upgrade the CRD.
+2. Install tack v1.0.0.
+3. In each Workload file, set `apiVersion: failover.tako.id/v1`. Nothing else changes. Tack still reads `failover.tako.id/v1alpha1`, with a warning.
+
+| After the upgrade | Behaviour |
+|---|---|
+| Ledgers written by v0.1.x | `tack status` reads them and `tack resume` continues them. The API server serves them as `v1` and stores each as `v1` the next time it is written. |
+| tack v0.1.x | Still reads and writes ledgers, through `v1alpha1`, until every operator has upgraded. |
+| `kubectl` | Warns on each `v1alpha1` request. Until its discovery cache refreshes, `kubectl get sfo` may still ask for `v1alpha1`. |
+| Downgrading the CRD to v0.1.x | Refused by the API server: `v1` is now in the CRD's `status.storedVersions`. |
 
 ## Walkthrough
 

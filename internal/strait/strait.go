@@ -12,7 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/takodotid/tack/api/v1alpha1"
+	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/kube"
 )
 
@@ -38,7 +38,7 @@ type Reader struct {
 func New(c kube.Clients) *Reader { return &Reader{Clients: c, Poll: 2 * time.Second, Now: time.Now} }
 
 // Wait waits until the SiteService routes to the expected member only.
-func (r *Reader) Wait(ctx context.Context, site string, s *v1alpha1.RoutingStep) (string, error) {
+func (r *Reader) Wait(ctx context.Context, site string, s *failoverv1.RoutingStep) (string, error) {
 	c, err := r.Clients.Client(site)
 	if err != nil {
 		return "", err

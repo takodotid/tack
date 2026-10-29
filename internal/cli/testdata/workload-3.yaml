@@ -1,4 +1,4 @@
-apiVersion: failover.tako.id/v1alpha1
+apiVersion: failover.tako.id/v1
 kind: Workload
 metadata:
   name: pg-main

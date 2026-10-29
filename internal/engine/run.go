@@ -10,7 +10,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/takodotid/tack/api/v1alpha1"
+	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/driver"
 	"github.com/takodotid/tack/internal/fault"
 	"github.com/takodotid/tack/internal/stop"
@@ -35,13 +35,13 @@ var ErrStopped = errors.New("run stopped")
 var ErrWaiting = errors.New("run waiting")
 
 // Start creates the ledger and runs the plan.
-func (e *Env) Start(ctx context.Context, sf *v1alpha1.SiteFailover, opts Options) error {
+func (e *Env) Start(ctx context.Context, sf *failoverv1.SiteFailover, opts Options) error {
 	now := metav1.NewTime(e.now())
-	sf.Status.State = v1alpha1.RunRunning
+	sf.Status.State = failoverv1.RunRunning
 	sf.Status.StartedAt = &now
 	sf.Status.Steps = nil
 	for _, s := range sf.Spec.Steps {
-		sf.Status.Steps = append(sf.Status.Steps, v1alpha1.StepStatus{ID: s.ID, State: v1alpha1.StepPending})
+		sf.Status.Steps = append(sf.Status.Steps, failoverv1.StepStatus{ID: s.ID, State: failoverv1.StepPending})
 	}
 	status := sf.Status.DeepCopy()
 	if err := e.Ledger.Create(ctx, sf); err != nil {
@@ -57,15 +57,15 @@ func (e *Env) Start(ctx context.Context, sf *v1alpha1.SiteFailover, opts Options
 }
 
 // Resume runs the remaining steps of a ledger.
-func (e *Env) Resume(ctx context.Context, sf *v1alpha1.SiteFailover, opts Options) error {
-	if sf.Status.State == v1alpha1.RunSucceeded && !hasRunnableDeferred(sf) {
+func (e *Env) Resume(ctx context.Context, sf *failoverv1.SiteFailover, opts Options) error {
+	if sf.Status.State == failoverv1.RunSucceeded && !hasRunnableDeferred(sf) {
 		e.printf("run %s already succeeded\n", sf.Name)
 		return nil
 	}
 	if opts.AcceptGitHead != "" {
 		sf.Status.Git.AcceptedRevision = opts.AcceptGitHead
 	}
-	sf.Status.State, sf.Status.Reason, sf.Status.Message = v1alpha1.RunRunning, "", ""
+	sf.Status.State, sf.Status.Reason, sf.Status.Message = failoverv1.RunRunning, "", ""
 	if err := e.write(ctx, sf); err != nil {
 		return err
 	}
@@ -75,7 +75,7 @@ func (e *Env) Resume(ctx context.Context, sf *v1alpha1.SiteFailover, opts Option
 
 type runner struct {
 	*Env
-	sf        *v1alpha1.SiteFailover
+	sf        *failoverv1.SiteFailover
 	opts      Options
 	reachable map[string]error
 	gated     map[string]bool
@@ -85,16 +85,16 @@ func (r *runner) run(ctx context.Context) error {
 	for i := range r.sf.Spec.Steps {
 		step := &r.sf.Spec.Steps[i]
 		st := r.stepStatus(step.ID)
-		if st.State == v1alpha1.StepSucceeded {
+		if st.State == failoverv1.StepSucceeded {
 			continue
 		}
 		if step.Site != "" {
 			if err := r.siteReachable(ctx, step.Site); err != nil {
 				if !step.Deferrable {
-					return r.end(ctx, step, stop.Ask(v1alpha1.ReasonStepFailed, "site %s is unreachable: %v", step.Site, err))
+					return r.end(ctx, step, stop.Ask(failoverv1.ReasonStepFailed, "site %s is unreachable: %v", step.Site, err))
 				}
-				if st.State != v1alpha1.StepDeferred {
-					st.State, st.Message = v1alpha1.StepDeferred, fmt.Sprintf("site %s unreachable", step.Site)
+				if st.State != failoverv1.StepDeferred {
+					st.State, st.Message = failoverv1.StepDeferred, fmt.Sprintf("site %s unreachable", step.Site)
 					if err := r.write(ctx, r.sf); err != nil {
 						return err
 					}
@@ -102,7 +102,7 @@ func (r *runner) run(ctx context.Context) error {
 				}
 				continue
 			}
-			if st.State == v1alpha1.StepDeferred {
+			if st.State == failoverv1.StepDeferred {
 				if err := r.gate(ctx, step.Site); err != nil {
 					return r.end(ctx, step, err)
 				}
@@ -130,7 +130,7 @@ func (r *runner) gate(ctx context.Context, site string) error {
 		return fmt.Errorf("site %s is not in the topology", site)
 	}
 	if s.Role == driver.RolePrimary && site != r.sf.Spec.To && !slices.Contains(r.opts.Fence, site) {
-		return stop.Ask(v1alpha1.ReasonFencedSiteIsPrimary,
+		return stop.Ask(failoverv1.ReasonFencedSiteIsPrimary,
 			"site %s came back and answers as primary (%s); it should be fenced. Check it, then resume with --fence %s", site, s.Summary, site)
 	}
 	r.gated[site] = true
@@ -139,11 +139,11 @@ func (r *runner) gate(ctx context.Context, site string) error {
 
 // runStep runs one step. Every ledger write replaces the status, so the
 // step's status is looked up again after each write.
-func (r *runner) runStep(ctx context.Context, step *v1alpha1.Step) error {
+func (r *runner) runStep(ctx context.Context, step *failoverv1.Step) error {
 	now := metav1.NewTime(r.now())
 	r.startPhase(step.Phase, now)
 	st := r.stepStatus(step.ID)
-	st.State = v1alpha1.StepRunning
+	st.State = failoverv1.StepRunning
 	st.StartedAt = &now
 	st.FinishedAt = nil
 	st.Attempts++
@@ -160,7 +160,7 @@ func (r *runner) runStep(ctx context.Context, step *v1alpha1.Step) error {
 	}
 	done := metav1.NewTime(r.now())
 	st = r.stepStatus(step.ID)
-	st.State, st.FinishedAt, st.Message = v1alpha1.StepSucceeded, &done, msg
+	st.State, st.FinishedAt, st.Message = failoverv1.StepSucceeded, &done, msg
 	r.endPhase(step.Phase, done)
 	if err := r.write(ctx, r.sf); err != nil {
 		return err
@@ -174,21 +174,21 @@ func (r *runner) runStep(ctx context.Context, step *v1alpha1.Step) error {
 }
 
 // end records why the run cannot go on.
-func (r *runner) end(ctx context.Context, step *v1alpha1.Step, err error) error {
+func (r *runner) end(ctx context.Context, step *failoverv1.Step, err error) error {
 	se, ok := stop.As(err)
 	if !ok {
-		se = &stop.Error{Reason: v1alpha1.ReasonStepFailed, Message: err.Error()}
+		se = &stop.Error{Reason: failoverv1.ReasonStepFailed, Message: err.Error()}
 	}
 	st := r.stepStatus(step.ID)
 	st.Message = se.Message
 	ret := ErrStopped
 	if se.Wait {
-		st.State = v1alpha1.StepPending
-		r.sf.Status.State = v1alpha1.RunWaiting
+		st.State = failoverv1.StepPending
+		r.sf.Status.State = failoverv1.RunWaiting
 		ret = ErrWaiting
 	} else {
-		st.State = v1alpha1.StepFailed
-		r.sf.Status.State = v1alpha1.RunStopped
+		st.State = failoverv1.StepFailed
+		r.sf.Status.State = failoverv1.RunStopped
 	}
 	r.sf.Status.Reason = se.Reason
 	r.sf.Status.Message = fmt.Sprintf("step %s: %s", step.ID, se.Message)
@@ -202,12 +202,12 @@ func (r *runner) end(ctx context.Context, step *v1alpha1.Step, err error) error 
 func (r *runner) finish(ctx context.Context) error {
 	deferred := 0
 	for _, st := range r.sf.Status.Steps {
-		if st.State == v1alpha1.StepDeferred {
+		if st.State == failoverv1.StepDeferred {
 			deferred++
 		}
 	}
 	now := metav1.NewTime(r.now())
-	r.sf.Status.State = v1alpha1.RunSucceeded
+	r.sf.Status.State = failoverv1.RunSucceeded
 	r.sf.Status.Reason = ""
 	r.sf.Status.Message = "every step ran"
 	if deferred > 0 {
@@ -232,34 +232,34 @@ func (r *runner) siteReachable(ctx context.Context, site string) error {
 	return err
 }
 
-func (r *runner) stepStatus(id string) *v1alpha1.StepStatus {
+func (r *runner) stepStatus(id string) *failoverv1.StepStatus {
 	for i := range r.sf.Status.Steps {
 		if r.sf.Status.Steps[i].ID == id {
 			return &r.sf.Status.Steps[i]
 		}
 	}
-	r.sf.Status.Steps = append(r.sf.Status.Steps, v1alpha1.StepStatus{ID: id, State: v1alpha1.StepPending})
+	r.sf.Status.Steps = append(r.sf.Status.Steps, failoverv1.StepStatus{ID: id, State: failoverv1.StepPending})
 	return &r.sf.Status.Steps[len(r.sf.Status.Steps)-1]
 }
 
-func (r *runner) startPhase(p v1alpha1.Phase, now metav1.Time) {
+func (r *runner) startPhase(p failoverv1.Phase, now metav1.Time) {
 	r.sf.Status.Phase = p
 	for i := range r.sf.Status.Phases {
 		if r.sf.Status.Phases[i].Name == p {
 			return
 		}
 	}
-	r.sf.Status.Phases = append(r.sf.Status.Phases, v1alpha1.PhaseStatus{Name: p, StartedAt: &now})
+	r.sf.Status.Phases = append(r.sf.Status.Phases, failoverv1.PhaseStatus{Name: p, StartedAt: &now})
 }
 
 // endPhase records a phase's end once its last step that can run has run.
-func (r *runner) endPhase(p v1alpha1.Phase, now metav1.Time) {
+func (r *runner) endPhase(p failoverv1.Phase, now metav1.Time) {
 	for _, s := range r.sf.Spec.Steps {
 		if s.Phase != p {
 			continue
 		}
 		st := r.stepStatus(s.ID)
-		if st.State != v1alpha1.StepSucceeded && st.State != v1alpha1.StepDeferred {
+		if st.State != failoverv1.StepSucceeded && st.State != failoverv1.StepDeferred {
 			return
 		}
 	}
@@ -272,7 +272,7 @@ func (r *runner) endPhase(p v1alpha1.Phase, now metav1.Time) {
 
 // write records the status. It outlives a cancelled run, so an interrupt
 // is still recorded.
-func (e *Env) write(ctx context.Context, sf *v1alpha1.SiteFailover) error {
+func (e *Env) write(ctx context.Context, sf *failoverv1.SiteFailover) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	if err := e.Ledger.UpdateStatus(ctx, sf); err != nil {
@@ -287,9 +287,9 @@ func (e *Env) printf(format string, a ...any) {
 	}
 }
 
-func hasRunnableDeferred(sf *v1alpha1.SiteFailover) bool {
+func hasRunnableDeferred(sf *failoverv1.SiteFailover) bool {
 	for _, st := range sf.Status.Steps {
-		if st.State == v1alpha1.StepDeferred {
+		if st.State == failoverv1.StepDeferred {
 			return true
 		}
 	}

@@ -32,6 +32,7 @@ dist: tools-go
 generate: tools-go
 	$(GO) tool controller-gen object:headerFile=hack/boilerplate.go.txt paths=./api/...
 	$(GO) tool controller-gen crd paths=./api/... output:crd:artifacts:config=config/crd
+	$(GO) run ./hack/crdversions config/crd/failover.tako.id_sitefailovers.yaml
 	rm -rf deploy/helm/tack/files/crds && mkdir -p deploy/helm/tack/files/crds && cp config/crd/*.yaml deploy/helm/tack/files/crds/
 
 ## verify: generated files are current, code is formatted and vetted

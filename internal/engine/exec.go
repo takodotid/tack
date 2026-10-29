@@ -17,34 +17,34 @@ import (
 	"k8s.io/client-go/util/jsonpath"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/takodotid/tack/api/v1alpha1"
+	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/stop"
 )
 
 // FieldManager is the field manager of Tack's changes to live objects.
 const FieldManager = "tack"
 
-func (r *runner) exec(ctx context.Context, s *v1alpha1.Step) (string, error) {
+func (r *runner) exec(ctx context.Context, s *failoverv1.Step) (string, error) {
 	switch s.Type {
-	case v1alpha1.StepHold:
+	case failoverv1.StepHold:
 		return r.hold(ctx, s)
-	case v1alpha1.StepReconcile:
+	case failoverv1.StepReconcile:
 		return r.reconcile(ctx, s)
-	case v1alpha1.StepPatch:
+	case failoverv1.StepPatch:
 		return r.patch(ctx, s)
-	case v1alpha1.StepWait:
+	case failoverv1.StepWait:
 		return r.wait(ctx, s)
-	case v1alpha1.StepCapture:
+	case failoverv1.StepCapture:
 		return r.capture(ctx, s)
-	case v1alpha1.StepGit:
+	case failoverv1.StepGit:
 		return r.git(ctx, s)
-	case v1alpha1.StepVerifyGit:
+	case failoverv1.StepVerifyGit:
 		return r.verifyGit(ctx, s)
-	case v1alpha1.StepRelease:
+	case failoverv1.StepRelease:
 		return r.release(ctx, s)
-	case v1alpha1.StepVerifyNoop:
+	case failoverv1.StepVerifyNoop:
 		return r.Flux.VerifyNoop(ctx, s.Site, r.siteHeld(s.Site), s.VerifyNoop.Fields, r.strict())
-	case v1alpha1.StepRouting:
+	case failoverv1.StepRouting:
 		if r.Routing == nil {
 			return "", fmt.Errorf("routing is not available in this build")
 		}
@@ -53,7 +53,7 @@ func (r *runner) exec(ctx context.Context, s *v1alpha1.Step) (string, error) {
 	return "", fmt.Errorf("unknown step type %q", s.Type)
 }
 
-func (r *runner) hold(ctx context.Context, s *v1alpha1.Step) (string, error) {
+func (r *runner) hold(ctx context.Context, s *failoverv1.Step) (string, error) {
 	ks, err := r.Flux.Hold(ctx, s.Site, s.Hold.Object, r.sf.Name, r.opts.TakeOver)
 	if err != nil {
 		return "", err
@@ -61,14 +61,14 @@ func (r *runner) hold(ctx context.Context, s *v1alpha1.Step) (string, error) {
 	now := metav1.NewTime(r.now())
 	h := r.held(s.Site, s.Hold.Object)
 	if h == nil {
-		r.sf.Status.Held = append(r.sf.Status.Held, v1alpha1.HeldObject{Site: s.Site, Object: s.Hold.Object})
+		r.sf.Status.Held = append(r.sf.Status.Held, failoverv1.HeldObject{Site: s.Site, Object: s.Hold.Object})
 		h = &r.sf.Status.Held[len(r.sf.Status.Held)-1]
 	}
 	h.Kustomization, h.HeldAt, h.ReleasedAt = ks, &now, nil
 	return fmt.Sprintf("held; applied by Kustomization %s/%s", ks.Namespace, ks.Name), nil
 }
 
-func (r *runner) release(ctx context.Context, s *v1alpha1.Step) (string, error) {
+func (r *runner) release(ctx context.Context, s *failoverv1.Step) (string, error) {
 	gen, err := r.Flux.Release(ctx, s.Site, s.Release.Object, r.sf.Name)
 	if err != nil {
 		return "", err
@@ -80,10 +80,10 @@ func (r *runner) release(ctx context.Context, s *v1alpha1.Step) (string, error) 
 	return fmt.Sprintf("released at generation %d", gen), nil
 }
 
-func (r *runner) reconcile(ctx context.Context, s *v1alpha1.Step) (string, error) {
+func (r *runner) reconcile(ctx context.Context, s *failoverv1.Step) (string, error) {
 	ks := s.Reconcile.Kustomizations
 	if len(ks) == 0 {
-		set := map[v1alpha1.ObjectKey]bool{}
+		set := map[failoverv1.ObjectKey]bool{}
 		for _, h := range r.siteHeld(s.Site) {
 			if !set[h.Kustomization] {
 				set[h.Kustomization] = true
@@ -109,30 +109,30 @@ func (r *runner) reconcile(ctx context.Context, s *v1alpha1.Step) (string, error
 	if len(notes) > 0 {
 		msg += "; " + strings.Join(notes, "; ")
 	}
-	if s.Phase == v1alpha1.PhaseHold {
+	if s.Phase == failoverv1.PhaseHold {
 		g := &r.sf.Status.Git
 		switch {
 		case applied == "":
 		case g.BaseRevision == "":
 			g.BaseRevision = applied
 		case !SameRevision(g.BaseRevision, applied) && g.AcceptedRevision == "":
-			return "", stop.Ask(v1alpha1.ReasonGitChanged,
+			return "", stop.Ask(failoverv1.ReasonGitChanged,
 				"Flux at site %s applied %s, but the run's base is %s: Git changed during the run", s.Site, applied, g.BaseRevision)
 		}
 	}
 	return msg, nil
 }
 
-func (r *runner) git(ctx context.Context, s *v1alpha1.Step) (string, error) {
+func (r *runner) git(ctx context.Context, s *failoverv1.Step) (string, error) {
 	g := &r.sf.Status.Git
 	base := g.BaseRevision
 	if g.AcceptedRevision != "" {
 		base = g.AcceptedRevision
 	}
 	if base == "" {
-		return "", stop.Ask(v1alpha1.ReasonGitChanged, "the run has no base revision")
+		return "", stop.Ask(failoverv1.ReasonGitChanged, "the run has no base revision")
 	}
-	var changes []v1alpha1.GitChange
+	var changes []failoverv1.GitChange
 	for _, c := range s.Git.Changes {
 		c := *c.DeepCopy()
 		if c.Value != nil {
@@ -154,7 +154,7 @@ func (r *runner) git(ctx context.Context, s *v1alpha1.Step) (string, error) {
 	return "committed " + commit, nil
 }
 
-func (r *runner) verifyGit(ctx context.Context, s *v1alpha1.Step) (string, error) {
+func (r *runner) verifyGit(ctx context.Context, s *failoverv1.Step) (string, error) {
 	if r.sf.Status.Git.Commit == "" {
 		return "", fmt.Errorf("the run has no commit yet")
 	}
@@ -169,7 +169,7 @@ func (r *runner) verifyGit(ctx context.Context, s *v1alpha1.Step) (string, error
 // run: that commit may change the held objects in other fields.
 func (r *runner) strict() bool { return r.sf.Status.Git.AcceptedRevision == "" }
 
-func (r *runner) held(site string, obj v1alpha1.ObjectRef) *v1alpha1.HeldObject {
+func (r *runner) held(site string, obj failoverv1.ObjectRef) *failoverv1.HeldObject {
 	for i := range r.sf.Status.Held {
 		h := &r.sf.Status.Held[i]
 		if h.Site == site && h.Object == obj {
@@ -179,8 +179,8 @@ func (r *runner) held(site string, obj v1alpha1.ObjectRef) *v1alpha1.HeldObject 
 	return nil
 }
 
-func (r *runner) siteHeld(site string) []v1alpha1.HeldObject {
-	var out []v1alpha1.HeldObject
+func (r *runner) siteHeld(site string) []failoverv1.HeldObject {
+	var out []failoverv1.HeldObject
 	for _, h := range r.sf.Status.Held {
 		if h.Site == site {
 			out = append(out, h)
@@ -189,7 +189,7 @@ func (r *runner) siteHeld(site string) []v1alpha1.HeldObject {
 	return out
 }
 
-func (r *runner) patch(ctx context.Context, s *v1alpha1.Step) (string, error) {
+func (r *runner) patch(ctx context.Context, s *failoverv1.Step) (string, error) {
 	body, err := r.subst(s.Patch.Merge)
 	if err != nil {
 		return "", err
@@ -209,7 +209,7 @@ func (r *runner) patch(ctx context.Context, s *v1alpha1.Step) (string, error) {
 	return fmt.Sprintf("patched; generation %d", u.GetGeneration()), nil
 }
 
-func (r *runner) wait(ctx context.Context, s *v1alpha1.Step) (string, error) {
+func (r *runner) wait(ctx context.Context, s *failoverv1.Step) (string, error) {
 	c, err := r.Clients.Client(s.Site)
 	if err != nil {
 		return "", err
@@ -242,7 +242,7 @@ func (r *runner) wait(ctx context.Context, s *v1alpha1.Step) (string, error) {
 	}
 }
 
-func (r *runner) conditionsHold(u *unstructured.Unstructured, conds []v1alpha1.Condition) (bool, string, error) {
+func (r *runner) conditionsHold(u *unstructured.Unstructured, conds []failoverv1.Condition) (bool, string, error) {
 	for _, cond := range conds {
 		got, err := JSONPath(u.Object, cond.JSONPath)
 		if err != nil {
@@ -254,15 +254,15 @@ func (r *runner) conditionsHold(u *unstructured.Unstructured, conds []v1alpha1.C
 		}
 		ok := false
 		switch cond.Operator {
-		case v1alpha1.OpEquals:
+		case failoverv1.OpEquals:
 			ok = got == want
-		case v1alpha1.OpNotEquals:
+		case failoverv1.OpNotEquals:
 			ok = got != want
-		case v1alpha1.OpNotEmpty:
+		case failoverv1.OpNotEmpty:
 			ok = got != ""
-		case v1alpha1.OpEmpty:
+		case failoverv1.OpEmpty:
 			ok = got == ""
-		case v1alpha1.OpContains:
+		case failoverv1.OpContains:
 			ok = slices.Contains(strings.Fields(got), want)
 		default:
 			return false, "", fmt.Errorf("unknown operator %q", cond.Operator)
@@ -274,7 +274,7 @@ func (r *runner) conditionsHold(u *unstructured.Unstructured, conds []v1alpha1.C
 	return true, "", nil
 }
 
-func (r *runner) capture(ctx context.Context, s *v1alpha1.Step) (string, error) {
+func (r *runner) capture(ctx context.Context, s *failoverv1.Step) (string, error) {
 	c, err := r.Clients.Client(s.Site)
 	if err != nil {
 		return "", err
@@ -288,7 +288,7 @@ func (r *runner) capture(ctx context.Context, s *v1alpha1.Step) (string, error) 
 		return "", err
 	}
 	if v == "" {
-		return "", stop.Ask(v1alpha1.ReasonTokenMissing, "%s has no value at %s", refString(s.Capture.Object), s.Capture.JSONPath)
+		return "", stop.Ask(failoverv1.ReasonTokenMissing, "%s has no value at %s", refString(s.Capture.Object), s.Capture.JSONPath)
 	}
 	if r.sf.Status.Captured == nil {
 		r.sf.Status.Captured = map[string]string{}
@@ -318,12 +318,12 @@ func (r *runner) subst(s string) (string, error) {
 		return v
 	})
 	if len(missing) > 0 {
-		return "", stop.Ask(v1alpha1.ReasonTokenMissing, "the ledger has no value for %s", strings.Join(missing, ", "))
+		return "", stop.Ask(failoverv1.ReasonTokenMissing, "the ledger has no value for %s", strings.Join(missing, ", "))
 	}
 	return out, nil
 }
 
-func newObject(ref v1alpha1.ObjectRef) *unstructured.Unstructured {
+func newObject(ref failoverv1.ObjectRef) *unstructured.Unstructured {
 	u := &unstructured.Unstructured{}
 	u.SetGroupVersionKind(schema.FromAPIVersionAndKind(ref.APIVersion, ref.Kind))
 	u.SetNamespace(ref.Namespace)

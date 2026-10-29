@@ -8,7 +8,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/takodotid/tack/api/v1alpha1"
+	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/kube"
 )
 
@@ -25,7 +25,7 @@ const (
 type Request struct {
 	From string
 	To   string
-	Mode v1alpha1.Mode
+	Mode failoverv1.Mode
 }
 
 // Topology is the workload's state at every site, as read at plan time.
@@ -59,7 +59,7 @@ type SiteState struct {
 	// Summary is one line for the operator.
 	Summary string
 	// Objects are the live objects a run may change at this site.
-	Objects []v1alpha1.ObjectRef
+	Objects []failoverv1.ObjectRef
 	// Facts are driver-specific values the driver read, for its own checks.
 	Facts map[string]string
 	// Created is when the site's member was created. A rebuild recreates it.
@@ -69,7 +69,7 @@ type SiteState struct {
 // FieldChange is one field of one live object, and its value after the run.
 type FieldChange struct {
 	Site   string
-	Object v1alpha1.ObjectRef
+	Object failoverv1.ObjectRef
 	// Field is the path in the object, such as spec.replica.primary.
 	Field string
 	// Value is the JSON value, or nil to remove the field. It may reference
@@ -87,23 +87,23 @@ type Driver interface {
 	Name() string
 
 	// Validate checks the driver's part of the Workload.
-	Validate(w *v1alpha1.WorkloadSpec) error
+	Validate(w *failoverv1.WorkloadSpec) error
 
 	// Discover reads the workload at every site. An unreachable site is
 	// reported in its SiteState, not as an error.
-	Discover(ctx context.Context, w *v1alpha1.WorkloadSpec, c kube.Clients) (*Topology, error)
+	Discover(ctx context.Context, w *failoverv1.WorkloadSpec, c kube.Clients) (*Topology, error)
 
 	// Plan returns the Failover phase's steps, in order. It checks that the
 	// request makes sense for the topology.
-	Plan(w *v1alpha1.WorkloadSpec, t *Topology, r Request) ([]v1alpha1.Step, []v1alpha1.FollowUp, error)
+	Plan(w *failoverv1.WorkloadSpec, t *Topology, r Request) ([]failoverv1.Step, []failoverv1.FollowUp, error)
 
 	// GitChange returns the fields that make Git equal the live state
 	// after the run.
-	GitChange(w *v1alpha1.WorkloadSpec, t *Topology, r Request) ([]FieldChange, error)
+	GitChange(w *failoverv1.WorkloadSpec, t *Topology, r Request) ([]FieldChange, error)
 
 	// Verify returns the conditions that mean the switch is complete at a
 	// site, as Wait steps.
-	Verify(w *v1alpha1.WorkloadSpec, r Request, site string) ([]v1alpha1.Step, error)
+	Verify(w *failoverv1.WorkloadSpec, r Request, site string) ([]failoverv1.Step, error)
 }
 
 var drivers = map[string]Driver{}

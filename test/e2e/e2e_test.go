@@ -111,7 +111,7 @@ func gitURL() (string, error) {
 
 // The Pooler instances at site b use a field mapping (b); every other
 // field is found in its manifest (a).
-const workloadTemplate = `apiVersion: failover.tako.id/v1alpha1
+const workloadTemplate = `apiVersion: failover.tako.id/v1
 kind: Workload
 metadata:
   name: pg
