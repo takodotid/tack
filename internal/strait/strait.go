@@ -18,7 +18,7 @@ import (
 
 // APIVersion and Kind of Strait's SiteService.
 const (
-	APIVersion = "strait.tako.id/v1alpha1"
+	APIVersion = "strait.tako.id/v1"
 	Kind       = "SiteService"
 )
 
@@ -52,7 +52,7 @@ func (r *Reader) Wait(ctx context.Context, site string, s *failoverv1.RoutingSte
 		err := c.Get(ctx, client.ObjectKey{Namespace: s.Service.Namespace, Name: s.Service.Name}, u)
 		switch {
 		case meta.IsNoMatchError(err):
-			return "", fmt.Errorf("site %s has no %s API: is Strait installed?", site, Kind)
+			return "", fmt.Errorf("site %s does not serve %s %s: is Strait v1.0.0 or later installed?", site, Kind, APIVersion)
 		case err != nil:
 			last = err.Error()
 		default:

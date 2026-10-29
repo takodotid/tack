@@ -26,7 +26,7 @@ CNPG_MANIFEST_SHA256=37237f145d8138256ea25ae830f87759255665ff08f8d552fdd8224a5ec
 # Strait, built from its source at a pinned commit, fetched by its SHA. The
 # image is loaded into the nodes from an archive; Envoy is pulled in them.
 STRAIT_GIT_URL=https://github.com/takodotid/strait.git
-STRAIT_COMMIT=620302b88e449d8103253d6c1275bf6c946fedcf
+STRAIT_COMMIT=e76a8cdd00f51eb4d84c9dbb300a546952d46b05
 STRAIT_IMAGE=tack-e2e-strait:${STRAIT_COMMIT:0:12}
 STRAIT_NAMESPACE=strait-system
 ENVOY_IMAGE=envoyproxy/envoy:distroless-v1.40.2

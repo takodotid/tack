@@ -105,7 +105,7 @@ func TestWaitNoStrait(t *testing.T) {
 		return &meta.NoKindMatchError{GroupKind: schema.GroupKind{Group: "strait.tako.id", Kind: Kind}}
 	})
 	_, err := r.Wait(context.Background(), "a", step(time.Minute))
-	if err == nil || !strings.Contains(err.Error(), "is Strait installed?") {
+	if err == nil || !strings.Contains(err.Error(), "is Strait v1.0.0 or later installed?") {
 		t.Fatalf("err = %v, want Strait not installed", err)
 	}
 }

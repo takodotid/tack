@@ -1,5 +1,5 @@
 # The SiteService that routes the e2e workload's primary, at each site.
-apiVersion: strait.tako.id/v1alpha1
+apiVersion: strait.tako.id/v1
 kind: SiteService
 metadata:
   name: postgres
