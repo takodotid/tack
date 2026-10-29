@@ -15,7 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/takodotid/tack/api/v1alpha1"
+	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/driver"
 	_ "github.com/takodotid/tack/internal/driver/cnpg"
 	"github.com/takodotid/tack/internal/engine"
@@ -36,7 +36,7 @@ type testFactory struct {
 
 func (f *testFactory) Clients(string, map[string]string) kube.Clients { return f.clients }
 
-func (f *testFactory) Env(_ context.Context, _ string, spec *v1alpha1.WorkloadSpec, ledgerSite string, out io.Writer) (*engine.Env, func(), error) {
+func (f *testFactory) Env(_ context.Context, _ string, spec *failoverv1.WorkloadSpec, ledgerSite string, out io.Writer) (*engine.Env, func(), error) {
 	d, err := driver.Get(spec.Driver)
 	if err != nil {
 		return nil, nil, err
@@ -182,14 +182,14 @@ func TestPlanGolden(t *testing.T) {
 }
 
 // siteLossRun is a succeeded site-loss run that left site lost to rebuild.
-func siteLossRun(lost string, started time.Time) *v1alpha1.SiteFailover {
+func siteLossRun(lost string, started time.Time) *failoverv1.SiteFailover {
 	t := metav1.NewTime(started)
-	return &v1alpha1.SiteFailover{
+	return &failoverv1.SiteFailover{
 		ObjectMeta: metav1.ObjectMeta{Name: "pg-main-earlier", Namespace: "tack-system", Labels: map[string]string{engine.LabelWorkload: "pg-main"}},
-		Spec:       v1alpha1.SiteFailoverSpec{Mode: v1alpha1.ModeSiteLoss, From: lost, To: "b"},
-		Status: v1alpha1.SiteFailoverStatus{
-			State: v1alpha1.RunSucceeded, StartedAt: &t,
-			FollowUps: []v1alpha1.FollowUp{{Site: lost, Action: engine.FollowUpRebuild, Reason: "promoted without a token"}},
+		Spec:       failoverv1.SiteFailoverSpec{Mode: failoverv1.ModeSiteLoss, From: lost, To: "b"},
+		Status: failoverv1.SiteFailoverStatus{
+			State: failoverv1.RunSucceeded, StartedAt: &t,
+			FollowUps: []failoverv1.FollowUp{{Site: lost, Action: engine.FollowUpRebuild, Reason: "promoted without a token"}},
 		},
 	}
 }
@@ -242,5 +242,23 @@ func TestRunWrongConfirmation(t *testing.T) {
 	out, code := run(t, f, "run", "-f", "testdata/workload.yaml", "--to", "b")
 	if code != ExitError || !strings.Contains(out, "not confirmed; nothing was changed") {
 		t.Fatalf("exit %d:\n%s", code, out)
+	}
+}
+
+func TestPlanDeprecatedWorkload(t *testing.T) {
+	b, err := os.ReadFile("testdata/workload.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(t.TempDir(), "workload.yaml")
+	old := strings.Replace(string(b), "apiVersion: failover.tako.id/v1\n", "apiVersion: failover.tako.id/v1alpha1\n", 1)
+	if err := os.WriteFile(file, []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": testenv.Site("b", "a", 0)})
+	out, code := run(t, f, "plan", "-f", file, "--to", "b")
+	warning := "tack: warning: " + file + ": apiVersion failover.tako.id/v1alpha1 is deprecated; use failover.tako.id/v1\n"
+	if code != ExitOK || !strings.HasPrefix(out, warning) || !strings.Contains(out, "Nothing was changed.") {
+		t.Fatalf("exit %d, want %d with the warning and the plan:\n%s", code, ExitOK, out)
 	}
 }

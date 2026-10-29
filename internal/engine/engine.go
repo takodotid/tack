@@ -9,7 +9,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/takodotid/tack/api/v1alpha1"
+	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/driver"
 	"github.com/takodotid/tack/internal/kube"
 )
@@ -17,7 +17,7 @@ import (
 // Owner is how Flux applies an object.
 type Owner struct {
 	// Kustomization applies the object. Nil when no Kustomization does.
-	Kustomization *v1alpha1.ObjectKey
+	Kustomization *failoverv1.ObjectKey
 	// Helm is true when helm-controller applies the object.
 	Helm bool
 }
@@ -25,43 +25,43 @@ type Owner struct {
 // Flux holds and releases objects and talks to kustomize-controller.
 type Flux interface {
 	// Owner reads how Flux applies a live object.
-	Owner(ctx context.Context, site string, obj v1alpha1.ObjectRef) (Owner, error)
+	Owner(ctx context.Context, site string, obj failoverv1.ObjectRef) (Owner, error)
 
 	// Hold stops Flux from applying the object and marks it held by run.
 	// It stops the run when another run holds the object, unless that run
 	// is takeOver. It returns the Kustomization that applies the object.
-	Hold(ctx context.Context, site string, obj v1alpha1.ObjectRef, run, takeOver string) (v1alpha1.ObjectKey, error)
+	Hold(ctx context.Context, site string, obj failoverv1.ObjectRef, run, takeOver string) (failoverv1.ObjectKey, error)
 
 	// Release lets Flux apply the object again, if run holds it. It returns
 	// the object's generation.
-	Release(ctx context.Context, site string, obj v1alpha1.ObjectRef, run string) (int64, error)
+	Release(ctx context.Context, site string, obj failoverv1.ObjectRef, run string) (int64, error)
 
 	// Reconcile asks Flux to fetch Git and reconcile the Kustomizations,
 	// and waits until each has handled the request. When revision is set,
 	// each must have applied it. It returns the revision Flux applied, and
 	// notes for the ledger, such as a GitRepository that could not fetch.
-	Reconcile(ctx context.Context, site string, ks []v1alpha1.ObjectKey, revision string, timeout time.Duration) (string, []string, error)
+	Reconcile(ctx context.Context, site string, ks []failoverv1.ObjectKey, revision string, timeout time.Duration) (string, []string, error)
 
 	// VerifyGit renders the objects from the repository checked out at dir,
 	// as Flux would, and checks that applying them changes nothing live.
-	VerifyGit(ctx context.Context, site string, held []v1alpha1.HeldObject, fields []v1alpha1.ObjectField, dir string, strict bool) (string, error)
+	VerifyGit(ctx context.Context, site string, held []failoverv1.HeldObject, fields []failoverv1.ObjectField, dir string, strict bool) (string, error)
 
 	// VerifyNoop checks that Flux changed nothing in the released objects.
-	VerifyNoop(ctx context.Context, site string, held []v1alpha1.HeldObject, fields []v1alpha1.ObjectField, strict bool) (string, error)
+	VerifyNoop(ctx context.Context, site string, held []failoverv1.HeldObject, fields []failoverv1.ObjectField, strict bool) (string, error)
 }
 
 // Git reads and writes the GitOps repository with the git binary.
 type Git interface {
 	// Resolve finds the file and path of each field. When Git cannot be
 	// read, it returns the changes unresolved with an error that says so.
-	Resolve(ctx context.Context, w *v1alpha1.WorkloadSpec, changes []driver.FieldChange) ([]v1alpha1.GitChange, error)
+	Resolve(ctx context.Context, w *failoverv1.WorkloadSpec, changes []driver.FieldChange) ([]failoverv1.GitChange, error)
 
 	// Commit writes one commit on top of base, or adopts the run's commit
 	// when it is already there.
-	Commit(ctx context.Context, w *v1alpha1.WorkloadSpec, req CommitRequest) (string, error)
+	Commit(ctx context.Context, w *failoverv1.WorkloadSpec, req CommitRequest) (string, error)
 
 	// Checkout returns a directory holding the repository at revision.
-	Checkout(ctx context.Context, w *v1alpha1.WorkloadSpec, revision string) (string, error)
+	Checkout(ctx context.Context, w *failoverv1.WorkloadSpec, revision string) (string, error)
 
 	// Close removes local copies.
 	Close() error
@@ -78,7 +78,7 @@ type CommitRequest struct {
 	// Base is the commit the branch must be at.
 	Base string
 	// Changes are the fields to set.
-	Changes []v1alpha1.GitChange
+	Changes []failoverv1.GitChange
 	// Message is the commit message.
 	Message string
 }
@@ -86,17 +86,17 @@ type CommitRequest struct {
 // Routing confirms that routing followed the switch.
 type Routing interface {
 	// Wait waits until the service routes to the expected member.
-	Wait(ctx context.Context, site string, s *v1alpha1.RoutingStep) (string, error)
+	Wait(ctx context.Context, site string, s *failoverv1.RoutingStep) (string, error)
 }
 
 // Ledger stores SiteFailover objects.
 type Ledger interface {
-	Create(ctx context.Context, sf *v1alpha1.SiteFailover) error
-	Get(ctx context.Context, name string) (*v1alpha1.SiteFailover, error)
+	Create(ctx context.Context, sf *failoverv1.SiteFailover) error
+	Get(ctx context.Context, name string) (*failoverv1.SiteFailover, error)
 	// UpdateStatus writes the status. It fails when another writer changed
 	// the object since it was read.
-	UpdateStatus(ctx context.Context, sf *v1alpha1.SiteFailover) error
-	List(ctx context.Context) ([]v1alpha1.SiteFailover, error)
+	UpdateStatus(ctx context.Context, sf *failoverv1.SiteFailover) error
+	List(ctx context.Context) ([]failoverv1.SiteFailover, error)
 }
 
 // Env is what a run needs.
@@ -108,7 +108,7 @@ type Env struct {
 	Routing Routing
 	Ledger  Ledger
 	// Runs lists the workload's earlier runs at every reachable site.
-	Runs func(ctx context.Context) ([]v1alpha1.SiteFailover, error)
+	Runs func(ctx context.Context) ([]failoverv1.SiteFailover, error)
 	// Out receives progress lines.
 	Out io.Writer
 	// Now returns the time. Tests replace it.

@@ -11,7 +11,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/takodotid/tack/api/v1alpha1"
+	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/driver"
 )
 
@@ -21,14 +21,14 @@ import (
 // reach the repository, Resolve returns the changes with every mapped one
 // resolved and the searched ones without a file, and an error that wraps
 // ErrUnreachable. Any other error returns no changes.
-func (r *Repo) Resolve(ctx context.Context, w *v1alpha1.WorkloadSpec, changes []driver.FieldChange) ([]v1alpha1.GitChange, error) {
+func (r *Repo) Resolve(ctx context.Context, w *failoverv1.WorkloadSpec, changes []driver.FieldChange) ([]failoverv1.GitChange, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	g := &w.Git
-	out := make([]v1alpha1.GitChange, len(changes))
+	out := make([]failoverv1.GitChange, len(changes))
 	mapped := make([]bool, len(changes))
 	for i, c := range changes {
-		out[i] = v1alpha1.GitChange{Site: c.Site, Object: c.Object, Field: c.Field}
+		out[i] = failoverv1.GitChange{Site: c.Site, Object: c.Object, Field: c.Field}
 		if c.Value != nil {
 			v := *c.Value
 			out[i].Value = &v
@@ -113,7 +113,7 @@ func (r *Repo) Resolve(ctx context.Context, w *v1alpha1.WorkloadSpec, changes []
 
 // mapping returns the spec.git.fields entry of a change, or nil. The entry
 // matches on site, kind, name, field, and namespace when it sets one.
-func mapping(fields []v1alpha1.FieldMapping, c driver.FieldChange) (*v1alpha1.FieldMapping, error) {
+func mapping(fields []failoverv1.FieldMapping, c driver.FieldChange) (*failoverv1.FieldMapping, error) {
 	var found []int
 	for i, m := range fields {
 		if m.Site == c.Site && m.Object.Kind == c.Object.Kind && m.Object.Name == c.Object.Name &&
@@ -154,17 +154,17 @@ type finder struct {
 	r      *Repo
 	c      *clone
 	commit string
-	spec   *v1alpha1.FindSpec
+	spec   *failoverv1.FindSpec
 	sites  map[string]*index
 }
 
-func (r *Repo) newFinder(c *clone, commit string, spec *v1alpha1.FindSpec) *finder {
+func (r *Repo) newFinder(c *clone, commit string, spec *failoverv1.FindSpec) *finder {
 	return &finder{r: r, c: c, commit: commit, spec: spec, sites: map[string]*index{}}
 }
 
 // resolve sets the file, path and document of a change to the one manifest
 // that defines its object.
-func (f *finder) resolve(ctx context.Context, ch *v1alpha1.GitChange) error {
+func (f *finder) resolve(ctx context.Context, ch *failoverv1.GitChange) error {
 	if f.spec == nil {
 		return fmt.Errorf("%w: %s: add an entry to spec.git.fields, or set spec.git.find", ErrNoMapping, describeChange(ch))
 	}

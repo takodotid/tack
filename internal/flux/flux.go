@@ -15,7 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/takodotid/tack/api/v1alpha1"
+	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/engine"
 	"github.com/takodotid/tack/internal/kube"
 	"github.com/takodotid/tack/internal/stop"
@@ -106,7 +106,7 @@ func (f *Flux) sleep(ctx context.Context) error {
 }
 
 // Owner implements engine.Flux. It reads the object's owner labels.
-func (f *Flux) Owner(ctx context.Context, site string, obj v1alpha1.ObjectRef) (engine.Owner, error) {
+func (f *Flux) Owner(ctx context.Context, site string, obj failoverv1.ObjectRef) (engine.Owner, error) {
 	c, err := f.Clients.Client(site)
 	if err != nil {
 		return engine.Owner{}, err
@@ -122,7 +122,7 @@ func owner(u *unstructured.Unstructured) engine.Owner {
 	l := u.GetLabels()
 	var o engine.Owner
 	if name, ns := l[LabelKustomizationName], l[LabelKustomizationNamespace]; name != "" && ns != "" {
-		o.Kustomization = &v1alpha1.ObjectKey{Namespace: ns, Name: name}
+		o.Kustomization = &failoverv1.ObjectKey{Namespace: ns, Name: name}
 	}
 	o.Helm = l[LabelHelmName] != ""
 	return o
@@ -131,38 +131,38 @@ func owner(u *unstructured.Unstructured) engine.Owner {
 // Hold implements engine.Flux. It writes AnnotationReconcile and
 // AnnotationHeldBy with an update that fails if the object changed since
 // it was read.
-func (f *Flux) Hold(ctx context.Context, site string, obj v1alpha1.ObjectRef, run, takeOver string) (v1alpha1.ObjectKey, error) {
+func (f *Flux) Hold(ctx context.Context, site string, obj failoverv1.ObjectRef, run, takeOver string) (failoverv1.ObjectKey, error) {
 	if run == "" {
-		return v1alpha1.ObjectKey{}, fmt.Errorf("hold %s: no run name", refString(obj))
+		return failoverv1.ObjectKey{}, fmt.Errorf("hold %s: no run name", refString(obj))
 	}
 	c, err := f.Clients.Client(site)
 	if err != nil {
-		return v1alpha1.ObjectKey{}, err
+		return failoverv1.ObjectKey{}, err
 	}
 	for attempt := 0; ; attempt++ {
 		u, err := getObject(ctx, c, obj)
 		if err != nil {
-			return v1alpha1.ObjectKey{}, err
+			return failoverv1.ObjectKey{}, err
 		}
 		o := owner(u)
 		if o.Kustomization == nil {
 			if o.Helm {
-				return v1alpha1.ObjectKey{}, fmt.Errorf("%s at site %s is applied by helm-controller; Tack holds only objects that a Flux Kustomization applies", refString(obj), site)
+				return failoverv1.ObjectKey{}, fmt.Errorf("%s at site %s is applied by helm-controller; Tack holds only objects that a Flux Kustomization applies", refString(obj), site)
 			}
-			return v1alpha1.ObjectKey{}, fmt.Errorf("%s at site %s has no %s and %s labels: no Flux Kustomization applies it", refString(obj), site, LabelKustomizationName, LabelKustomizationNamespace)
+			return failoverv1.ObjectKey{}, fmt.Errorf("%s at site %s has no %s and %s labels: no Flux Kustomization applies it", refString(obj), site, LabelKustomizationName, LabelKustomizationNamespace)
 		}
 		ann := u.GetAnnotations()
 		heldBy := ann[AnnotationHeldBy]
 		switch {
 		case heldBy != "" && heldBy != run && (takeOver == "" || heldBy != takeOver):
-			return v1alpha1.ObjectKey{}, stop.Ask(v1alpha1.ReasonHeldByAnotherRun,
+			return failoverv1.ObjectKey{}, stop.Ask(failoverv1.ReasonHeldByAnotherRun,
 				"%s at site %s is held by run %s. Take it over only once that run is abandoned", refString(obj), site, heldBy)
 		case disabledValue(u.GetLabels()[AnnotationReconcile]):
-			return v1alpha1.ObjectKey{}, stop.Ask(v1alpha1.ReasonHeldByAnotherRun,
+			return failoverv1.ObjectKey{}, stop.Ask(failoverv1.ReasonHeldByAnotherRun,
 				"%s at site %s is held outside Tack: it has the label %s=%s. Tack never removes a hold it did not set",
 				refString(obj), site, AnnotationReconcile, u.GetLabels()[AnnotationReconcile])
 		case heldBy == "" && disabledValue(ann[AnnotationReconcile]):
-			return v1alpha1.ObjectKey{}, stop.Ask(v1alpha1.ReasonHeldByAnotherRun,
+			return failoverv1.ObjectKey{}, stop.Ask(failoverv1.ReasonHeldByAnotherRun,
 				"%s at site %s is held outside Tack: it has %s=%s without %s. Tack never removes a hold it did not set",
 				refString(obj), site, AnnotationReconcile, ann[AnnotationReconcile], AnnotationHeldBy)
 		case heldBy == run && disabledValue(ann[AnnotationReconcile]):
@@ -179,13 +179,13 @@ func (f *Flux) Hold(ctx context.Context, site string, obj v1alpha1.ObjectRef, ru
 			return *o.Kustomization, nil
 		}
 		if !apierrors.IsConflict(err) || attempt > 0 {
-			return v1alpha1.ObjectKey{}, fmt.Errorf("hold %s at site %s: %w", refString(obj), site, err)
+			return failoverv1.ObjectKey{}, fmt.Errorf("hold %s at site %s: %w", refString(obj), site, err)
 		}
 	}
 }
 
 // Release implements engine.Flux. It removes the hold only when run set it.
-func (f *Flux) Release(ctx context.Context, site string, obj v1alpha1.ObjectRef, run string) (int64, error) {
+func (f *Flux) Release(ctx context.Context, site string, obj failoverv1.ObjectRef, run string) (int64, error) {
 	if run == "" {
 		return 0, fmt.Errorf("release %s: no run name", refString(obj))
 	}
@@ -202,15 +202,15 @@ func (f *Flux) Release(ctx context.Context, site string, obj v1alpha1.ObjectRef,
 		heldBy := ann[AnnotationHeldBy]
 		switch {
 		case disabledValue(u.GetLabels()[AnnotationReconcile]):
-			return 0, stop.Ask(v1alpha1.ReasonHeldByAnotherRun,
+			return 0, stop.Ask(failoverv1.ReasonHeldByAnotherRun,
 				"%s at site %s is held outside Tack: it has the label %s=%s. Tack never removes a hold it did not set",
 				refString(obj), site, AnnotationReconcile, u.GetLabels()[AnnotationReconcile])
 		case heldBy == run:
 		case heldBy != "":
-			return 0, stop.Ask(v1alpha1.ReasonHeldByAnotherRun,
+			return 0, stop.Ask(failoverv1.ReasonHeldByAnotherRun,
 				"%s at site %s is held by run %s, not %s. Tack leaves it held", refString(obj), site, heldBy, run)
 		case disabledValue(ann[AnnotationReconcile]):
-			return 0, stop.Ask(v1alpha1.ReasonHeldByAnotherRun,
+			return 0, stop.Ask(failoverv1.ReasonHeldByAnotherRun,
 				"%s at site %s is held outside Tack: it has %s=%s without %s. Tack never removes a hold it did not set",
 				refString(obj), site, AnnotationReconcile, ann[AnnotationReconcile], AnnotationHeldBy)
 		default:
@@ -238,7 +238,7 @@ func isHeld(u *unstructured.Unstructured) bool {
 	return disabledValue(u.GetLabels()[AnnotationReconcile]) || disabledValue(u.GetAnnotations()[AnnotationReconcile])
 }
 
-func newObject(ref v1alpha1.ObjectRef) *unstructured.Unstructured {
+func newObject(ref failoverv1.ObjectRef) *unstructured.Unstructured {
 	u := &unstructured.Unstructured{}
 	u.SetGroupVersionKind(schema.FromAPIVersionAndKind(ref.APIVersion, ref.Kind))
 	u.SetNamespace(ref.Namespace)
@@ -246,7 +246,7 @@ func newObject(ref v1alpha1.ObjectRef) *unstructured.Unstructured {
 	return u
 }
 
-func getObject(ctx context.Context, c client.Client, ref v1alpha1.ObjectRef) (*unstructured.Unstructured, error) {
+func getObject(ctx context.Context, c client.Client, ref failoverv1.ObjectRef) (*unstructured.Unstructured, error) {
 	u := newObject(ref)
 	if err := c.Get(ctx, client.ObjectKeyFromObject(u), u); err != nil {
 		return nil, fmt.Errorf("get %s: %w", refString(ref), err)
@@ -254,7 +254,7 @@ func getObject(ctx context.Context, c client.Client, ref v1alpha1.ObjectRef) (*u
 	return u, nil
 }
 
-func getKind(ctx context.Context, c client.Client, gvk schema.GroupVersionKind, key v1alpha1.ObjectKey) (*unstructured.Unstructured, error) {
+func getKind(ctx context.Context, c client.Client, gvk schema.GroupVersionKind, key failoverv1.ObjectKey) (*unstructured.Unstructured, error) {
 	u := &unstructured.Unstructured{}
 	u.SetGroupVersionKind(gvk)
 	if err := c.Get(ctx, client.ObjectKey{Namespace: key.Namespace, Name: key.Name}, u); err != nil {
@@ -263,8 +263,8 @@ func getKind(ctx context.Context, c client.Client, gvk schema.GroupVersionKind, 
 	return u, nil
 }
 
-func refString(o v1alpha1.ObjectRef) string {
+func refString(o failoverv1.ObjectRef) string {
 	return fmt.Sprintf("%s %s/%s", o.Kind, o.Namespace, o.Name)
 }
 
-func keyString(k v1alpha1.ObjectKey) string { return k.Namespace + "/" + k.Name }
+func keyString(k failoverv1.ObjectKey) string { return k.Namespace + "/" + k.Name }

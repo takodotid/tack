@@ -13,7 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/takodotid/tack/api/v1alpha1"
+	failoverv1 "github.com/takodotid/tack/api/v1"
 )
 
 const (
@@ -76,7 +76,7 @@ func TestRender(t *testing.T) {
 	ctx := context.Background()
 	before := snapshot(t, repoDir)
 	ks := renderKustomization("./clusters/a")
-	r, err := render(ctx, renderClient(), ks, repoDir, []v1alpha1.ObjectRef{clusterRef, poolerRef})
+	r, err := render(ctx, renderClient(), ks, repoDir, []failoverv1.ObjectRef{clusterRef, poolerRef})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,13 +132,13 @@ func TestRender(t *testing.T) {
 func TestRenderErrors(t *testing.T) {
 	ctx := context.Background()
 	t.Run("path", func(t *testing.T) {
-		_, err := render(ctx, renderClient(), renderKustomization("./clusters/b"), repoDir, []v1alpha1.ObjectRef{clusterRef})
+		_, err := render(ctx, renderClient(), renderKustomization("./clusters/b"), repoDir, []failoverv1.ObjectRef{clusterRef})
 		if err == nil || !strings.Contains(err.Error(), "not in the checkout") {
 			t.Fatalf("got %v", err)
 		}
 	})
 	t.Run("build", func(t *testing.T) {
-		_, err := render(ctx, renderClient(), renderKustomization("./clusters/broken"), repoDir, []v1alpha1.ObjectRef{clusterRef})
+		_, err := render(ctx, renderClient(), renderKustomization("./clusters/broken"), repoDir, []failoverv1.ObjectRef{clusterRef})
 		if err == nil || !strings.Contains(err.Error(), "without remote bases") || !strings.Contains(err.Error(), "missing.yaml") {
 			t.Fatalf("got %v", err)
 		}
@@ -146,7 +146,7 @@ func TestRenderErrors(t *testing.T) {
 	t.Run("OCI source", func(t *testing.T) {
 		ks := renderKustomization("./clusters/a")
 		_ = unstructured.SetNestedField(ks.Object, "OCIRepository", "spec", "sourceRef", "kind")
-		_, err := render(ctx, renderClient(), ks, repoDir, []v1alpha1.ObjectRef{clusterRef})
+		_, err := render(ctx, renderClient(), ks, repoDir, []failoverv1.ObjectRef{clusterRef})
 		if err == nil || !strings.Contains(err.Error(), "not from a GitRepository") {
 			t.Fatalf("got %v", err)
 		}
@@ -154,7 +154,7 @@ func TestRenderErrors(t *testing.T) {
 	t.Run("missing variable", func(t *testing.T) {
 		ks := renderKustomization("./clusters/a")
 		unstructured.RemoveNestedField(ks.Object, "spec", "postBuild", "substituteFrom")
-		_, err := render(ctx, renderClient(), ks, repoDir, []v1alpha1.ObjectRef{clusterRef})
+		_, err := render(ctx, renderClient(), ks, repoDir, []failoverv1.ObjectRef{clusterRef})
 		if err == nil || !strings.Contains(err.Error(), `variable not set (strict mode): "token"`) {
 			t.Fatalf("got %v", err)
 		}
@@ -163,7 +163,7 @@ func TestRenderErrors(t *testing.T) {
 		repo := gitRepository()
 		_ = unstructured.SetNestedSlice(repo.Object, []any{map[string]any{"repository": map[string]any{"name": "other"}}}, "spec", "include")
 		c := newClient(nil, repo, varsSecret())
-		_, err := render(ctx, c, renderKustomization("./clusters/a"), repoDir, []v1alpha1.ObjectRef{clusterRef})
+		_, err := render(ctx, c, renderKustomization("./clusters/a"), repoDir, []failoverv1.ObjectRef{clusterRef})
 		if err == nil || !strings.Contains(err.Error(), "includes other repositories") {
 			t.Fatalf("got %v", err)
 		}

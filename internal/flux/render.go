@@ -19,7 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/takodotid/tack/api/v1alpha1"
+	failoverv1 "github.com/takodotid/tack/api/v1"
 )
 
 // controllerOwner is how kustomize-controller applies and labels objects.
@@ -30,7 +30,7 @@ type objID struct {
 	Group, Kind, Namespace, Name string
 }
 
-func refID(r v1alpha1.ObjectRef) objID {
+func refID(r failoverv1.ObjectRef) objID {
 	gv, _ := schema.ParseGroupVersion(r.APIVersion)
 	return objID{Group: gv.Group, Kind: r.Kind, Namespace: r.Namespace, Name: r.Name}
 }
@@ -96,7 +96,7 @@ type rendered struct {
 // what source-controller puts in its artifact, and reads the ConfigMaps
 // and Secrets of spec.postBuild.substituteFrom. It never writes to dir.
 // It does not decrypt SOPS: an encrypted object renders encrypted.
-func render(ctx context.Context, c client.Client, ks *unstructured.Unstructured, dir string, refs []v1alpha1.ObjectRef) (*rendered, error) {
+func render(ctx context.Context, c client.Client, ks *unstructured.Unstructured, dir string, refs []failoverv1.ObjectRef) (*rendered, error) {
 	name := fmt.Sprintf("Kustomization %s/%s", ks.GetNamespace(), ks.GetName())
 	kind, src := sourceRef(ks)
 	if kind != GitRepositoryGVK.Kind {

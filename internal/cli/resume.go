@@ -9,7 +9,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/yaml"
 
-	"github.com/takodotid/tack/api/v1alpha1"
+	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/config"
 	"github.com/takodotid/tack/internal/engine"
 	"github.com/takodotid/tack/internal/kube"
@@ -30,7 +30,7 @@ func (l *ledgerFlags) add(cmd *cobra.Command) {
 
 type foundRun struct {
 	site string
-	sf   *v1alpha1.SiteFailover
+	sf   *failoverv1.SiteFailover
 }
 
 // contextSite names the single site behind --context.
@@ -42,7 +42,7 @@ func (l *ledgerFlags) find(ctx context.Context, o *options) ([]foundRun, error) 
 	case l.file != "" && l.context != "":
 		return nil, usagef("pass --file or --context, not both")
 	case l.file != "":
-		w, err := config.Load(l.file)
+		w, err := o.loadWorkload(l.file)
 		if err != nil {
 			return nil, err
 		}
@@ -68,7 +68,7 @@ func (l *ledgerFlags) find(ctx context.Context, o *options) ([]foundRun, error) 
 }
 
 // findRuns lists a workload's runs at every reachable site.
-func findRuns(ctx context.Context, o *options, spec *v1alpha1.WorkloadSpec, workload string) ([]foundRun, error) {
+func findRuns(ctx context.Context, o *options, spec *failoverv1.WorkloadSpec, workload string) ([]foundRun, error) {
 	c := o.factory.Clients(o.kubeconfig, kube.Contexts(spec))
 	var out []foundRun
 	for _, s := range spec.Sites {
