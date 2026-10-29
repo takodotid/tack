@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/takodotid/tack/api/v1alpha1"
+	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/engine"
 )
 
@@ -113,7 +113,7 @@ func (r *Repo) mkdir(prefix string) (string, error) {
 }
 
 // clone returns the clone of the spec's branch, creating it empty.
-func (r *Repo) clone(ctx context.Context, g *v1alpha1.GitSpec) (*clone, error) {
+func (r *Repo) clone(ctx context.Context, g *failoverv1.GitSpec) (*clone, error) {
 	if g.URL == "" || strings.HasPrefix(g.URL, "-") {
 		return nil, fmt.Errorf("spec.git.url %q is not a repository URL", Redact(g.URL))
 	}
@@ -305,7 +305,7 @@ var userinfo = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/\s]+@`)
 func Redact(s string) string { return userinfo.ReplaceAllString(s, "${1}***@") }
 
 // describe names a field for a message.
-func describe(site string, obj v1alpha1.ObjectRef, field string) string {
+func describe(site string, obj failoverv1.ObjectRef, field string) string {
 	name := obj.Name
 	if obj.Namespace != "" {
 		name = obj.Namespace + "/" + obj.Name
@@ -313,7 +313,7 @@ func describe(site string, obj v1alpha1.ObjectRef, field string) string {
 	return fmt.Sprintf("site %s, %s %s %s, field %s", site, obj.APIVersion, obj.Kind, name, field)
 }
 
-func describeChange(c *v1alpha1.GitChange) string { return describe(c.Site, c.Object, c.Field) }
+func describeChange(c *failoverv1.GitChange) string { return describe(c.Site, c.Object, c.Field) }
 
 func docString(d *int32) string {
 	if d == nil {

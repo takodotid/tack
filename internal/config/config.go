@@ -10,11 +10,15 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 
-	"github.com/takodotid/tack/api/v1alpha1"
+	failoverv1 "github.com/takodotid/tack/api/v1"
 )
 
 // Kind is the kind of the Workload file.
 const Kind = "Workload"
+
+// DeprecatedAPIVersion is the Workload's apiVersion before v1, with the same
+// schema. Tack still reads it; the CLI warns.
+const DeprecatedAPIVersion = "failover.tako.id/v1alpha1"
 
 // DefaultLedgerNamespace holds SiteFailover objects when the Workload sets none.
 const DefaultLedgerNamespace = "tack-system"
@@ -32,7 +36,7 @@ type Workload struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec v1alpha1.WorkloadSpec `json:"spec"`
+	Spec failoverv1.WorkloadSpec `json:"spec"`
 }
 
 // Load reads, defaults and validates a Workload file.
@@ -50,9 +54,9 @@ func Parse(b []byte) (*Workload, error) {
 	if err := yaml.UnmarshalStrict(b, &w); err != nil {
 		return nil, fmt.Errorf("workload: %w", err)
 	}
-	if w.APIVersion != v1alpha1.GroupVersion.String() || w.Kind != Kind {
+	if (w.APIVersion != failoverv1.GroupVersion.String() && w.APIVersion != DeprecatedAPIVersion) || w.Kind != Kind {
 		return nil, fmt.Errorf("workload: want apiVersion %s and kind %s, got %q and %q",
-			v1alpha1.GroupVersion.String(), Kind, w.APIVersion, w.Kind)
+			failoverv1.GroupVersion.String(), Kind, w.APIVersion, w.Kind)
 	}
 	Default(&w.Spec)
 	if err := Validate(w.Name, &w.Spec); err != nil {
@@ -62,7 +66,7 @@ func Parse(b []byte) (*Workload, error) {
 }
 
 // Default fills unset fields.
-func Default(s *v1alpha1.WorkloadSpec) {
+func Default(s *failoverv1.WorkloadSpec) {
 	if s.Ledger.Namespace == "" {
 		s.Ledger.Namespace = DefaultLedgerNamespace
 	}
@@ -79,7 +83,7 @@ func Default(s *v1alpha1.WorkloadSpec) {
 }
 
 // Validate checks what the engine relies on. Drivers check their own part.
-func Validate(name string, s *v1alpha1.WorkloadSpec) error {
+func Validate(name string, s *failoverv1.WorkloadSpec) error {
 	var errs []string
 	add := func(f string, a ...any) { errs = append(errs, fmt.Sprintf(f, a...)) }
 	if name == "" {
@@ -154,7 +158,7 @@ func Validate(name string, s *v1alpha1.WorkloadSpec) error {
 }
 
 // Site returns the named site.
-func Site(s *v1alpha1.WorkloadSpec, name string) (*v1alpha1.Site, bool) {
+func Site(s *failoverv1.WorkloadSpec, name string) (*failoverv1.Site, bool) {
 	for i := range s.Sites {
 		if s.Sites[i].Name == name {
 			return &s.Sites[i], true

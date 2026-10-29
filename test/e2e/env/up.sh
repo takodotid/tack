@@ -351,13 +351,13 @@ EOF
   for site in "${SITES[@]}"; do
     peer=$(other_site "$site")
     kc "$site" apply --server-side --field-manager tack-e2e-up -f - >/dev/null <<EOF
-apiVersion: strait.tako.id/v1alpha1
+apiVersion: strait.tako.id/v1
 kind: SitePeer
 metadata:
   name: $peer
 spec: {}
 ---
-apiVersion: strait.tako.id/v1alpha1
+apiVersion: strait.tako.id/v1
 kind: SiteLink
 metadata:
   name: $peer-direct

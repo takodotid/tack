@@ -14,7 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
-	"github.com/takodotid/tack/api/v1alpha1"
+	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/driver"
 	"github.com/takodotid/tack/internal/engine"
 	"github.com/takodotid/tack/internal/kube"
@@ -27,9 +27,9 @@ var GVKs = []schema.GroupVersionKind{
 	{Group: "postgresql.cnpg.io", Version: "v1", Kind: "Pooler"},
 	{Group: "kustomize.toolkit.fluxcd.io", Version: "v1", Kind: "Kustomization"},
 	{Group: "source.toolkit.fluxcd.io", Version: "v1", Kind: "GitRepository"},
-	{Group: "strait.tako.id", Version: "v1alpha1", Kind: "SiteService"},
+	{Group: "strait.tako.id", Version: "v1", Kind: "SiteService"},
 	{Group: "apps", Version: "v1", Kind: "Deployment"},
-	{Group: "failover.tako.id", Version: "v1alpha1", Kind: "SiteFailover"},
+	{Group: "failover.tako.id", Version: "v1", Kind: "SiteFailover"},
 }
 
 // Clients is a fake kube.Clients with one fake client per site.
@@ -87,7 +87,7 @@ func NewClient(objs ...client.Object) client.Client {
 		WithScheme(kube.Scheme).
 		WithRESTMapper(mapper).
 		WithObjects(objs...).
-		WithStatusSubresource(&v1alpha1.SiteFailover{}).
+		WithStatusSubresource(&failoverv1.SiteFailover{}).
 		Build()
 }
 
@@ -158,29 +158,29 @@ func (f *Flux) call(name string, a ...any) error {
 	return f.Fail[name]
 }
 
-func key(site string, o v1alpha1.ObjectRef) string { return site + "/" + o.Kind + "/" + o.Name }
+func key(site string, o failoverv1.ObjectRef) string { return site + "/" + o.Kind + "/" + o.Name }
 
 // Owner implements engine.Flux.
-func (f *Flux) Owner(_ context.Context, site string, _ v1alpha1.ObjectRef) (engine.Owner, error) {
-	return engine.Owner{Kustomization: &v1alpha1.ObjectKey{Namespace: "flux-system", Name: site}}, nil
+func (f *Flux) Owner(_ context.Context, site string, _ failoverv1.ObjectRef) (engine.Owner, error) {
+	return engine.Owner{Kustomization: &failoverv1.ObjectKey{Namespace: "flux-system", Name: site}}, nil
 }
 
 // Hold implements engine.Flux.
-func (f *Flux) Hold(_ context.Context, site string, obj v1alpha1.ObjectRef, run, takeOver string) (v1alpha1.ObjectKey, error) {
+func (f *Flux) Hold(_ context.Context, site string, obj failoverv1.ObjectRef, run, takeOver string) (failoverv1.ObjectKey, error) {
 	if err := f.call("Hold", site, " ", obj.Name); err != nil {
-		return v1alpha1.ObjectKey{}, err
+		return failoverv1.ObjectKey{}, err
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if h, ok := f.Held[key(site, obj)]; ok && h != run && h != takeOver {
-		return v1alpha1.ObjectKey{}, stop.Ask(v1alpha1.ReasonHeldByAnotherRun, "held by %s", h)
+		return failoverv1.ObjectKey{}, stop.Ask(failoverv1.ReasonHeldByAnotherRun, "held by %s", h)
 	}
 	f.Held[key(site, obj)] = run
-	return v1alpha1.ObjectKey{Namespace: "flux-system", Name: site}, nil
+	return failoverv1.ObjectKey{Namespace: "flux-system", Name: site}, nil
 }
 
 // Release implements engine.Flux.
-func (f *Flux) Release(_ context.Context, site string, obj v1alpha1.ObjectRef, run string) (int64, error) {
+func (f *Flux) Release(_ context.Context, site string, obj failoverv1.ObjectRef, run string) (int64, error) {
 	if err := f.call("Release", site, " ", obj.Name); err != nil {
 		return 0, err
 	}
@@ -193,7 +193,7 @@ func (f *Flux) Release(_ context.Context, site string, obj v1alpha1.ObjectRef, r
 }
 
 // Reconcile implements engine.Flux.
-func (f *Flux) Reconcile(_ context.Context, site string, _ []v1alpha1.ObjectKey, revision string, _ time.Duration) (string, []string, error) {
+func (f *Flux) Reconcile(_ context.Context, site string, _ []failoverv1.ObjectKey, revision string, _ time.Duration) (string, []string, error) {
 	if err := f.call("Reconcile", site, " ", revision); err != nil {
 		return "", nil, err
 	}
@@ -206,12 +206,12 @@ func (f *Flux) Reconcile(_ context.Context, site string, _ []v1alpha1.ObjectKey,
 }
 
 // VerifyGit implements engine.Flux.
-func (f *Flux) VerifyGit(_ context.Context, site string, held []v1alpha1.HeldObject, _ []v1alpha1.ObjectField, _ string, _ bool) (string, error) {
+func (f *Flux) VerifyGit(_ context.Context, site string, held []failoverv1.HeldObject, _ []failoverv1.ObjectField, _ string, _ bool) (string, error) {
 	return "Git equals live", f.call("VerifyGit", site)
 }
 
 // VerifyNoop implements engine.Flux.
-func (f *Flux) VerifyNoop(_ context.Context, site string, _ []v1alpha1.HeldObject, _ []v1alpha1.ObjectField, _ bool) (string, error) {
+func (f *Flux) VerifyNoop(_ context.Context, site string, _ []failoverv1.HeldObject, _ []failoverv1.ObjectField, _ bool) (string, error) {
 	return "nothing changed", f.call("VerifyNoop", site)
 }
 
@@ -224,10 +224,10 @@ type Git struct {
 }
 
 // Resolve implements engine.Git.
-func (g *Git) Resolve(_ context.Context, _ *v1alpha1.WorkloadSpec, changes []driver.FieldChange) ([]v1alpha1.GitChange, error) {
-	var out []v1alpha1.GitChange
+func (g *Git) Resolve(_ context.Context, _ *failoverv1.WorkloadSpec, changes []driver.FieldChange) ([]failoverv1.GitChange, error) {
+	var out []failoverv1.GitChange
 	for _, c := range changes {
-		gc := v1alpha1.GitChange{Site: c.Site, Object: c.Object, Field: c.Field, Value: c.Value}
+		gc := failoverv1.GitChange{Site: c.Site, Object: c.Object, Field: c.Field, Value: c.Value}
 		if !g.Unreachable {
 			gc.File = fmt.Sprintf("clusters/%s/%s.yaml", c.Site, lower(c.Object.Kind))
 			gc.Path = c.Field
@@ -241,14 +241,14 @@ func (g *Git) Resolve(_ context.Context, _ *v1alpha1.WorkloadSpec, changes []dri
 }
 
 // Commit implements engine.Git.
-func (g *Git) Commit(_ context.Context, _ *v1alpha1.WorkloadSpec, req engine.CommitRequest) (string, error) {
+func (g *Git) Commit(_ context.Context, _ *failoverv1.WorkloadSpec, req engine.CommitRequest) (string, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.Unreachable {
-		return "", stop.Wait(v1alpha1.ReasonGitUnreachable, "remote unreachable")
+		return "", stop.Wait(failoverv1.ReasonGitUnreachable, "remote unreachable")
 	}
 	if g.Head != "" && g.Head != req.Base {
-		return "", stop.Ask(v1alpha1.ReasonGitChanged, "branch moved from %s to %s", req.Base, g.Head)
+		return "", stop.Ask(failoverv1.ReasonGitChanged, "branch moved from %s to %s", req.Base, g.Head)
 	}
 	g.Commits = append(g.Commits, req)
 	g.Head = fmt.Sprintf("c%039d", len(g.Commits))
@@ -256,7 +256,7 @@ func (g *Git) Commit(_ context.Context, _ *v1alpha1.WorkloadSpec, req engine.Com
 }
 
 // Checkout implements engine.Git.
-func (g *Git) Checkout(context.Context, *v1alpha1.WorkloadSpec, string) (string, error) {
+func (g *Git) Checkout(context.Context, *failoverv1.WorkloadSpec, string) (string, error) {
 	return "/nonexistent", nil
 }
 

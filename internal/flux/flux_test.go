@@ -14,16 +14,16 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
-	"github.com/takodotid/tack/api/v1alpha1"
+	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/stop"
 )
 
 var (
 	clusterGVK = schema.GroupVersionKind{Group: "postgresql.cnpg.io", Version: "v1", Kind: "Cluster"}
 	poolerGVK  = schema.GroupVersionKind{Group: "postgresql.cnpg.io", Version: "v1", Kind: "Pooler"}
-	clusterRef = v1alpha1.ObjectRef{APIVersion: "postgresql.cnpg.io/v1", Kind: "Cluster", Namespace: "db", Name: "pg"}
-	poolerRef  = v1alpha1.ObjectRef{APIVersion: "postgresql.cnpg.io/v1", Kind: "Pooler", Namespace: "db", Name: "pg-rw"}
-	ksKey      = v1alpha1.ObjectKey{Namespace: "flux-system", Name: "db"}
+	clusterRef = failoverv1.ObjectRef{APIVersion: "postgresql.cnpg.io/v1", Kind: "Cluster", Namespace: "db", Name: "pg"}
+	poolerRef  = failoverv1.ObjectRef{APIVersion: "postgresql.cnpg.io/v1", Kind: "Pooler", Namespace: "db", Name: "pg-rw"}
+	ksKey      = failoverv1.ObjectKey{Namespace: "flux-system", Name: "db"}
 )
 
 func testScheme() *runtime.Scheme {
@@ -76,7 +76,7 @@ func liveCluster(annotations map[string]string) *unstructured.Unstructured {
 	return u
 }
 
-func get(t *testing.T, c client.Client, ref v1alpha1.ObjectRef) *unstructured.Unstructured {
+func get(t *testing.T, c client.Client, ref failoverv1.ObjectRef) *unstructured.Unstructured {
 	t.Helper()
 	u, err := getObject(context.Background(), c, ref)
 	if err != nil {
@@ -184,9 +184,9 @@ func TestHold(t *testing.T) {
 	t.Run("other run", func(t *testing.T) {
 		c := newClient(nil, liveCluster(map[string]string{AnnotationReconcile: "disabled", AnnotationHeldBy: "run-0"}))
 		_, err := New(fakeClients{c}).Hold(ctx, "a", clusterRef, "run-1", "")
-		wantStop(t, err, v1alpha1.ReasonHeldByAnotherRun, "run-0")
+		wantStop(t, err, failoverv1.ReasonHeldByAnotherRun, "run-0")
 		_, err = New(fakeClients{c}).Hold(ctx, "a", clusterRef, "run-1", "run-9")
-		wantStop(t, err, v1alpha1.ReasonHeldByAnotherRun, "run-0")
+		wantStop(t, err, failoverv1.ReasonHeldByAnotherRun, "run-0")
 	})
 	t.Run("take over", func(t *testing.T) {
 		c := newClient(nil, liveCluster(map[string]string{AnnotationReconcile: "disabled", AnnotationHeldBy: "run-0"}))
@@ -200,13 +200,13 @@ func TestHold(t *testing.T) {
 	t.Run("held outside Tack", func(t *testing.T) {
 		c := newClient(nil, liveCluster(map[string]string{AnnotationReconcile: "Disabled"}))
 		_, err := New(fakeClients{c}).Hold(ctx, "a", clusterRef, "run-1", "")
-		wantStop(t, err, v1alpha1.ReasonHeldByAnotherRun, "held outside Tack")
+		wantStop(t, err, failoverv1.ReasonHeldByAnotherRun, "held outside Tack")
 
 		u := liveCluster(nil)
 		u.SetLabels(map[string]string{LabelKustomizationName: "db", LabelKustomizationNamespace: "flux-system", AnnotationReconcile: "disabled"})
 		c = newClient(nil, u)
 		_, err = New(fakeClients{c}).Hold(ctx, "a", clusterRef, "run-1", "")
-		wantStop(t, err, v1alpha1.ReasonHeldByAnotherRun, "held outside Tack", "label")
+		wantStop(t, err, failoverv1.ReasonHeldByAnotherRun, "held outside Tack", "label")
 	})
 	t.Run("no owner", func(t *testing.T) {
 		u := liveCluster(nil)
@@ -276,7 +276,7 @@ func TestRelease(t *testing.T) {
 	t.Run("other run", func(t *testing.T) {
 		c := newClient(nil, liveCluster(map[string]string{AnnotationReconcile: "disabled", AnnotationHeldBy: "run-2"}))
 		_, err := New(fakeClients{c}).Release(ctx, "a", clusterRef, "run-1")
-		wantStop(t, err, v1alpha1.ReasonHeldByAnotherRun, "run-2")
+		wantStop(t, err, failoverv1.ReasonHeldByAnotherRun, "run-2")
 		if v := get(t, c, clusterRef).GetAnnotations()[AnnotationReconcile]; v != "disabled" {
 			t.Error("hold removed")
 		}
@@ -284,6 +284,6 @@ func TestRelease(t *testing.T) {
 	t.Run("held outside Tack", func(t *testing.T) {
 		c := newClient(nil, liveCluster(map[string]string{AnnotationReconcile: "disabled"}))
 		_, err := New(fakeClients{c}).Release(ctx, "a", clusterRef, "run-1")
-		wantStop(t, err, v1alpha1.ReasonHeldByAnotherRun, "held outside Tack")
+		wantStop(t, err, failoverv1.ReasonHeldByAnotherRun, "held outside Tack")
 	})
 }

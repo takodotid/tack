@@ -11,7 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/takodotid/tack/api/v1alpha1"
+	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/config"
 	"github.com/takodotid/tack/internal/driver"
 	"github.com/takodotid/tack/internal/driver/cnpg"
@@ -20,14 +20,14 @@ import (
 	"github.com/takodotid/tack/internal/testenv"
 )
 
-const workloadYAML = `apiVersion: failover.tako.id/v1alpha1
+const workloadYAML = `apiVersion: failover.tako.id/v1
 kind: Workload
 metadata: {name: pg-main}
 spec:
   driver: cnpg
   sites:
-  - {name: a, kubeContext: site-a, cnpg: {cluster: {namespace: db, name: pg-a}, pooler: {namespace: db, name: pg-a-rw, instances: 2}}}
-  - {name: b, kubeContext: site-b, cnpg: {cluster: {namespace: db, name: pg-b}, pooler: {namespace: db, name: pg-b-rw, instances: 2}}}
+  - {name: a, kubeContext: site-a, cnpg: {cluster: {namespace: db, name: pg-a}, pooler: {namespace: db, name: pg-a-pooler-rw, instances: 2}}}
+  - {name: b, kubeContext: site-b, cnpg: {cluster: {namespace: db, name: pg-b}, pooler: {namespace: db, name: pg-b-pooler-rw, instances: 2}}}
   git: {url: https://git.example.com/gitops.git, branch: main, find: {}}
   timeouts: {demotion: 5s, promotion: 5s, flux: 5s}
 `
@@ -70,7 +70,7 @@ func (f *fixture) env(ledgerSite string) *engine.Env {
 	}
 }
 
-func (f *fixture) start(to string, mode v1alpha1.Mode, opts engine.Options) (*v1alpha1.SiteFailover, error) {
+func (f *fixture) start(to string, mode failoverv1.Mode, opts engine.Options) (*failoverv1.SiteFailover, error) {
 	f.t.Helper()
 	env := f.env(to)
 	from := "a"
@@ -88,7 +88,7 @@ func (f *fixture) start(to string, mode v1alpha1.Mode, opts engine.Options) (*v1
 	return f.ledger(to), err
 }
 
-func (f *fixture) resume(site string, opts engine.Options) (*v1alpha1.SiteFailover, error) {
+func (f *fixture) resume(site string, opts engine.Options) (*failoverv1.SiteFailover, error) {
 	f.t.Helper()
 	env := f.env(site)
 	sf := f.ledger(site)
@@ -96,7 +96,7 @@ func (f *fixture) resume(site string, opts engine.Options) (*v1alpha1.SiteFailov
 	return f.ledger(site), err
 }
 
-func (f *fixture) ledger(site string) *v1alpha1.SiteFailover {
+func (f *fixture) ledger(site string) *failoverv1.SiteFailover {
 	f.t.Helper()
 	sf, err := f.env(site).Ledger.Get(context.Background(), "run-1")
 	if err != nil {
@@ -119,7 +119,7 @@ func field(obj map[string]any, path ...string) any {
 	return v
 }
 
-func stepState(sf *v1alpha1.SiteFailover, id string) v1alpha1.StepState {
+func stepState(sf *failoverv1.SiteFailover, id string) failoverv1.StepState {
 	for _, s := range sf.Status.Steps {
 		if s.ID == id {
 			return s.State
@@ -142,11 +142,11 @@ func change(req engine.CommitRequest, site, f string) (string, bool) {
 
 func TestPlannedRun(t *testing.T) {
 	f := newFixture(t)
-	sf, err := f.start("b", v1alpha1.ModePlanned, engine.Options{})
+	sf, err := f.start("b", failoverv1.ModePlanned, engine.Options{})
 	if err != nil {
 		t.Fatalf("run: %v\n%s", err, sf.Status.Message)
 	}
-	if sf.Status.State != v1alpha1.RunSucceeded {
+	if sf.Status.State != failoverv1.RunSucceeded {
 		t.Fatalf("state %s: %s", sf.Status.State, sf.Status.Message)
 	}
 	tok := sf.Status.Captured[cnpg.TokenKey]
@@ -197,17 +197,17 @@ func TestPlannedRun(t *testing.T) {
 func TestResumeAfterStop(t *testing.T) {
 	f := newFixture(t)
 	f.flux.Fail["VerifyGit"] = errors.New("render failed")
-	sf, err := f.start("b", v1alpha1.ModePlanned, engine.Options{})
+	sf, err := f.start("b", failoverv1.ModePlanned, engine.Options{})
 	if !errors.Is(err, engine.ErrStopped) {
 		t.Fatalf("err %v, want stopped", err)
 	}
-	if sf.Status.State != v1alpha1.RunStopped || sf.Status.Reason != v1alpha1.ReasonStepFailed || stepState(sf, "verify-git-a") != v1alpha1.StepFailed {
+	if sf.Status.State != failoverv1.RunStopped || sf.Status.Reason != failoverv1.ReasonStepFailed || stepState(sf, "verify-git-a") != failoverv1.StepFailed {
 		t.Fatalf("state %s %s %s", sf.Status.State, sf.Status.Reason, stepState(sf, "verify-git-a"))
 	}
 	holds := countCalls(f.flux, "Hold")
 	delete(f.flux.Fail, "VerifyGit")
 	sf, err = f.resume("b", engine.Options{})
-	if err != nil || sf.Status.State != v1alpha1.RunSucceeded {
+	if err != nil || sf.Status.State != failoverv1.RunSucceeded {
 		t.Fatalf("resume: %v %s", err, sf.Status.Message)
 	}
 	if countCalls(f.flux, "Hold") != holds {
@@ -221,11 +221,11 @@ func TestResumeAfterStop(t *testing.T) {
 func TestResumeReRunsStartedStep(t *testing.T) {
 	f := newFixture(t)
 	f.flux.Fail["VerifyGit"] = errors.New("stop here")
-	sf, _ := f.start("b", v1alpha1.ModePlanned, engine.Options{})
+	sf, _ := f.start("b", failoverv1.ModePlanned, engine.Options{})
 	// A process that died after starting a step leaves it Running.
 	for i := range sf.Status.Steps {
 		if sf.Status.Steps[i].ID == "reconcile-git-b" {
-			sf.Status.Steps[i].State = v1alpha1.StepRunning
+			sf.Status.Steps[i].State = failoverv1.StepRunning
 		}
 	}
 	if err := f.env("b").Ledger.UpdateStatus(context.Background(), sf); err != nil {
@@ -237,7 +237,7 @@ func TestResumeReRunsStartedStep(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}
-	if stepState(sf, "reconcile-git-b") != v1alpha1.StepSucceeded || countCalls(f.flux, "Reconcile") <= before {
+	if stepState(sf, "reconcile-git-b") != failoverv1.StepSucceeded || countCalls(f.flux, "Reconcile") <= before {
 		t.Fatal("the started step did not run again")
 	}
 }
@@ -246,15 +246,15 @@ func TestGitChangedDuringRun(t *testing.T) {
 	f := newFixture(t)
 	other := "2222222222222222222222222222222222222222"
 	f.git.Head = other
-	sf, err := f.start("b", v1alpha1.ModePlanned, engine.Options{})
-	if !errors.Is(err, engine.ErrStopped) || sf.Status.Reason != v1alpha1.ReasonGitChanged {
+	sf, err := f.start("b", failoverv1.ModePlanned, engine.Options{})
+	if !errors.Is(err, engine.ErrStopped) || sf.Status.Reason != failoverv1.ReasonGitChanged {
 		t.Fatalf("err %v, reason %s", err, sf.Status.Reason)
 	}
-	if stepState(sf, "git-commit") != v1alpha1.StepFailed || stepState(sf, "verify-b") != v1alpha1.StepSucceeded {
+	if stepState(sf, "git-commit") != failoverv1.StepFailed || stepState(sf, "verify-b") != failoverv1.StepSucceeded {
 		t.Fatal("the run should switch live, then stop at the Git step")
 	}
 	sf, err = f.resume("b", engine.Options{AcceptGitHead: other})
-	if err != nil || sf.Status.State != v1alpha1.RunSucceeded {
+	if err != nil || sf.Status.State != failoverv1.RunSucceeded {
 		t.Fatalf("resume: %v %s", err, sf.Status.Message)
 	}
 	if f.git.Commits[0].Base != other || sf.Status.Git.AcceptedRevision != other {
@@ -266,14 +266,14 @@ func TestSiteLossBreakGlassAndReturn(t *testing.T) {
 	f := newFixture(t)
 	f.clients.SetDown("a", true)
 	f.git.Unreachable = true
-	sf, err := f.start("b", v1alpha1.ModeSiteLoss, engine.Options{})
-	if !errors.Is(err, engine.ErrWaiting) || sf.Status.Reason != v1alpha1.ReasonGitUnreachable {
+	sf, err := f.start("b", failoverv1.ModeSiteLoss, engine.Options{})
+	if !errors.Is(err, engine.ErrWaiting) || sf.Status.Reason != failoverv1.ReasonGitUnreachable {
 		t.Fatalf("err %v, state %s %s", err, sf.Status.State, sf.Status.Reason)
 	}
 	if field(f.cluster("b"), "status", "instancesReportedState", "pg-b-1", "isPrimary") != true {
 		t.Fatal("site b was not promoted during break-glass")
 	}
-	if stepState(sf, "fence-a") != v1alpha1.StepDeferred || stepState(sf, "hold-a-cluster-pg-a") != v1alpha1.StepDeferred {
+	if stepState(sf, "fence-a") != failoverv1.StepDeferred || stepState(sf, "hold-a-cluster-pg-a") != failoverv1.StepDeferred {
 		t.Fatal("site a's steps were not deferred")
 	}
 	if len(sf.Status.FollowUps) != 1 || sf.Status.FollowUps[0].Action != "Rebuild" {
@@ -283,7 +283,7 @@ func TestSiteLossBreakGlassAndReturn(t *testing.T) {
 	// Site a comes back, still primary, while Git is still down.
 	f.clients.SetDown("a", false)
 	sf, err = f.resume("b", engine.Options{})
-	if !errors.Is(err, engine.ErrStopped) || sf.Status.Reason != v1alpha1.ReasonFencedSiteIsPrimary {
+	if !errors.Is(err, engine.ErrStopped) || sf.Status.Reason != failoverv1.ReasonFencedSiteIsPrimary {
 		t.Fatalf("err %v, reason %s", err, sf.Status.Reason)
 	}
 	if field(f.cluster("a"), "spec", "replica", "primary") != "pg-a" {
@@ -297,17 +297,17 @@ func TestSiteLossBreakGlassAndReturn(t *testing.T) {
 	if field(f.cluster("a"), "spec", "replica", "primary") != "pg-b" {
 		t.Fatal("site a was not fenced")
 	}
-	if stepState(sf, "hold-a-cluster-pg-a") != v1alpha1.StepSucceeded {
+	if stepState(sf, "hold-a-cluster-pg-a") != failoverv1.StepSucceeded {
 		t.Fatal("site a's objects were not held before the fence")
 	}
 
 	f.git.Unreachable = false
 	sf, err = f.resume("b", engine.Options{})
-	if err != nil || sf.Status.State != v1alpha1.RunSucceeded {
+	if err != nil || sf.Status.State != failoverv1.RunSucceeded {
 		t.Fatalf("resume: %v %s %s", err, sf.Status.State, sf.Status.Message)
 	}
 	for _, st := range sf.Status.Steps {
-		if st.State != v1alpha1.StepSucceeded {
+		if st.State != failoverv1.StepSucceeded {
 			t.Errorf("step %s is %s", st.ID, st.State)
 		}
 	}
@@ -319,8 +319,8 @@ func TestSiteLossBreakGlassAndReturn(t *testing.T) {
 func TestSiteLossSiteStaysDown(t *testing.T) {
 	f := newFixture(t)
 	f.clients.SetDown("a", true)
-	sf, err := f.start("b", v1alpha1.ModeSiteLoss, engine.Options{})
-	if err != nil || sf.Status.State != v1alpha1.RunSucceeded {
+	sf, err := f.start("b", failoverv1.ModeSiteLoss, engine.Options{})
+	if err != nil || sf.Status.State != failoverv1.RunSucceeded {
 		t.Fatalf("run: %v %s", err, sf.Status.Message)
 	}
 	if !strings.Contains(sf.Status.Message, "wait for their site") {
@@ -334,8 +334,8 @@ func TestSiteLossSiteStaysDown(t *testing.T) {
 func TestHeldByAnotherRun(t *testing.T) {
 	f := newFixture(t)
 	f.flux.Held["a/Cluster/pg-a"] = "run-0"
-	sf, err := f.start("b", v1alpha1.ModePlanned, engine.Options{})
-	if !errors.Is(err, engine.ErrStopped) || sf.Status.Reason != v1alpha1.ReasonHeldByAnotherRun {
+	sf, err := f.start("b", failoverv1.ModePlanned, engine.Options{})
+	if !errors.Is(err, engine.ErrStopped) || sf.Status.Reason != failoverv1.ReasonHeldByAnotherRun {
 		t.Fatalf("err %v, reason %s", err, sf.Status.Reason)
 	}
 	if field(f.cluster("a"), "spec", "replica", "primary") != "pg-a" {

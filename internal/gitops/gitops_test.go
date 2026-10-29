@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/takodotid/tack/api/v1alpha1"
+	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/driver"
 	"github.com/takodotid/tack/internal/engine"
 	"github.com/takodotid/tack/internal/stop"
@@ -148,21 +148,21 @@ func fixture() map[string]string {
 	}
 }
 
-func cnpg(kind, ns, name string) v1alpha1.ObjectRef {
-	return v1alpha1.ObjectRef{APIVersion: "postgresql.cnpg.io/v1", Kind: kind, Namespace: ns, Name: name}
+func cnpg(kind, ns, name string) failoverv1.ObjectRef {
+	return failoverv1.ObjectRef{APIVersion: "postgresql.cnpg.io/v1", Kind: kind, Namespace: ns, Name: name}
 }
 
-func workload(url string) *v1alpha1.WorkloadSpec {
-	return &v1alpha1.WorkloadSpec{Git: v1alpha1.GitSpec{
+func workload(url string) *failoverv1.WorkloadSpec {
+	return &failoverv1.WorkloadSpec{Git: failoverv1.GitSpec{
 		URL: url, Branch: "main",
-		Find: &v1alpha1.FindSpec{Paths: []v1alpha1.SitePath{
+		Find: &failoverv1.FindSpec{Paths: []failoverv1.SitePath{
 			{Site: "a", Path: "deploy/site-a"}, {Site: "b", Path: "deploy/site-b/"},
 		}},
-		Fields: []v1alpha1.FieldMapping{{
-			Site: "a", Object: v1alpha1.ObjectRef{Kind: "Cluster", Name: "pg"}, Field: "spec.replica.primary",
+		Fields: []failoverv1.FieldMapping{{
+			Site: "a", Object: failoverv1.ObjectRef{Kind: "Cluster", Name: "pg"}, Field: "spec.replica.primary",
 			File: "helm/values-a.yaml", Path: "cnpg.clusters[0].replica.primary",
 		}},
-		Author: &v1alpha1.GitAuthor{Name: "Tack", Email: "tack@example.invalid"},
+		Author: &failoverv1.GitAuthor{Name: "Tack", Email: "tack@example.invalid"},
 	}}
 }
 
@@ -195,7 +195,7 @@ func TestResolve(t *testing.T) {
 		t.Fatalf("Resolve: %v", err)
 	}
 	ch := switchover()
-	want := []v1alpha1.GitChange{
+	want := []failoverv1.GitChange{
 		{Site: "a", Object: ch[0].Object, Field: ch[0].Field, Value: ch[0].Value, File: "helm/values-a.yaml", Path: "cnpg.clusters[0].replica.primary"},
 		{Site: "b", Object: ch[1].Object, Field: ch[1].Field, Value: ch[1].Value, File: "deploy/site-b/cluster.yaml", Path: "spec.replica.primary", Document: i32(0)},
 		{Site: "a", Object: ch[2].Object, Field: ch[2].Field, Value: ch[2].Value, File: "deploy/site-a/cluster.yaml", Path: "spec.instances", Document: i32(0)},
@@ -214,13 +214,13 @@ func TestResolveFindErrors(t *testing.T) {
 	rm := newRemote(t, files)
 	tests := []struct {
 		name   string
-		spec   func(*v1alpha1.WorkloadSpec)
+		spec   func(*failoverv1.WorkloadSpec)
 		change driver.FieldChange
 		errs   []string
 	}{
 		{
 			name:   "several manifests in the whole repository",
-			spec:   func(w *v1alpha1.WorkloadSpec) { w.Git.Find.Paths = nil },
+			spec:   func(w *failoverv1.WorkloadSpec) { w.Git.Find.Paths = nil },
 			change: driver.FieldChange{Site: "b", Object: cnpg("Cluster", "db", "pg"), Field: "spec.instances", Value: str(`1`)},
 			errs:   []string{"several manifests", "deploy/site-a/cluster.yaml document 0", "deploy/site-b/cluster.yaml document 0", "spec.git.fields"},
 		},
@@ -241,7 +241,7 @@ func TestResolveFindErrors(t *testing.T) {
 		},
 		{
 			name:   "another group",
-			change: driver.FieldChange{Site: "b", Object: v1alpha1.ObjectRef{APIVersion: "example.com/v1", Kind: "Cluster", Namespace: "db", Name: "pg"}, Field: "spec.instances", Value: str(`1`)},
+			change: driver.FieldChange{Site: "b", Object: failoverv1.ObjectRef{APIVersion: "example.com/v1", Kind: "Cluster", Namespace: "db", Name: "pg"}, Field: "spec.instances", Value: str(`1`)},
 			errs:   []string{"no manifest"},
 		},
 		{
@@ -251,25 +251,25 @@ func TestResolveFindErrors(t *testing.T) {
 		},
 		{
 			name:   "mapped file is missing",
-			spec:   func(w *v1alpha1.WorkloadSpec) { w.Git.Fields[0].File = "helm/missing.yaml" },
+			spec:   func(w *failoverv1.WorkloadSpec) { w.Git.Fields[0].File = "helm/missing.yaml" },
 			change: driver.FieldChange{Site: "a", Object: cnpg("Cluster", "db", "pg"), Field: "spec.replica.primary", Value: str(`"x"`)},
 			errs:   []string{"helm/missing.yaml does not exist"},
 		},
 		{
 			name:   "mapped path has no parent",
-			spec:   func(w *v1alpha1.WorkloadSpec) { w.Git.Fields[0].Path = "cnpg.clusters[0].replicas.primary" },
+			spec:   func(w *failoverv1.WorkloadSpec) { w.Git.Fields[0].Path = "cnpg.clusters[0].replicas.primary" },
 			change: driver.FieldChange{Site: "a", Object: cnpg("Cluster", "db", "pg"), Field: "spec.replica.primary", Value: str(`"x"`)},
 			errs:   []string{"cnpg.clusters[0].replicas does not exist"},
 		},
 		{
 			name:   "mapped file outside the repository",
-			spec:   func(w *v1alpha1.WorkloadSpec) { w.Git.Fields[0].File = "../x.yaml" },
+			spec:   func(w *failoverv1.WorkloadSpec) { w.Git.Fields[0].File = "../x.yaml" },
 			change: driver.FieldChange{Site: "a", Object: cnpg("Cluster", "db", "pg"), Field: "spec.replica.primary", Value: str(`"x"`)},
 			errs:   []string{"not a path inside the repository"},
 		},
 		{
 			name: "two mappings match",
-			spec: func(w *v1alpha1.WorkloadSpec) {
+			spec: func(w *failoverv1.WorkloadSpec) {
 				w.Git.Fields = append(w.Git.Fields, w.Git.Fields[0])
 			},
 			change: driver.FieldChange{Site: "a", Object: cnpg("Cluster", "db", "pg"), Field: "spec.replica.primary", Value: str(`"x"`)},
@@ -436,7 +436,7 @@ func TestCommitSearchesWhenResolveCouldNot(t *testing.T) {
 	rm := newRemote(t, fixture())
 	base := rm.head()
 	w := workload(rm.url)
-	changes := []v1alpha1.GitChange{{Site: "b", Object: cnpg("Cluster", "db", "pg"), Field: "spec.replica.primary", Path: "spec.replica.primary", Value: str(`"site-b"`)}}
+	changes := []failoverv1.GitChange{{Site: "b", Object: cnpg("Cluster", "db", "pg"), Field: "spec.replica.primary", Path: "spec.replica.primary", Value: str(`"site-b"`)}}
 	commit, err := newRepo(t).Commit(context.Background(), w, engine.CommitRequest{Run: "run-1", Base: base, Changes: changes, Message: "m"})
 	if err != nil {
 		t.Fatalf("Commit: %v", err)
@@ -473,7 +473,7 @@ func TestCommitAdoptsTheRunsCommit(t *testing.T) {
 	// Another run does not adopt it.
 	req.Run = "run-2"
 	_, err = newRepo(t).Commit(context.Background(), w, req)
-	if se, ok := stop.As(err); !ok || se.Reason != v1alpha1.ReasonGitChanged || se.Wait {
+	if se, ok := stop.As(err); !ok || se.Reason != failoverv1.ReasonGitChanged || se.Wait {
 		t.Errorf("Commit by another run: %v, want to stop with GitChanged", err)
 	}
 }
@@ -503,7 +503,7 @@ func TestCommitGitChanged(t *testing.T) {
 			}
 			_, err = r.Commit(context.Background(), w, engine.CommitRequest{Run: "run-1", Base: base, Changes: changes, Message: "m"})
 			se, ok := stop.As(err)
-			if !ok || se.Reason != v1alpha1.ReasonGitChanged || se.Wait {
+			if !ok || se.Reason != failoverv1.ReasonGitChanged || se.Wait {
 				t.Fatalf("Commit: %v, want to stop with GitChanged", err)
 			}
 			if !strings.Contains(se.Message, base) || !strings.Contains(se.Message, other) {
@@ -530,7 +530,7 @@ func TestCommitPushRace(t *testing.T) {
 	r.beforePush = func() { other = rm.push(map[string]string{"other.txt": "x\n"}, "race") }
 	_, err = r.Commit(context.Background(), w, engine.CommitRequest{Run: "run-1", Base: base, Changes: changes, Message: "m"})
 	se, ok := stop.As(err)
-	if !ok || se.Reason != v1alpha1.ReasonGitChanged || se.Wait || !strings.Contains(se.Message, "rejected") {
+	if !ok || se.Reason != failoverv1.ReasonGitChanged || se.Wait || !strings.Contains(se.Message, "rejected") {
 		t.Fatalf("Commit: %v, want to stop with GitChanged after a rejected push", err)
 	}
 	if rm.head() != other {
@@ -555,7 +555,7 @@ func TestCommitUnreachable(t *testing.T) {
 	for name, repo := range map[string]*Repo{"same clone": r, "new clone": newRepo(t)} {
 		_, err := repo.Commit(context.Background(), w, req)
 		se, ok := stop.As(err)
-		if !ok || se.Reason != v1alpha1.ReasonGitUnreachable || !se.Wait {
+		if !ok || se.Reason != failoverv1.ReasonGitUnreachable || !se.Wait {
 			t.Errorf("%s: Commit: %v, want to wait with GitUnreachable", name, err)
 		}
 	}
@@ -577,7 +577,7 @@ func TestCommitPushUnreachable(t *testing.T) {
 		}
 	}
 	_, err = r.Commit(context.Background(), w, engine.CommitRequest{Run: "run-1", Base: base, Changes: changes, Message: "m"})
-	if se, ok := stop.As(err); !ok || se.Reason != v1alpha1.ReasonGitUnreachable || !se.Wait {
+	if se, ok := stop.As(err); !ok || se.Reason != failoverv1.ReasonGitUnreachable || !se.Wait {
 		t.Fatalf("Commit: %v, want to wait with GitUnreachable", err)
 	}
 	// Git comes back: the retry commits again on the same base.
@@ -717,7 +717,7 @@ func TestRedact(t *testing.T) {
 	if strings.Contains(e.Error(), "secret") {
 		t.Errorf("gitError shows the password: %s", e)
 	}
-	if _, err := newRepo(t).Resolve(context.Background(), &v1alpha1.WorkloadSpec{Git: v1alpha1.GitSpec{URL: "-https://user:secret@x", Branch: "main", Find: &v1alpha1.FindSpec{}}},
+	if _, err := newRepo(t).Resolve(context.Background(), &failoverv1.WorkloadSpec{Git: failoverv1.GitSpec{URL: "-https://user:secret@x", Branch: "main", Find: &failoverv1.FindSpec{}}},
 		switchover()); err == nil || strings.Contains(err.Error(), "secret") {
 		t.Errorf("Resolve with a bad URL: %v", err)
 	}

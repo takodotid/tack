@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/takodotid/tack/api/v1alpha1"
+	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/engine"
 	"github.com/takodotid/tack/internal/stop"
 )
@@ -22,7 +22,7 @@ const trailer = "Tack-Run"
 // head is the run's own commit on top of req.Base, as after an interrupted
 // run, it returns that commit. When the changes change nothing, it returns
 // the base and pushes nothing.
-func (r *Repo) Commit(ctx context.Context, w *v1alpha1.WorkloadSpec, req engine.CommitRequest) (string, error) {
+func (r *Repo) Commit(ctx context.Context, w *failoverv1.WorkloadSpec, req engine.CommitRequest) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if req.Run == "" || strings.ContainsAny(req.Run, "\r\n") || strings.TrimSpace(req.Run) != req.Run {
@@ -42,9 +42,9 @@ func (r *Repo) Commit(ctx context.Context, w *v1alpha1.WorkloadSpec, req engine.
 	head, err := r.fetch(ctx, c)
 	switch {
 	case errors.Is(err, ErrUnreachable):
-		return "", stop.Wait(v1alpha1.ReasonGitUnreachable, "%v", err)
+		return "", stop.Wait(failoverv1.ReasonGitUnreachable, "%v", err)
 	case errors.Is(err, errNoBranch):
-		return "", stop.Ask(v1alpha1.ReasonGitChanged, "%v", err)
+		return "", stop.Ask(failoverv1.ReasonGitChanged, "%v", err)
 	case err != nil:
 		return "", err
 	}
@@ -56,14 +56,14 @@ func (r *Repo) Commit(ctx context.Context, w *v1alpha1.WorkloadSpec, req engine.
 		if r.ranBy(ctx, c, head, base, req.Run) {
 			return head, nil
 		}
-		return "", stop.Ask(v1alpha1.ReasonGitChanged,
+		return "", stop.Ask(failoverv1.ReasonGitChanged,
 			"branch %s of %s is at %s, but the run's base is %s: Git changed during the run", c.branch, Redact(c.url), head, req.Base)
 	}
 
 	if err := r.reset(ctx, c, base); err != nil {
 		return "", err
 	}
-	changes := make([]v1alpha1.GitChange, len(req.Changes))
+	changes := make([]failoverv1.GitChange, len(req.Changes))
 	var f *finder
 	for i := range req.Changes {
 		changes[i] = *req.Changes[i].DeepCopy()
@@ -106,7 +106,7 @@ func (r *Repo) Commit(ctx context.Context, w *v1alpha1.WorkloadSpec, req engine.
 
 // apply writes the changes into the clone's working tree, which holds
 // commit. It returns the files whose bytes changed.
-func (r *Repo) apply(ctx context.Context, c *clone, commit string, changes []v1alpha1.GitChange) ([]string, error) {
+func (r *Repo) apply(ctx context.Context, c *clone, commit string, changes []failoverv1.GitChange) ([]string, error) {
 	orig := map[string][]byte{}
 	edited := map[string][]byte{}
 	var order []string
@@ -149,7 +149,7 @@ func (r *Repo) apply(ctx context.Context, c *clone, commit string, changes []v1a
 
 // commit commits the index with the run's trailer. The author is the
 // Workload's when it sets one, else git's own configuration's.
-func (r *Repo) commit(ctx context.Context, c *clone, author *v1alpha1.GitAuthor, req engine.CommitRequest) error {
+func (r *Repo) commit(ctx context.Context, c *clone, author *failoverv1.GitAuthor, req engine.CommitRequest) error {
 	msg := strings.TrimRight(req.Message, " \t\r\n") + "\n\n" + trailer + ": " + req.Run + "\n"
 	var env, args []string
 	if author != nil {
@@ -197,13 +197,13 @@ func (r *Repo) push(ctx context.Context, c *clone, commit string) error {
 		}
 		status := Redact(strings.TrimSpace(l[1:]))
 		if strings.Contains(l, "[rejected]") {
-			return stop.Ask(v1alpha1.ReasonGitChanged,
+			return stop.Ask(failoverv1.ReasonGitChanged,
 				"the push of %s to branch %s of %s was rejected because the branch moved: Git changed during the run (%s)", commit, c.branch, Redact(c.url), status)
 		}
 		return fmt.Errorf("the remote refused the push of %s to branch %s: %s", commit, c.branch, status)
 	}
 	if err != nil {
-		return stop.Wait(v1alpha1.ReasonGitUnreachable, "%v: %v", ErrUnreachable, err)
+		return stop.Wait(failoverv1.ReasonGitUnreachable, "%v: %v", ErrUnreachable, err)
 	}
 	return nil
 }
@@ -230,7 +230,7 @@ func (r *Repo) ranBy(ctx context.Context, c *clone, commit, base, run string) bo
 // Checkout returns a directory that holds the repository's files at
 // revision, a commit id. It fetches the branch when the clone lacks the
 // commit. The directory stays until Close.
-func (r *Repo) Checkout(ctx context.Context, w *v1alpha1.WorkloadSpec, revision string) (string, error) {
+func (r *Repo) Checkout(ctx context.Context, w *failoverv1.WorkloadSpec, revision string) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if !commitRE.MatchString(revision) {
@@ -245,7 +245,7 @@ func (r *Repo) Checkout(ctx context.Context, w *v1alpha1.WorkloadSpec, revision 
 		_, err := r.fetch(ctx, c)
 		switch {
 		case errors.Is(err, ErrUnreachable):
-			return "", stop.Wait(v1alpha1.ReasonGitUnreachable, "%v", err)
+			return "", stop.Wait(failoverv1.ReasonGitUnreachable, "%v", err)
 		case err != nil:
 			return "", err
 		}

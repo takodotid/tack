@@ -12,7 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/takodotid/tack/api/v1alpha1"
+	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/stop"
 )
 
@@ -89,7 +89,7 @@ func diffOptions(ks *unstructured.Unstructured) (ssa.DiffOptions, error) {
 // VerifyGit implements engine.Flux. For each Kustomization that applies a
 // held object, it renders the Kustomization from dir and dry-runs the held
 // objects as kustomize-controller.
-func (f *Flux) VerifyGit(ctx context.Context, site string, held []v1alpha1.HeldObject, fields []v1alpha1.ObjectField, dir string, strict bool) (string, error) {
+func (f *Flux) VerifyGit(ctx context.Context, site string, held []failoverv1.HeldObject, fields []failoverv1.ObjectField, dir string, strict bool) (string, error) {
 	if len(held) == 0 {
 		return "no object is held at site " + site, nil
 	}
@@ -97,8 +97,8 @@ func (f *Flux) VerifyGit(ctx context.Context, site string, held []v1alpha1.HeldO
 	if err != nil {
 		return "", err
 	}
-	var order []v1alpha1.ObjectKey
-	byKs := map[v1alpha1.ObjectKey][]v1alpha1.ObjectRef{}
+	var order []failoverv1.ObjectKey
+	byKs := map[failoverv1.ObjectKey][]failoverv1.ObjectRef{}
 	for _, h := range held {
 		k := h.Kustomization
 		if k.Name == "" {
@@ -144,7 +144,7 @@ func (f *Flux) VerifyGit(ctx context.Context, site string, held []v1alpha1.HeldO
 		}
 	}
 	if len(missing) > 0 {
-		return "", stop.Ask(v1alpha1.ReasonGitDiffersFromLive,
+		return "", stop.Ask(failoverv1.ReasonGitDiffersFromLive,
 			"Git, as Flux renders it at site %s, lacks %s", site, strings.Join(missing, "; "))
 	}
 	fs, err := classify(objs, fields, mask)
@@ -156,7 +156,7 @@ func (f *Flux) VerifyGit(ctx context.Context, site string, held []v1alpha1.HeldO
 
 // checked is one held object: rendered from Git, live, and the dry-run.
 type checked struct {
-	Ref    v1alpha1.ObjectRef
+	Ref    failoverv1.ObjectRef
 	Git    *unstructured.Unstructured
 	Live   *unstructured.Unstructured
 	Result diffResult
@@ -173,7 +173,7 @@ type findings struct {
 }
 
 // classify sorts the differences into the run's fields and the rest.
-func classify(objs []checked, fields []v1alpha1.ObjectField, mask *masker) (findings, error) {
+func classify(objs []checked, fields []failoverv1.ObjectField, mask *masker) (findings, error) {
 	var fs findings
 	byObj := map[objID][]path{}
 	names := map[objID][]string{}
@@ -202,7 +202,7 @@ func classify(objs []checked, fields []v1alpha1.ObjectField, mask *masker) (find
 			drift = driftPaths(o.Result.Live, o.Result.Merged)
 			unknown = len(drift) == 0
 		case ssa.CreatedAction:
-			return fs, stop.Ask(v1alpha1.ReasonGitDiffersFromLive,
+			return fs, stop.Ask(failoverv1.ReasonGitDiffersFromLive,
 				"applying Git would create %s again: it is missing live, or a field that cannot change differs", refString(o.Ref))
 		default:
 			return fs, fmt.Errorf("dry-run apply of %s: unexpected result %q", refString(o.Ref), o.Result.Action)
@@ -268,12 +268,12 @@ func classify(objs []checked, fields []v1alpha1.ObjectField, mask *masker) (find
 
 func verdict(fs findings, n int, site string, strict bool) (string, error) {
 	if len(fs.Fields) > 0 {
-		return "", stop.Ask(v1alpha1.ReasonGitDiffersFromLive,
+		return "", stop.Ask(failoverv1.ReasonGitDiffersFromLive,
 			"at site %s, Git differs from live in fields this run changed: %s", site, strings.Join(fs.Fields, "; "))
 	}
 	if len(fs.Other) > 0 {
 		if strict {
-			return "", stop.Ask(v1alpha1.ReasonGitDiffersFromLive,
+			return "", stop.Ask(failoverv1.ReasonGitDiffersFromLive,
 				"at site %s, applying Git would change fields this run did not change: %s", site, strings.Join(fs.Other, "; "))
 		}
 		return fmt.Sprintf("Git equals live in this run's fields for %d objects; applying Git also changes %s",
@@ -316,7 +316,7 @@ func body(u *unstructured.Unstructured) *unstructured.Unstructured {
 //
 // A field under metadata, or an object without a recorded generation, is
 // not covered; the result says so.
-func (f *Flux) VerifyNoop(ctx context.Context, site string, held []v1alpha1.HeldObject, fields []v1alpha1.ObjectField, strict bool) (string, error) {
+func (f *Flux) VerifyNoop(ctx context.Context, site string, held []failoverv1.HeldObject, fields []failoverv1.ObjectField, strict bool) (string, error) {
 	if len(held) == 0 {
 		return "no object is held at site " + site, nil
 	}
@@ -328,8 +328,8 @@ func (f *Flux) VerifyNoop(ctx context.Context, site string, held []v1alpha1.Held
 	unchecked := 0
 	moved := map[objID]bool{}
 	known := map[objID]bool{}
-	var order []v1alpha1.ObjectKey
-	seenKs := map[v1alpha1.ObjectKey]bool{}
+	var order []failoverv1.ObjectKey
+	seenKs := map[failoverv1.ObjectKey]bool{}
 	for _, h := range held {
 		if h.ReleasedAt == nil {
 			return "", fmt.Errorf("%s at site %s is not released", refString(h.Object), site)
@@ -339,7 +339,7 @@ func (f *Flux) VerifyNoop(ctx context.Context, site string, held []v1alpha1.Held
 			return "", err
 		}
 		if isHeld(u) {
-			return "", stop.Ask(v1alpha1.ReasonHeldByAnotherRun,
+			return "", stop.Ask(failoverv1.ReasonHeldByAnotherRun,
 				"%s at site %s is held again after release: Flux does not apply it", refString(h.Object), site)
 		}
 		id := refID(h.Object)
@@ -391,7 +391,7 @@ func (f *Flux) VerifyNoop(ctx context.Context, site string, held []v1alpha1.Held
 		}
 	}
 	if len(changed) > 0 && strict {
-		return "", stop.Ask(v1alpha1.ReasonFluxChanged, "at site %s, objects changed after release: %s", site, strings.Join(changed, "; "))
+		return "", stop.Ask(failoverv1.ReasonFluxChanged, "at site %s, objects changed after release: %s", site, strings.Join(changed, "; "))
 	}
 	msg := fmt.Sprintf("Flux changed nothing in %d objects", len(held)-len(changed)-unchecked)
 	if len(revs) > 0 {
