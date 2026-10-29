@@ -10,7 +10,7 @@ import (
 )
 
 // Operator acts like CloudNativePG on the fake clients, for the Clusters
-// pg-<site> and Poolers pg-<site>-rw in namespace db.
+// pg-<site> and Poolers pg-<site>-pooler-rw in namespace db.
 type Operator struct {
 	Clients *Clients
 	Sites   []string
@@ -70,15 +70,15 @@ func (o *Operator) reconcile(ctx context.Context, site string) {
 		_ = c.Update(ctx, u)
 	}
 
-	p := Object("postgresql.cnpg.io/v1", "Pooler", "db", "pg-"+site+"-rw", nil)
+	p := Object("postgresql.cnpg.io/v1", "Pooler", "db", "pg-"+site+"-pooler-rw", nil)
 	if c.Get(ctx, client.ObjectKeyFromObject(p), p) != nil {
 		return
 	}
 	n, _, _ := unstructured.NestedInt64(p.Object, "spec", "instances")
-	d := Object("apps/v1", "Deployment", "db", "pg-"+site+"-rw", nil)
+	d := Object("apps/v1", "Deployment", "db", "pg-"+site+"-pooler-rw", nil)
 	err = c.Get(ctx, client.ObjectKeyFromObject(d), d)
 	if err != nil {
-		d = Object("apps/v1", "Deployment", "db", "pg-"+site+"-rw", map[string]any{"spec": map[string]any{}})
+		d = Object("apps/v1", "Deployment", "db", "pg-"+site+"-pooler-rw", map[string]any{"spec": map[string]any{}})
 		_ = c.Create(ctx, d)
 	}
 	status := map[string]any{}

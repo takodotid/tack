@@ -26,8 +26,8 @@ metadata: {name: pg-main}
 spec:
   driver: cnpg
   sites:
-  - {name: a, kubeContext: site-a, cnpg: {cluster: {namespace: db, name: pg-a}, pooler: {namespace: db, name: pg-a-rw, instances: 2}}}
-  - {name: b, kubeContext: site-b, cnpg: {cluster: {namespace: db, name: pg-b}, pooler: {namespace: db, name: pg-b-rw, instances: 2}}}
+  - {name: a, kubeContext: site-a, cnpg: {cluster: {namespace: db, name: pg-a}, pooler: {namespace: db, name: pg-a-pooler-rw, instances: 2}}}
+  - {name: b, kubeContext: site-b, cnpg: {cluster: {namespace: db, name: pg-b}, pooler: {namespace: db, name: pg-b-pooler-rw, instances: 2}}}
   git: {url: https://git.example.com/gitops.git, branch: main, find: {}}
   timeouts: {demotion: 5s, promotion: 5s, flux: 5s}
 `
