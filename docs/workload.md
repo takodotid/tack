@@ -100,12 +100,34 @@ Required fields have no default. Durations are Go durations, such as `90s`, `15m
 | Field | Required | Default | Meaning |
 |---|---|---|---|
 | `name` | yes | | The site's name in `--to`, `--from`, `--fence` and the ledger. Unique. Lowercase letters, digits and `-`, starting and ending with a letter or digit, at most 63 characters. |
-| `kubeContext` | yes | | The kubeconfig context for this site. A context missing from the kubeconfig is an error; Tack never uses the current context instead. |
+| `kubeContext` | yes | | The kubeconfig context for this site. A context missing from the kubeconfig is an error; Tack never uses the current context instead. [One kubeconfig](#every-sites-context-in-one-kubeconfig) holds every site's context. |
 | `cnpg.cluster.namespace`, `cnpg.cluster.name` | yes | | The site's CloudNativePG `Cluster`. Each site's Cluster needs its own name. |
 | `cnpg.pooler.namespace`, `cnpg.pooler.name` | no | | The site's read-write `Pooler`. Tack also waits on the Deployment of the same name, which CloudNativePG runs for it. Without a pooler, Tack moves no Pooler at this site. Never name a Pooler `<cluster>-rw`, `<cluster>-ro` or `<cluster>-r`: its Service takes its name, the Cluster already owns Services with those names, and CloudNativePG then never reconciles the Pooler. |
 | `cnpg.pooler.instances` | with a pooler | | The Pooler's instances while this site is primary, at least 1. At every other site Tack sets it to 0. |
 
 `tack plan` checks the live objects too: each `Cluster` sets `.spec.replica.primary` and not `.spec.replica.enabled`, and a Flux Kustomization applies each `Cluster` and `Pooler`. [RFC#0004](../rfcs/RFC0004.md) and [RFC#0005](../rfcs/RFC0005.md) give every check.
+
+### Every site's context in one kubeconfig
+
+Tack reads every site's `kubeContext` from one kubeconfig: the file `--kubeconfig` names, or else the standard loading rules. When each cluster has its own kubeconfig file, list the files in `KUBECONFIG`, and client-go merges them:
+
+```sh
+KUBECONFIG=site-a.kubeconfig:site-b.kubeconfig tack plan -f workload.yaml --to b
+```
+
+| Rule | Why |
+|---|---|
+| `--kubeconfig` takes one file. | With it, Tack ignores `KUBECONFIG`. |
+| Context, cluster and user names differ between the files. | On a repeated name, the first file's entry wins and the others are dropped. A site's context could then reach another site's cluster or use its credentials. |
+
+To keep one file instead, flatten the merge, then pass it with `--kubeconfig`:
+
+```sh
+KUBECONFIG=site-a.kubeconfig:site-b.kubeconfig kubectl config view --flatten > sites.kubeconfig
+tack --kubeconfig sites.kubeconfig plan -f workload.yaml --to b
+```
+
+The merged file holds every site's credentials. Protect it like the originals.
 
 ### `spec.git`
 

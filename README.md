@@ -98,7 +98,7 @@ Tack also needs:
 
 | Need | Detail |
 |---|---|
-| A kube context per site | In the kubeconfig (`--kubeconfig`, or the standard loading rules). The permissions are listed in [docs/operations.md](docs/operations.md#permissions). |
+| A kube context per site | All in one kubeconfig (`--kubeconfig`, or the standard loading rules). To combine one file per cluster, see [docs/workload.md](docs/workload.md#every-sites-context-in-one-kubeconfig). The permissions are listed in [docs/operations.md](docs/operations.md#permissions). |
 | Git access | Through the operator's `git` configuration, such as an SSH agent or a credential helper. Tack runs `git` with `GIT_TERMINAL_PROMPT=0` and stores no credential. The branch must accept a push from those credentials. |
 | A Workload file | The sites, their contexts, the Git repository and where each field lives in it: [docs/workload.md](docs/workload.md). |
 
