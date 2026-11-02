@@ -1,7 +1,7 @@
-// Package v1alpha1 holds the SiteFailover ledger and the Workload configuration.
+// Package v1 holds the SiteFailover ledger and the Workload configuration.
 // +kubebuilder:object:generate=true
 // +groupName=failover.tako.id
-package v1alpha1
+package v1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -10,7 +10,7 @@ import (
 )
 
 // GroupVersion is the API group and version of the ledger.
-var GroupVersion = schema.GroupVersion{Group: "failover.tako.id", Version: "v1alpha1"}
+var GroupVersion = schema.GroupVersion{Group: "failover.tako.id", Version: "v1"}
 
 var (
 	schemeBuilder = runtime.NewSchemeBuilder(addKnownTypes)

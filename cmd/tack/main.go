@@ -9,7 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/takodotid/tack/api/v1alpha1"
+	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/cli"
 	"github.com/takodotid/tack/internal/driver"
 	_ "github.com/takodotid/tack/internal/driver/cnpg"
@@ -27,7 +27,7 @@ func (factory) Clients(kubeconfig string, contexts map[string]string) kube.Clien
 	return kube.NewKubeconfig(kubeconfig, contexts)
 }
 
-func (f factory) Env(_ context.Context, kubeconfig string, spec *v1alpha1.WorkloadSpec, ledgerSite string, out io.Writer) (*engine.Env, func(), error) {
+func (f factory) Env(_ context.Context, kubeconfig string, spec *failoverv1.WorkloadSpec, ledgerSite string, out io.Writer) (*engine.Env, func(), error) {
 	d, err := driver.Get(spec.Driver)
 	if err != nil {
 		return nil, nil, err

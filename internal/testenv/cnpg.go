@@ -25,9 +25,9 @@ func Cluster(site, primary string, isPrimary bool, extra map[string]any) *unstru
 	})
 }
 
-// Pooler returns the read-write Pooler pg-<site>-rw with n instances.
+// Pooler returns the read-write Pooler pg-<site>-pooler-rw with n instances.
 func Pooler(site string, n int64) *unstructured.Unstructured {
-	return Object("postgresql.cnpg.io/v1", "Pooler", "db", "pg-"+site+"-rw", map[string]any{
+	return Object("postgresql.cnpg.io/v1", "Pooler", "db", "pg-"+site+"-pooler-rw", map[string]any{
 		"spec": map[string]any{"cluster": map[string]any{"name": "pg-" + site}, "instances": n, "type": "rw"},
 	})
 }

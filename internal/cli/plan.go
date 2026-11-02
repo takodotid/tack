@@ -12,7 +12,7 @@ import (
 	"golang.org/x/term"
 	"sigs.k8s.io/yaml"
 
-	"github.com/takodotid/tack/api/v1alpha1"
+	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/config"
 	"github.com/takodotid/tack/internal/driver"
 	"github.com/takodotid/tack/internal/engine"
@@ -40,12 +40,12 @@ func (p *planFlags) request(w *config.Workload, now func() string) (engine.Reque
 	if p.file == "" || p.to == "" {
 		return engine.Request{}, usagef("--file and --to are required")
 	}
-	var mode v1alpha1.Mode
+	var mode failoverv1.Mode
 	switch p.mode {
 	case "planned":
-		mode = v1alpha1.ModePlanned
+		mode = failoverv1.ModePlanned
 	case "site-loss":
-		mode = v1alpha1.ModeSiteLoss
+		mode = failoverv1.ModeSiteLoss
 	default:
 		return engine.Request{}, usagef("--mode must be planned or site-loss, not %q", p.mode)
 	}
@@ -118,7 +118,7 @@ func (o *options) makePlan(ctx context.Context, p *planFlags, progress io.Writer
 	if p.file == "" || p.to == "" {
 		return nil, nil, nil, usagef("--file and --to are required")
 	}
-	w, err := config.Load(p.file)
+	w, err := o.loadWorkload(p.file)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -130,9 +130,9 @@ func (o *options) makePlan(ctx context.Context, p *planFlags, progress io.Writer
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	env.Runs = func(ctx context.Context) ([]v1alpha1.SiteFailover, error) {
+	env.Runs = func(ctx context.Context) ([]failoverv1.SiteFailover, error) {
 		found, err := findRuns(ctx, o, &w.Spec, w.Name)
-		var runs []v1alpha1.SiteFailover
+		var runs []failoverv1.SiteFailover
 		for _, r := range found {
 			runs = append(runs, *r.sf)
 		}
@@ -234,13 +234,13 @@ func (o *options) confirm(out io.Writer, yes bool, workload string) error {
 func stdinIsTerminal() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
 
 // checkNoActiveRun refuses a second active run of the same workload.
-func checkNoActiveRun(ctx context.Context, o *options, env *engine.Env, sf *v1alpha1.SiteFailover, takeOver string) error {
+func checkNoActiveRun(ctx context.Context, o *options, env *engine.Env, sf *failoverv1.SiteFailover, takeOver string) error {
 	runs, err := findRuns(ctx, o, &sf.Spec.Workload.Spec, sf.Spec.Workload.Name)
 	if err != nil {
 		return err
 	}
 	for _, r := range runs {
-		if r.sf.Status.State == v1alpha1.RunSucceeded || r.sf.Name == takeOver {
+		if r.sf.Status.State == failoverv1.RunSucceeded || r.sf.Name == takeOver {
 			continue
 		}
 		return fmt.Errorf("run %s at site %s is %s: resume it (tack resume %s) or take it over (--take-over %s)",

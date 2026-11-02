@@ -11,7 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/takodotid/tack/api/v1alpha1"
+	failoverv1 "github.com/takodotid/tack/api/v1"
 )
 
 func TestParsePath(t *testing.T) {
@@ -95,7 +95,7 @@ func clusterWith(primary string, instances int64, description string) *unstructu
 }
 
 var (
-	primaryField = v1alpha1.ObjectField{Object: clusterRef, Field: "spec.replica.primary"}
+	primaryField = failoverv1.ObjectField{Object: clusterRef, Field: "spec.replica.primary"}
 	secretGVK    = schema.GroupVersionKind{Version: "v1", Kind: "Secret"}
 )
 
@@ -106,7 +106,7 @@ func TestClassify(t *testing.T) {
 
 	t.Run("equal", func(t *testing.T) {
 		fs, err := classify([]checked{{Ref: clusterRef, Git: git, Live: git.DeepCopy(), Result: diffResult{Action: ssa.UnchangedAction}}},
-			[]v1alpha1.ObjectField{primaryField}, mask)
+			[]failoverv1.ObjectField{primaryField}, mask)
 		if err != nil || len(fs.Fields)+len(fs.Other) != 0 {
 			t.Fatalf("%+v %v", fs, err)
 		}
@@ -119,7 +119,7 @@ func TestClassify(t *testing.T) {
 		live := clusterWith("pg-a", 3, "d")
 		fs, err := classify([]checked{{Ref: clusterRef, Git: git, Live: live,
 			Result: diffResult{Action: ssa.ConfiguredAction, Live: live, Merged: git}}},
-			[]v1alpha1.ObjectField{primaryField}, mask)
+			[]failoverv1.ObjectField{primaryField}, mask)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -128,14 +128,14 @@ func TestClassify(t *testing.T) {
 		}
 		for _, strict := range []bool{true, false} {
 			_, err = verdict(fs, 1, "a", strict)
-			wantStop(t, err, v1alpha1.ReasonGitDiffersFromLive, "spec.replica.primary")
+			wantStop(t, err, failoverv1.ReasonGitDiffersFromLive, "spec.replica.primary")
 		}
 	})
 	t.Run("field missing from Git", func(t *testing.T) {
 		g := git.DeepCopy()
 		unstructured.RemoveNestedField(g.Object, "spec", "replica", "primary")
 		fs, _ := classify([]checked{{Ref: clusterRef, Git: g, Live: git, Result: diffResult{Action: ssa.UnchangedAction}}},
-			[]v1alpha1.ObjectField{primaryField}, mask)
+			[]failoverv1.ObjectField{primaryField}, mask)
 		if len(fs.Fields) != 1 || !strings.Contains(fs.Fields[0], "Git has (unset)") {
 			t.Fatalf("%+v", fs)
 		}
@@ -144,7 +144,7 @@ func TestClassify(t *testing.T) {
 		g := git.DeepCopy()
 		unstructured.RemoveNestedField(g.Object, "spec", "replica", "primary")
 		fs, _ := classify([]checked{{Ref: clusterRef, Git: g, Live: g.DeepCopy(), Result: diffResult{Action: ssa.UnchangedAction}}},
-			[]v1alpha1.ObjectField{primaryField}, mask)
+			[]failoverv1.ObjectField{primaryField}, mask)
 		if len(fs.Fields) != 0 {
 			t.Fatalf("%+v", fs)
 		}
@@ -154,7 +154,7 @@ func TestClassify(t *testing.T) {
 		g.SetAnnotations(map[string]string{"cnpg.io/hibernation": "off"})
 		for _, field := range []string{"spec.replcia.primary", "metadata.annotations.cnpg.io/hibernation"} {
 			_, err := classify([]checked{{Ref: clusterRef, Git: g, Live: g.DeepCopy(), Result: diffResult{Action: ssa.UnchangedAction}}},
-				[]v1alpha1.ObjectField{{Object: clusterRef, Field: field}}, mask)
+				[]failoverv1.ObjectField{{Object: clusterRef, Field: field}}, mask)
 			if err == nil || !strings.Contains(err.Error(), "resolves in neither") {
 				t.Errorf("%s: got %v", field, err)
 			}
@@ -164,10 +164,10 @@ func TestClassify(t *testing.T) {
 		live := clusterWith("pg-b", 3, "d")
 		merged := clusterWith("pg-b", 3, "d")
 		_ = unstructured.SetNestedField(merged.Object, "x", "spec", "replica", "primary")
-		field := v1alpha1.ObjectField{Object: clusterRef, Field: "spec.replica"}
+		field := failoverv1.ObjectField{Object: clusterRef, Field: "spec.replica"}
 		fs, _ := classify([]checked{{Ref: clusterRef, Git: live, Live: live,
 			Result: diffResult{Action: ssa.ConfiguredAction, Live: live, Merged: merged}}},
-			[]v1alpha1.ObjectField{field}, mask)
+			[]failoverv1.ObjectField{field}, mask)
 		if len(fs.Fields) != 1 || !strings.Contains(fs.Fields[0], "applying Git changes spec.replica.primary") || len(fs.Other) != 0 {
 			t.Fatalf("%+v", fs)
 		}
@@ -178,7 +178,7 @@ func TestClassify(t *testing.T) {
 		unstructured.RemoveNestedField(merged.Object, "spec", "replica")
 		fs, _ := classify([]checked{{Ref: clusterRef, Git: live, Live: live,
 			Result: diffResult{Action: ssa.ConfiguredAction, Live: live, Merged: merged}}},
-			[]v1alpha1.ObjectField{primaryField}, mask)
+			[]failoverv1.ObjectField{primaryField}, mask)
 		if len(fs.Fields) != 1 || !strings.Contains(fs.Fields[0], "applying Git changes spec.replica:") {
 			t.Fatalf("%+v", fs)
 		}
@@ -188,7 +188,7 @@ func TestClassify(t *testing.T) {
 		merged := clusterWith("pg-b", 3, "token "+secret)
 		fs, err := classify([]checked{{Ref: clusterRef, Git: merged, Live: live,
 			Result: diffResult{Action: ssa.ConfiguredAction, Live: live, Merged: merged}}},
-			[]v1alpha1.ObjectField{primaryField}, mask)
+			[]failoverv1.ObjectField{primaryField}, mask)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -196,7 +196,7 @@ func TestClassify(t *testing.T) {
 			t.Fatalf("%+v", fs)
 		}
 		_, err = verdict(fs, 1, "a", true)
-		wantStop(t, err, v1alpha1.ReasonGitDiffersFromLive, "spec.description, spec.instances")
+		wantStop(t, err, failoverv1.ReasonGitDiffersFromLive, "spec.description, spec.instances")
 		if strings.Contains(err.Error(), secret) || strings.Contains(err.Error(), "token old") {
 			t.Errorf("values in %q", err)
 		}
@@ -208,20 +208,20 @@ func TestClassify(t *testing.T) {
 	t.Run("secret in a field value", func(t *testing.T) {
 		live := clusterWith("pg-b", 3, "token old")
 		g := clusterWith("pg-b", 3, "token "+secret)
-		field := v1alpha1.ObjectField{Object: clusterRef, Field: "spec.description"}
+		field := failoverv1.ObjectField{Object: clusterRef, Field: "spec.description"}
 		fs, _ := classify([]checked{{Ref: clusterRef, Git: g, Live: live,
 			Result: diffResult{Action: ssa.ConfiguredAction, Live: live, Merged: g}}},
-			[]v1alpha1.ObjectField{field}, mask)
+			[]failoverv1.ObjectField{field}, mask)
 		if len(fs.Fields) != 1 || strings.Contains(fs.Fields[0], secret) || !strings.Contains(fs.Fields[0], `"token *****"`) {
 			t.Fatalf("%+v", fs)
 		}
 	})
 	t.Run("Secret field values stay hidden", func(t *testing.T) {
-		ref := v1alpha1.ObjectRef{APIVersion: "v1", Kind: "Secret", Namespace: "db", Name: "s"}
+		ref := failoverv1.ObjectRef{APIVersion: "v1", Kind: "Secret", Namespace: "db", Name: "s"}
 		g := object(secretGVK, "db", "s", map[string]any{"data": map[string]any{"k": "bmV3"}})
 		live := object(secretGVK, "db", "s", map[string]any{"data": map[string]any{"k": "b2xk"}})
 		fs, _ := classify([]checked{{Ref: ref, Git: g, Live: live, Result: diffResult{Action: ssa.UnchangedAction}}},
-			[]v1alpha1.ObjectField{{Object: ref, Field: "data.k"}}, mask)
+			[]failoverv1.ObjectField{{Object: ref, Field: "data.k"}}, mask)
 		if len(fs.Fields) != 1 || strings.Contains(fs.Fields[0], "bmV3") || strings.Contains(fs.Fields[0], "b2xk") {
 			t.Fatalf("%+v", fs)
 		}
@@ -235,12 +235,12 @@ func TestClassify(t *testing.T) {
 	})
 	t.Run("created", func(t *testing.T) {
 		_, err := classify([]checked{{Ref: clusterRef, Git: git, Live: git, Result: diffResult{Action: ssa.CreatedAction}}}, nil, mask)
-		wantStop(t, err, v1alpha1.ReasonGitDiffersFromLive, "create")
+		wantStop(t, err, failoverv1.ReasonGitDiffersFromLive, "create")
 	})
 	t.Run("field of an object not held", func(t *testing.T) {
-		field := v1alpha1.ObjectField{Object: poolerRef, Field: "spec.instances"}
+		field := failoverv1.ObjectField{Object: poolerRef, Field: "spec.instances"}
 		_, err := classify([]checked{{Ref: clusterRef, Git: git, Live: git, Result: diffResult{Action: ssa.UnchangedAction}}},
-			[]v1alpha1.ObjectField{field}, mask)
+			[]failoverv1.ObjectField{field}, mask)
 		if err == nil || !strings.Contains(err.Error(), "not held") {
 			t.Fatalf("got %v", err)
 		}
@@ -282,7 +282,7 @@ func mergeInto(dst, src map[string]any) {
 func TestVerifyGit(t *testing.T) {
 	ctx := context.Background()
 	ks := renderKustomization("./clusters/a")
-	r, err := render(ctx, renderClient(), ks, repoDir, []v1alpha1.ObjectRef{clusterRef, poolerRef})
+	r, err := render(ctx, renderClient(), ks, repoDir, []failoverv1.ObjectRef{clusterRef, poolerRef})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,12 +306,12 @@ func TestVerifyGit(t *testing.T) {
 		}
 		return out
 	}
-	held := []v1alpha1.HeldObject{
+	held := []failoverv1.HeldObject{
 		{Site: "a", Object: clusterRef, Kustomization: ksKey},
 		{Site: "a", Object: poolerRef, Kustomization: ksKey},
 	}
-	fields := []v1alpha1.ObjectField{primaryField, {Object: poolerRef, Field: "spec.instances"}}
-	verify := func(strict bool, edit func(u *unstructured.Unstructured), h []v1alpha1.HeldObject) (string, error) {
+	fields := []failoverv1.ObjectField{primaryField, {Object: poolerRef, Field: "spec.instances"}}
+	verify := func(strict bool, edit func(u *unstructured.Unstructured), h []failoverv1.HeldObject) (string, error) {
 		c := renderClient(append(liveFrom(edit), ks)...)
 		f := New(fakeClients{c})
 		f.differ = mergeDiffer{}
@@ -325,13 +325,13 @@ func TestVerifyGit(t *testing.T) {
 	_, err = verify(true, func(u *unstructured.Unstructured) {
 		_ = unstructured.SetNestedField(u.Object, "pg-a", "spec", "replica", "primary")
 	}, held)
-	wantStop(t, err, v1alpha1.ReasonGitDiffersFromLive, `Git has "pg-b", live has "pg-a"`)
+	wantStop(t, err, failoverv1.ReasonGitDiffersFromLive, `Git has "pg-b", live has "pg-a"`)
 
 	other := func(u *unstructured.Unstructured) {
 		_ = unstructured.SetNestedField(u.Object, "token old", "spec", "description")
 	}
 	_, err = verify(true, other, held)
-	wantStop(t, err, v1alpha1.ReasonGitDiffersFromLive, "Cluster db/pg: spec.description")
+	wantStop(t, err, failoverv1.ReasonGitDiffersFromLive, "Cluster db/pg: spec.description")
 	if strings.Contains(err.Error(), secret) {
 		t.Errorf("Secret value in %q", err)
 	}
@@ -340,10 +340,10 @@ func TestVerifyGit(t *testing.T) {
 		t.Fatalf("%q %v", msg, err)
 	}
 
-	missing := append(held[:1:1], v1alpha1.HeldObject{Site: "a", Object: v1alpha1.ObjectRef{
+	missing := append(held[:1:1], failoverv1.HeldObject{Site: "a", Object: failoverv1.ObjectRef{
 		APIVersion: "postgresql.cnpg.io/v1", Kind: "Pooler", Namespace: "db", Name: "gone"}, Kustomization: ksKey})
 	_, err = verify(true, nil, missing)
-	wantStop(t, err, v1alpha1.ReasonGitDiffersFromLive, "lacks Pooler db/gone")
+	wantStop(t, err, failoverv1.ReasonGitDiffersFromLive, "lacks Pooler db/gone")
 }
 
 func TestDiffOptions(t *testing.T) {
@@ -372,14 +372,14 @@ func TestDiffOptions(t *testing.T) {
 func TestVerifyNoop(t *testing.T) {
 	ctx := context.Background()
 	released := metav1.Now()
-	held := []v1alpha1.HeldObject{{Site: "a", Object: clusterRef, Kustomization: ksKey, ReleasedAt: &released, Generation: 4}}
-	fields := []v1alpha1.ObjectField{primaryField}
+	held := []failoverv1.HeldObject{{Site: "a", Object: clusterRef, Kustomization: ksKey, ReleasedAt: &released, Generation: 4}}
+	fields := []failoverv1.ObjectField{primaryField}
 	ready := func(status, reason string) *unstructured.Unstructured {
 		u := kustomization(ksKey, false)
 		_ = unstructured.SetNestedSlice(u.Object, readyCond(status, reason, "msg"), "status", "conditions")
 		return u
 	}
-	run := func(strict bool, ks *unstructured.Unstructured, live *unstructured.Unstructured, h []v1alpha1.HeldObject, f []v1alpha1.ObjectField) (string, error) {
+	run := func(strict bool, ks *unstructured.Unstructured, live *unstructured.Unstructured, h []failoverv1.HeldObject, f []failoverv1.ObjectField) (string, error) {
 		return New(fakeClients{newClient(nil, ks, live)}).VerifyNoop(ctx, "a", h, f, strict)
 	}
 
@@ -391,28 +391,28 @@ func TestVerifyNoop(t *testing.T) {
 	moved := liveCluster(nil)
 	moved.SetGeneration(5)
 	_, err = run(true, ready("True", ReasonSucceeded), moved, held, fields)
-	wantStop(t, err, v1alpha1.ReasonFluxChanged, "generation 4 at release, now 5")
+	wantStop(t, err, failoverv1.ReasonFluxChanged, "generation 4 at release, now 5")
 	msg, err = run(false, ready("True", ReasonSucceeded), moved, held, fields)
 	if err != nil || !strings.Contains(msg, "generation 4 at release, now 5") || !strings.Contains(msg, "spec.replica.primary may have changed") {
 		t.Fatalf("%q %v", msg, err)
 	}
 
 	_, err = run(true, ready("True", ReasonSucceeded), liveCluster(map[string]string{AnnotationReconcile: "disabled"}), held, fields)
-	wantStop(t, err, v1alpha1.ReasonHeldByAnotherRun, "held again")
+	wantStop(t, err, failoverv1.ReasonHeldByAnotherRun, "held again")
 
 	if _, err = run(true, ready("False", "ReconciliationFailed"), liveCluster(nil), held, fields); err == nil || !strings.Contains(err.Error(), "ReconciliationFailed") {
 		t.Fatalf("got %v", err)
 	}
 
-	noGen := []v1alpha1.HeldObject{held[0]}
+	noGen := []failoverv1.HeldObject{held[0]}
 	noGen[0].Generation = 0
-	meta := []v1alpha1.ObjectField{{Object: clusterRef, Field: "metadata.labels.role"}}
+	meta := []failoverv1.ObjectField{{Object: clusterRef, Field: "metadata.labels.role"}}
 	msg, err = run(true, ready("True", ReasonSucceeded), liveCluster(nil), noGen, meta)
 	if err != nil || !strings.Contains(msg, "no generation recorded") || !strings.Contains(msg, "is metadata") {
 		t.Fatalf("%q %v", msg, err)
 	}
 
-	notReleased := []v1alpha1.HeldObject{held[0]}
+	notReleased := []failoverv1.HeldObject{held[0]}
 	notReleased[0].ReleasedAt = nil
 	if _, err = run(true, ready("True", ReasonSucceeded), liveCluster(nil), notReleased, fields); err == nil {
 		t.Fatal("want an error for an object not released")

@@ -12,13 +12,13 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/takodotid/tack/api/v1alpha1"
+	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/kube"
 )
 
 // APIVersion and Kind of Strait's SiteService.
 const (
-	APIVersion = "strait.tako.id/v1alpha1"
+	APIVersion = "strait.tako.id/v1"
 	Kind       = "SiteService"
 )
 
@@ -38,7 +38,7 @@ type Reader struct {
 func New(c kube.Clients) *Reader { return &Reader{Clients: c, Poll: 2 * time.Second, Now: time.Now} }
 
 // Wait waits until the SiteService routes to the expected member only.
-func (r *Reader) Wait(ctx context.Context, site string, s *v1alpha1.RoutingStep) (string, error) {
+func (r *Reader) Wait(ctx context.Context, site string, s *failoverv1.RoutingStep) (string, error) {
 	c, err := r.Clients.Client(site)
 	if err != nil {
 		return "", err
@@ -52,7 +52,7 @@ func (r *Reader) Wait(ctx context.Context, site string, s *v1alpha1.RoutingStep)
 		err := c.Get(ctx, client.ObjectKey{Namespace: s.Service.Namespace, Name: s.Service.Name}, u)
 		switch {
 		case meta.IsNoMatchError(err):
-			return "", fmt.Errorf("site %s has no %s API: is Strait installed?", site, Kind)
+			return "", fmt.Errorf("site %s does not serve %s %s: is Strait v1.0.0 or later installed?", site, Kind, APIVersion)
 		case err != nil:
 			last = err.Error()
 		default:

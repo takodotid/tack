@@ -11,7 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/takodotid/tack/api/v1alpha1"
+	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/engine"
 	"github.com/takodotid/tack/internal/stop"
 )
@@ -25,7 +25,7 @@ const ReasonSucceeded = "ReconciliationSucceeded"
 // requests each Kustomization and waits until each is done. A source that
 // fails to fetch does not stop the wait: the Kustomization runs on the
 // artifact it has, which is enough when no revision is expected.
-func (f *Flux) Reconcile(ctx context.Context, site string, ks []v1alpha1.ObjectKey, revision string, timeout time.Duration) (string, []string, error) {
+func (f *Flux) Reconcile(ctx context.Context, site string, ks []failoverv1.ObjectKey, revision string, timeout time.Duration) (string, []string, error) {
 	var notes []string
 	note := func(format string, a ...any) {
 		n := fmt.Sprintf(format, a...)
@@ -38,9 +38,9 @@ func (f *Flux) Reconcile(ctx context.Context, site string, ks []v1alpha1.ObjectK
 	}
 	deadline := f.now().Add(timeout)
 
-	var active []v1alpha1.ObjectKey
-	var sources []v1alpha1.ObjectKey
-	seen, seenSource := map[v1alpha1.ObjectKey]bool{}, map[v1alpha1.ObjectKey]bool{}
+	var active []failoverv1.ObjectKey
+	var sources []failoverv1.ObjectKey
+	seen, seenSource := map[failoverv1.ObjectKey]bool{}, map[failoverv1.ObjectKey]bool{}
 	for _, k := range ks {
 		if seen[k] {
 			continue
@@ -65,7 +65,7 @@ func (f *Flux) Reconcile(ctx context.Context, site string, ks []v1alpha1.ObjectK
 	}
 
 	// Fetch Git first, so the Kustomizations run on the newest artifact.
-	pending := map[v1alpha1.ObjectKey]string{}
+	pending := map[failoverv1.ObjectKey]string{}
 	for _, s := range sources {
 		u, err := getKind(ctx, c, GitRepositoryGVK, s)
 		if err != nil {
@@ -109,7 +109,7 @@ func (f *Flux) Reconcile(ctx context.Context, site string, ks []v1alpha1.ObjectK
 		}
 	}
 
-	tokens := map[v1alpha1.ObjectKey]string{}
+	tokens := map[failoverv1.ObjectKey]string{}
 	for _, k := range active {
 		u, err := getKind(ctx, c, KustomizationGVK, k)
 		if err != nil {
@@ -121,8 +121,8 @@ func (f *Flux) Reconcile(ctx context.Context, site string, ks []v1alpha1.ObjectK
 		}
 		tokens[k] = tok
 	}
-	applied := map[v1alpha1.ObjectKey]string{}
-	why := map[v1alpha1.ObjectKey]string{}
+	applied := map[failoverv1.ObjectKey]string{}
+	why := map[failoverv1.ObjectKey]string{}
 	for {
 		for _, k := range active {
 			tok, waiting := tokens[k]
@@ -164,7 +164,7 @@ func (f *Flux) Reconcile(ctx context.Context, site string, ks []v1alpha1.ObjectK
 		}
 	}
 
-	rev, first := "", v1alpha1.ObjectKey{}
+	rev, first := "", failoverv1.ObjectKey{}
 	for _, k := range active {
 		r, ok := applied[k]
 		if !ok {
@@ -175,7 +175,7 @@ func (f *Flux) Reconcile(ctx context.Context, site string, ks []v1alpha1.ObjectK
 			continue
 		}
 		if !engine.SameRevision(rev, r) {
-			return "", notes, stop.Ask(v1alpha1.ReasonGitChanged,
+			return "", notes, stop.Ask(failoverv1.ReasonGitChanged,
 				"Kustomizations at site %s applied different revisions: %s applied %s, %s applied %s",
 				site, keyString(first), rev, keyString(k), r)
 		}
@@ -258,8 +258,8 @@ func artifactRevision(u *unstructured.Unstructured) string {
 
 // sourceRef returns the kind and key of a Kustomization's source. The
 // source's namespace defaults to the Kustomization's.
-func sourceRef(u *unstructured.Unstructured) (string, v1alpha1.ObjectKey) {
-	k := v1alpha1.ObjectKey{
+func sourceRef(u *unstructured.Unstructured) (string, failoverv1.ObjectKey) {
+	k := failoverv1.ObjectKey{
 		Namespace: str(u, "spec", "sourceRef", "namespace"),
 		Name:      str(u, "spec", "sourceRef", "name"),
 	}

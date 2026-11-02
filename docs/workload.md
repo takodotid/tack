@@ -7,7 +7,7 @@ A Workload file describes one workload: its sites, the Git repository Flux appli
 Two sites, `a` and `b`, each running one CloudNativePG `Cluster` and one read-write `Pooler` in namespace `db`. Site a is the primary.
 
 ```yaml
-apiVersion: failover.tako.id/v1alpha1
+apiVersion: failover.tako.id/v1
 kind: Workload
 metadata:
   name: pg-main
@@ -18,12 +18,12 @@ spec:
     kubeContext: site-a
     cnpg:
       cluster: {namespace: db, name: pg-a}
-      pooler: {namespace: db, name: pg-a-rw, instances: 2}
+      pooler: {namespace: db, name: pg-a-pooler-rw, instances: 2}
   - name: b
     kubeContext: site-b
     cnpg:
       cluster: {namespace: db, name: pg-b}
-      pooler: {namespace: db, name: pg-b-rw, instances: 2}
+      pooler: {namespace: db, name: pg-b-pooler-rw, instances: 2}
   git:
     url: ssh://git@git.example.com/gitops.git
     branch: main
@@ -32,7 +32,7 @@ spec:
     # Site b sets the Pooler's instances in a Kustomize patch, so two
     # manifests define that Pooler. The mapping names the patch.
     - site: b
-      object: {kind: Pooler, namespace: db, name: pg-b-rw}
+      object: {kind: Pooler, namespace: db, name: pg-b-pooler-rw}
       field: spec.instances
       file: clusters/site-b/db/pooler-instances.yaml
       path: spec.instances
@@ -57,11 +57,11 @@ The Git repository it assumes:
 ```text
 clusters/site-a/db/kustomization.yaml
 clusters/site-a/db/cluster.yaml             Cluster pg-a
-clusters/site-a/db/pooler.yaml              Pooler pg-a-rw
+clusters/site-a/db/pooler.yaml              Pooler pg-a-pooler-rw
 clusters/site-b/db/kustomization.yaml       patches: pooler-instances.yaml
 clusters/site-b/db/cluster.yaml             Cluster pg-b
-clusters/site-b/db/pooler.yaml              Pooler pg-b-rw
-clusters/site-b/db/pooler-instances.yaml    a patch of Pooler pg-b-rw that sets spec.instances
+clusters/site-b/db/pooler.yaml              Pooler pg-b-pooler-rw
+clusters/site-b/db/pooler-instances.yaml    a patch of Pooler pg-b-pooler-rw that sets spec.instances
 ```
 
 For a switch to site b, `tack plan` resolves the Git change of this example to:
@@ -69,10 +69,10 @@ For a switch to site b, `tack plan` resolves the Git change of this example to:
 ```text
 clusters/site-a/db/cluster.yaml, document 0: spec.replica.primary = "pg-b"  (site a, Cluster db/pg-a spec.replica.primary)
 clusters/site-a/db/cluster.yaml, document 0: spec.replica.promotionToken removed  (site a, Cluster db/pg-a spec.replica.promotionToken)
-clusters/site-a/db/pooler.yaml, document 0: spec.instances = 0  (site a, Pooler db/pg-a-rw spec.instances)
+clusters/site-a/db/pooler.yaml, document 0: spec.instances = 0  (site a, Pooler db/pg-a-pooler-rw spec.instances)
 clusters/site-b/db/cluster.yaml, document 0: spec.replica.primary = "pg-b"  (site b, Cluster db/pg-b spec.replica.primary)
 clusters/site-b/db/cluster.yaml, document 0: spec.replica.promotionToken removed  (site b, Cluster db/pg-b spec.replica.promotionToken)
-clusters/site-b/db/pooler-instances.yaml: spec.instances = 2  (site b, Pooler db/pg-b-rw spec.instances)
+clusters/site-b/db/pooler-instances.yaml: spec.instances = 2  (site b, Pooler db/pg-b-pooler-rw spec.instances)
 ```
 
 Without the mapping, the plan stops: `several manifests define the object: clusters/site-b/db/pooler-instances.yaml document 0, clusters/site-b/db/pooler.yaml document 0`.
@@ -85,7 +85,7 @@ Required fields have no default. Durations are Go durations, such as `90s`, `15m
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
-| `apiVersion` | yes | | `failover.tako.id/v1alpha1` |
+| `apiVersion` | yes | | `failover.tako.id/v1`. Tack still reads `failover.tako.id/v1alpha1`, the version of v0.1.x, with a warning. |
 | `kind` | yes | | `Workload` |
 | `metadata.name` | yes | | The workload's name. A run is named `<name>-<UTC yyyymmdd-hhmmss>` and labelled `failover.tako.id/workload: <name>`, and the operator types the name to confirm a run. Use lowercase letters, digits and `-`. |
 | `spec.driver` | yes | | The built-in driver that knows the workload's API. Only `cnpg`. |
@@ -100,12 +100,34 @@ Required fields have no default. Durations are Go durations, such as `90s`, `15m
 | Field | Required | Default | Meaning |
 |---|---|---|---|
 | `name` | yes | | The site's name in `--to`, `--from`, `--fence` and the ledger. Unique. Lowercase letters, digits and `-`, starting and ending with a letter or digit, at most 63 characters. |
-| `kubeContext` | yes | | The kubeconfig context for this site. A context missing from the kubeconfig is an error; Tack never uses the current context instead. |
+| `kubeContext` | yes | | The kubeconfig context for this site. A context missing from the kubeconfig is an error; Tack never uses the current context instead. [One kubeconfig](#every-sites-context-in-one-kubeconfig) holds every site's context. |
 | `cnpg.cluster.namespace`, `cnpg.cluster.name` | yes | | The site's CloudNativePG `Cluster`. Each site's Cluster needs its own name. |
-| `cnpg.pooler.namespace`, `cnpg.pooler.name` | no | | The site's read-write `Pooler`. Tack also waits on the Deployment of the same name, which CloudNativePG runs for it. Without a pooler, Tack moves no Pooler at this site. |
+| `cnpg.pooler.namespace`, `cnpg.pooler.name` | no | | The site's read-write `Pooler`. Tack also waits on the Deployment of the same name, which CloudNativePG runs for it. Without a pooler, Tack moves no Pooler at this site. Never name a Pooler `<cluster>-rw`, `<cluster>-ro` or `<cluster>-r`: its Service takes its name, the Cluster already owns Services with those names, and CloudNativePG then never reconciles the Pooler. |
 | `cnpg.pooler.instances` | with a pooler | | The Pooler's instances while this site is primary, at least 1. At every other site Tack sets it to 0. |
 
 `tack plan` checks the live objects too: each `Cluster` sets `.spec.replica.primary` and not `.spec.replica.enabled`, and a Flux Kustomization applies each `Cluster` and `Pooler`. [RFC#0004](../rfcs/RFC0004.md) and [RFC#0005](../rfcs/RFC0005.md) give every check.
+
+### Every site's context in one kubeconfig
+
+Tack reads every site's `kubeContext` from one kubeconfig: the file `--kubeconfig` names, or else the standard loading rules. When each cluster has its own kubeconfig file, list the files in `KUBECONFIG`, and client-go merges them:
+
+```sh
+KUBECONFIG=site-a.kubeconfig:site-b.kubeconfig tack plan -f workload.yaml --to b
+```
+
+| Rule | Why |
+|---|---|
+| `--kubeconfig` takes one file. | With it, Tack ignores `KUBECONFIG`. |
+| Context, cluster and user names differ between the files. | On a repeated name, the first file's entry wins and the others are dropped. A site's context could then reach another site's cluster or use its credentials. |
+
+To keep one file instead, flatten the merge, then pass it with `--kubeconfig`:
+
+```sh
+KUBECONFIG=site-a.kubeconfig:site-b.kubeconfig kubectl config view --flatten > sites.kubeconfig
+tack --kubeconfig sites.kubeconfig plan -f workload.yaml --to b
+```
+
+The merged file holds every site's credentials. Protect it like the originals.
 
 ### `spec.git`
 
@@ -124,7 +146,7 @@ Every field a run changes needs a mapping or `find`, or the plan fails. One exce
 | Field | Required | Default | Meaning |
 |---|---|---|---|
 | `site` | yes | | The site of the object. Must be a site of the workload. |
-| `object.kind`, `object.name` | yes | | The live object, such as `Pooler` `pg-b-rw`. |
+| `object.kind`, `object.name` | yes | | The live object, such as `Pooler` `pg-b-pooler-rw`. |
 | `object.namespace` | no | any namespace | The live object's namespace. |
 | `field` | yes | | The field's path in the live object, such as `spec.instances`. |
 | `file` | yes | | The file, relative to the repository root. |

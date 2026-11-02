@@ -10,7 +10,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/takodotid/tack/api/v1alpha1"
+	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/driver"
 )
 
@@ -27,13 +27,13 @@ type Request struct {
 	// Workload is the Workload's name.
 	Workload string
 	// Spec is the Workload's spec, defaulted and validated.
-	Spec *v1alpha1.WorkloadSpec
+	Spec *failoverv1.WorkloadSpec
 	driver.Request
 }
 
 // Plan is a SiteFailover ready to run, and what was read to make it.
 type Plan struct {
-	SiteFailover *v1alpha1.SiteFailover
+	SiteFailover *failoverv1.SiteFailover
 	Topology     *driver.Topology
 	// Notes are facts the operator should see before approving.
 	Notes []string
@@ -45,13 +45,13 @@ type Inputs struct {
 	Topology *driver.Topology
 	// Owners maps site, then object, to the Kustomization that applies it.
 	// Sites that were unreachable have no entry.
-	Owners map[string]map[v1alpha1.ObjectRef]v1alpha1.ObjectKey
+	Owners map[string]map[failoverv1.ObjectRef]failoverv1.ObjectKey
 	// Failover are the driver's steps.
-	Failover []v1alpha1.Step
+	Failover []failoverv1.Step
 	// FollowUps are the driver's follow-ups.
-	FollowUps []v1alpha1.FollowUp
+	FollowUps []failoverv1.FollowUp
 	// GitChanges are the resolved Git changes.
-	GitChanges []v1alpha1.GitChange
+	GitChanges []failoverv1.GitChange
 }
 
 // MakePlan reads the sites and Git, and composes the plan. It changes nothing.
@@ -70,12 +70,12 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 	if to == nil || !to.Reachable {
 		return nil, fmt.Errorf("site %q must be reachable to become primary", req.To)
 	}
-	if req.Mode == v1alpha1.ModePlanned {
+	if req.Mode == failoverv1.ModePlanned {
 		if from, _ := topo.Site(req.From); from == nil || !from.Reachable {
 			return nil, fmt.Errorf("site %q is unreachable: a planned switchover needs it; use --mode site-loss if the site is lost", req.From)
 		}
 	}
-	in := Inputs{Request: req, Topology: topo, Owners: map[string]map[v1alpha1.ObjectRef]v1alpha1.ObjectKey{}}
+	in := Inputs{Request: req, Topology: topo, Owners: map[string]map[failoverv1.ObjectRef]failoverv1.ObjectKey{}}
 	var notes []string
 	if e.Runs != nil {
 		runs, err := e.Runs(ctx)
@@ -91,7 +91,7 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 			notes = append(notes, fmt.Sprintf("%s; the steps at site %s wait for it to come back", s.Error, s.Name))
 			continue
 		}
-		owners := map[v1alpha1.ObjectRef]v1alpha1.ObjectKey{}
+		owners := map[failoverv1.ObjectRef]failoverv1.ObjectKey{}
 		for _, obj := range s.Objects {
 			o, err := e.Flux.Owner(ctx, s.Name, obj)
 			if err != nil {
@@ -133,7 +133,7 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 		if in.GitChanges == nil {
 			return nil, err
 		}
-		if req.Mode == v1alpha1.ModePlanned {
+		if req.Mode == failoverv1.ModePlanned {
 			return nil, fmt.Errorf("Git cannot be read (%v): a planned switchover needs Git; break-glass is for a site loss", err)
 		}
 		notes = append(notes, fmt.Sprintf("Git: %v; the Git step waits for Git (break-glass)", err))
@@ -152,7 +152,7 @@ const FollowUpRebuild = "Rebuild"
 // checkRebuilt refuses a planned run to a site whose member an earlier run
 // left to rebuild, until the member was created again after that run.
 // The workload's status cannot tell such a member from a healthy replica.
-func checkRebuilt(req Request, to *driver.SiteState, runs []v1alpha1.SiteFailover, notes *[]string) error {
+func checkRebuilt(req Request, to *driver.SiteState, runs []failoverv1.SiteFailover, notes *[]string) error {
 	for _, r := range runs {
 		if r.Status.StartedAt == nil {
 			continue
@@ -165,7 +165,7 @@ func checkRebuilt(req Request, to *driver.SiteState, runs []v1alpha1.SiteFailove
 				continue
 			}
 			msg := fmt.Sprintf("run %s left site %s to rebuild (%s), and its member was not created again since", r.Name, req.To, f.Reason)
-			if req.Mode == v1alpha1.ModePlanned {
+			if req.Mode == failoverv1.ModePlanned {
 				return fmt.Errorf("%s: rebuild it before a planned switchover (docs/runbooks/rebuild-old-primary.md)", msg)
 			}
 			*notes = append(*notes, msg)
@@ -192,7 +192,7 @@ func checkRequest(req Request) error {
 		}
 	}
 	switch req.Mode {
-	case v1alpha1.ModePlanned, v1alpha1.ModeSiteLoss:
+	case failoverv1.ModePlanned, failoverv1.ModeSiteLoss:
 	default:
 		return fmt.Errorf("unknown mode %q", req.Mode)
 	}
@@ -201,17 +201,17 @@ func checkRequest(req Request) error {
 
 // Compose builds the SiteFailover from its inputs. It reads nothing, so the
 // same inputs always give the same plan.
-func Compose(in Inputs) (*v1alpha1.SiteFailover, error) {
+func Compose(in Inputs) (*failoverv1.SiteFailover, error) {
 	spec := in.Spec
 	fluxTimeout := spec.Timeouts.Flux.DeepCopy()
 	deferrable := func(site string) bool {
 		if site == "" || site == in.To {
 			return false
 		}
-		return !(in.Mode == v1alpha1.ModePlanned && site == in.From)
+		return !(in.Mode == failoverv1.ModePlanned && site == in.From)
 	}
-	var steps []v1alpha1.Step
-	add := func(s v1alpha1.Step) {
+	var steps []failoverv1.Step
+	add := func(s failoverv1.Step) {
 		s.Deferrable = deferrable(s.Site)
 		steps = append(steps, s)
 	}
@@ -224,27 +224,27 @@ func Compose(in Inputs) (*v1alpha1.SiteFailover, error) {
 		}
 		owners := in.Owners[s.Name]
 		for _, obj := range s.Objects {
-			st := &v1alpha1.ObjectStep{Object: obj}
+			st := &failoverv1.ObjectStep{Object: obj}
 			if k, ok := owners[obj]; ok {
 				k := k
 				st.Kustomization = &k
 			}
-			add(v1alpha1.Step{
-				ID: stepID("hold", s.Name, obj), Phase: v1alpha1.PhaseHold, Type: v1alpha1.StepHold, Site: s.Name,
+			add(failoverv1.Step{
+				ID: stepID("hold", s.Name, obj), Phase: failoverv1.PhaseHold, Type: failoverv1.StepHold, Site: s.Name,
 				Description: fmt.Sprintf("hold %s at site %s: Flux stops applying it", refString(obj), s.Name),
 				Hold:        st,
 			})
 		}
-		add(v1alpha1.Step{
-			ID: "reconcile-hold-" + s.Name, Phase: v1alpha1.PhaseHold, Type: v1alpha1.StepReconcile, Site: s.Name,
+		add(failoverv1.Step{
+			ID: "reconcile-hold-" + s.Name, Phase: failoverv1.PhaseHold, Type: failoverv1.StepReconcile, Site: s.Name,
 			Description: fmt.Sprintf("reconcile Flux at site %s, so no apply started before the hold is still in flight", s.Name),
-			Reconcile:   &v1alpha1.ReconcileStep{Kustomizations: uniqueOwners(owners), Timeout: *fluxTimeout},
+			Reconcile:   &failoverv1.ReconcileStep{Kustomizations: uniqueOwners(owners), Timeout: *fluxTimeout},
 		})
 	}
 
 	// Failover.
 	for _, s := range in.Failover {
-		s.Phase = v1alpha1.PhaseFailover
+		s.Phase = failoverv1.PhaseFailover
 		add(s)
 	}
 
@@ -252,10 +252,10 @@ func Compose(in Inputs) (*v1alpha1.SiteFailover, error) {
 	if len(in.GitChanges) == 0 {
 		return nil, fmt.Errorf("the driver returned no Git change")
 	}
-	add(v1alpha1.Step{
-		ID: "git-commit", Phase: v1alpha1.PhasePromoteToGitOps, Type: v1alpha1.StepGit,
+	add(failoverv1.Step{
+		ID: "git-commit", Phase: failoverv1.PhasePromoteToGitOps, Type: failoverv1.StepGit,
 		Description: fmt.Sprintf("commit the live state to %s branch %s", redact(spec.Git.URL), spec.Git.Branch),
-		Git: &v1alpha1.GitStep{
+		Git: &failoverv1.GitStep{
 			Changes: in.GitChanges,
 			Message: fmt.Sprintf("tack: %s primary %s to %s (%s)\n\nRun %s, mode %s.", in.Workload, in.From, in.To, strings.ToLower(string(in.Mode)), in.Run, in.Mode),
 		},
@@ -264,10 +264,10 @@ func Compose(in Inputs) (*v1alpha1.SiteFailover, error) {
 		if len(s.Objects) == 0 {
 			continue
 		}
-		add(v1alpha1.Step{
-			ID: "reconcile-git-" + s.Name, Phase: v1alpha1.PhasePromoteToGitOps, Type: v1alpha1.StepReconcile, Site: s.Name,
+		add(failoverv1.Step{
+			ID: "reconcile-git-" + s.Name, Phase: failoverv1.PhasePromoteToGitOps, Type: failoverv1.StepReconcile, Site: s.Name,
 			Description: fmt.Sprintf("wait for Flux at site %s to apply the run's commit (held objects stay as they are)", s.Name),
-			Reconcile:   &v1alpha1.ReconcileStep{Kustomizations: uniqueOwners(in.Owners[s.Name]), Revision: GitCommitRef, Timeout: *fluxTimeout},
+			Reconcile:   &failoverv1.ReconcileStep{Kustomizations: uniqueOwners(in.Owners[s.Name]), Revision: GitCommitRef, Timeout: *fluxTimeout},
 		})
 	}
 
@@ -278,32 +278,32 @@ func Compose(in Inputs) (*v1alpha1.SiteFailover, error) {
 		}
 		owners := in.Owners[s.Name]
 		fields := siteFields(in.GitChanges, s.Name)
-		add(v1alpha1.Step{
-			ID: "verify-git-" + s.Name, Phase: v1alpha1.PhaseRelease, Type: v1alpha1.StepVerifyGit, Site: s.Name,
+		add(failoverv1.Step{
+			ID: "verify-git-" + s.Name, Phase: failoverv1.PhaseRelease, Type: failoverv1.StepVerifyGit, Site: s.Name,
 			Description: fmt.Sprintf("check at site %s that Git, as Flux renders it, equals live", s.Name),
-			VerifyGit:   &v1alpha1.VerifyStep{Objects: s.Objects, Fields: fields},
+			VerifyGit:   &failoverv1.VerifyStep{Objects: s.Objects, Fields: fields},
 		})
 		for _, obj := range s.Objects {
-			st := &v1alpha1.ObjectStep{Object: obj}
+			st := &failoverv1.ObjectStep{Object: obj}
 			if k, ok := owners[obj]; ok {
 				k := k
 				st.Kustomization = &k
 			}
-			add(v1alpha1.Step{
-				ID: stepID("release", s.Name, obj), Phase: v1alpha1.PhaseRelease, Type: v1alpha1.StepRelease, Site: s.Name,
+			add(failoverv1.Step{
+				ID: stepID("release", s.Name, obj), Phase: failoverv1.PhaseRelease, Type: failoverv1.StepRelease, Site: s.Name,
 				Description: fmt.Sprintf("release %s at site %s: Flux applies it again", refString(obj), s.Name),
 				Release:     st,
 			})
 		}
-		add(v1alpha1.Step{
-			ID: "reconcile-release-" + s.Name, Phase: v1alpha1.PhaseRelease, Type: v1alpha1.StepReconcile, Site: s.Name,
+		add(failoverv1.Step{
+			ID: "reconcile-release-" + s.Name, Phase: failoverv1.PhaseRelease, Type: failoverv1.StepReconcile, Site: s.Name,
 			Description: fmt.Sprintf("reconcile Flux at site %s with the released objects", s.Name),
-			Reconcile:   &v1alpha1.ReconcileStep{Kustomizations: uniqueOwners(owners), Revision: GitCommitRef, Timeout: *fluxTimeout},
+			Reconcile:   &failoverv1.ReconcileStep{Kustomizations: uniqueOwners(owners), Revision: GitCommitRef, Timeout: *fluxTimeout},
 		})
-		add(v1alpha1.Step{
-			ID: "verify-noop-" + s.Name, Phase: v1alpha1.PhaseRelease, Type: v1alpha1.StepVerifyNoop, Site: s.Name,
+		add(failoverv1.Step{
+			ID: "verify-noop-" + s.Name, Phase: failoverv1.PhaseRelease, Type: failoverv1.StepVerifyNoop, Site: s.Name,
 			Description: fmt.Sprintf("check at site %s that Flux changed nothing", s.Name),
-			VerifyNoop:  &v1alpha1.VerifyStep{Objects: s.Objects, Fields: fields},
+			VerifyNoop:  &failoverv1.VerifyStep{Objects: s.Objects, Fields: fields},
 		})
 	}
 	if spec.Routing != nil && spec.Routing.Strait != nil {
@@ -317,11 +317,11 @@ func Compose(in Inputs) (*v1alpha1.SiteFailover, error) {
 			return nil, fmt.Errorf("spec.routing.strait.members has no member for site %q", in.To)
 		}
 		for _, svc := range spec.Routing.Strait.Services {
-			add(v1alpha1.Step{
-				ID: "routing-" + svc.Site, Phase: v1alpha1.PhaseRelease, Type: v1alpha1.StepRouting, Site: svc.Site,
+			add(failoverv1.Step{
+				ID: "routing-" + svc.Site, Phase: failoverv1.PhaseRelease, Type: failoverv1.StepRouting, Site: svc.Site,
 				Description: fmt.Sprintf("wait for Strait at site %s to route %s/%s to member %s only", svc.Site, svc.Namespace, svc.Name, expected),
-				Routing: &v1alpha1.RoutingStep{
-					Service:  v1alpha1.ObjectKey{Namespace: svc.Namespace, Name: svc.Name},
+				Routing: &failoverv1.RoutingStep{
+					Service:  failoverv1.ObjectKey{Namespace: svc.Namespace, Name: svc.Name},
 					Expected: expected,
 					Timeout:  *spec.Timeouts.Routing.DeepCopy(),
 				},
@@ -337,21 +337,21 @@ func Compose(in Inputs) (*v1alpha1.SiteFailover, error) {
 		seen[s.ID] = true
 	}
 
-	sf := &v1alpha1.SiteFailover{
-		TypeMeta: metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "SiteFailover"},
+	sf := &failoverv1.SiteFailover{
+		TypeMeta: metav1.TypeMeta{APIVersion: failoverv1.GroupVersion.String(), Kind: "SiteFailover"},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      in.Run,
 			Namespace: spec.Ledger.Namespace,
 			Labels:    map[string]string{LabelWorkload: in.Workload},
 		},
-		Spec: v1alpha1.SiteFailoverSpec{
-			Workload: v1alpha1.WorkloadSnapshot{Name: in.Workload, Spec: *spec.DeepCopy()},
+		Spec: failoverv1.SiteFailoverSpec{
+			Workload: failoverv1.WorkloadSnapshot{Name: in.Workload, Spec: *spec.DeepCopy()},
 			Mode:     in.Mode,
 			From:     in.From,
 			To:       in.To,
 			Steps:    steps,
 		},
-		Status: v1alpha1.SiteFailoverStatus{FollowUps: in.FollowUps},
+		Status: failoverv1.SiteFailoverStatus{FollowUps: in.FollowUps},
 	}
 	return sf, nil
 }
@@ -361,20 +361,20 @@ var userinfo = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/\s]+@`)
 // redact hides the user and password of a URL.
 func redact(s string) string { return userinfo.ReplaceAllString(s, "${1}***@") }
 
-func stepID(verb, site string, obj v1alpha1.ObjectRef) string {
+func stepID(verb, site string, obj failoverv1.ObjectRef) string {
 	return strings.ToLower(fmt.Sprintf("%s-%s-%s-%s", verb, site, obj.Kind, obj.Name))
 }
 
-func refString(o v1alpha1.ObjectRef) string {
+func refString(o failoverv1.ObjectRef) string {
 	return fmt.Sprintf("%s %s/%s", o.Kind, o.Namespace, o.Name)
 }
 
-func uniqueOwners(owners map[v1alpha1.ObjectRef]v1alpha1.ObjectKey) []v1alpha1.ObjectKey {
-	set := map[v1alpha1.ObjectKey]bool{}
+func uniqueOwners(owners map[failoverv1.ObjectRef]failoverv1.ObjectKey) []failoverv1.ObjectKey {
+	set := map[failoverv1.ObjectKey]bool{}
 	for _, k := range owners {
 		set[k] = true
 	}
-	var out []v1alpha1.ObjectKey
+	var out []failoverv1.ObjectKey
 	for k := range set {
 		out = append(out, k)
 	}
@@ -387,11 +387,11 @@ func uniqueOwners(owners map[v1alpha1.ObjectRef]v1alpha1.ObjectKey) []v1alpha1.O
 	return out
 }
 
-func siteFields(changes []v1alpha1.GitChange, site string) []v1alpha1.ObjectField {
-	var out []v1alpha1.ObjectField
+func siteFields(changes []failoverv1.GitChange, site string) []failoverv1.ObjectField {
+	var out []failoverv1.ObjectField
 	for _, c := range changes {
 		if c.Site == site {
-			out = append(out, v1alpha1.ObjectField{Object: c.Object, Field: c.Field})
+			out = append(out, failoverv1.ObjectField{Object: c.Object, Field: c.Field})
 		}
 	}
 	return out

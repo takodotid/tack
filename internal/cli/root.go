@@ -12,7 +12,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/takodotid/tack/api/v1alpha1"
+	failoverv1 "github.com/takodotid/tack/api/v1"
+	"github.com/takodotid/tack/internal/config"
 	"github.com/takodotid/tack/internal/engine"
 	"github.com/takodotid/tack/internal/kube"
 )
@@ -36,7 +37,7 @@ type Factory interface {
 	Clients(kubeconfig string, contexts map[string]string) kube.Clients
 	// Env returns an Env for a workload, with its ledger at ledgerSite.
 	// Close releases what it holds.
-	Env(ctx context.Context, kubeconfig string, spec *v1alpha1.WorkloadSpec, ledgerSite string, out io.Writer) (env *engine.Env, close func(), err error)
+	Env(ctx context.Context, kubeconfig string, spec *failoverv1.WorkloadSpec, ledgerSite string, out io.Writer) (env *engine.Env, close func(), err error)
 }
 
 type options struct {
@@ -46,6 +47,8 @@ type options struct {
 	now        func() time.Time
 	stdin      io.Reader
 	isTerminal func() bool
+	// stderr takes warnings. The root command sets it before any command runs.
+	stderr io.Writer
 }
 
 const rootLong = `Tack switches a stateful workload's primary from one site to another: a
@@ -91,7 +94,7 @@ var (
 
 // NewRoot returns the tack command.
 func NewRoot(f Factory) *cobra.Command {
-	o := &options{factory: f, now: nowFunc, stdin: stdin, isTerminal: isTerminal}
+	o := &options{factory: f, now: nowFunc, stdin: stdin, isTerminal: isTerminal, stderr: os.Stderr}
 	root := &cobra.Command{
 		Use:           "tack",
 		Short:         "Switch a stateful workload's primary between sites, with GitOps kept in step",
@@ -99,6 +102,9 @@ func NewRoot(f Factory) *cobra.Command {
 		Version:       Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		PersistentPreRun: func(cmd *cobra.Command, _ []string) {
+			o.stderr = cmd.ErrOrStderr()
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if o.skill {
 				return writeSkill(cmd.OutOrStdout(), cmd)
@@ -135,6 +141,19 @@ func Execute(ctx context.Context, f Factory, args []string, stdout, stderr io.Wr
 		return ExitWaiting
 	}
 	return ExitError
+}
+
+// loadWorkload reads the Workload file, and warns when its apiVersion is
+// deprecated.
+func (o *options) loadWorkload(file string) (*config.Workload, error) {
+	w, err := config.Load(file)
+	if err != nil {
+		return nil, err
+	}
+	if w.APIVersion == config.DeprecatedAPIVersion {
+		fmt.Fprintf(o.stderr, "tack: warning: %s: apiVersion %s is deprecated; use %s\n", file, w.APIVersion, failoverv1.GroupVersion)
+	}
+	return w, nil
 }
 
 type usageError struct{ error }

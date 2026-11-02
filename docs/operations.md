@@ -28,9 +28,9 @@ Git: base main@sha1:6dd30f74794e7c2d1ef0405918b9b92bb00a4a11, commit none
 Captured: demotionToken
 Held objects:
   site a: Cluster db/pg-a (held)
-  site a: Pooler db/pg-a-rw (held)
+  site a: Pooler db/pg-a-pooler-rw (held)
   site b: Cluster db/pg-b (held)
-  site b: Pooler db/pg-b-rw (held)
+  site b: Pooler db/pg-b-pooler-rw (held)
 ...
 PromoteToGitOps
   18. [Failed] git-commit  Git

@@ -14,7 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
-	"github.com/takodotid/tack/api/v1alpha1"
+	failoverv1 "github.com/takodotid/tack/api/v1"
 )
 
 func obj(gen, observed int64, reason string, members ...any) map[string]any {
@@ -76,9 +76,9 @@ func status(o map[string]any) func(*unstructured.Unstructured) error {
 	}
 }
 
-func step(timeout time.Duration) *v1alpha1.RoutingStep {
-	return &v1alpha1.RoutingStep{
-		Service:  v1alpha1.ObjectKey{Namespace: "db", Name: "postgres"},
+func step(timeout time.Duration) *failoverv1.RoutingStep {
+	return &failoverv1.RoutingStep{
+		Service:  failoverv1.ObjectKey{Namespace: "db", Name: "postgres"},
 		Expected: "pg-b",
 		Timeout:  metav1.Duration{Duration: timeout},
 	}
@@ -105,7 +105,7 @@ func TestWaitNoStrait(t *testing.T) {
 		return &meta.NoKindMatchError{GroupKind: schema.GroupKind{Group: "strait.tako.id", Kind: Kind}}
 	})
 	_, err := r.Wait(context.Background(), "a", step(time.Minute))
-	if err == nil || !strings.Contains(err.Error(), "is Strait installed?") {
+	if err == nil || !strings.Contains(err.Error(), "is Strait v1.0.0 or later installed?") {
 		t.Fatalf("err = %v, want Strait not installed", err)
 	}
 }

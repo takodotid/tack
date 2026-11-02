@@ -14,7 +14,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/takodotid/tack/api/v1alpha1"
+	failoverv1 "github.com/takodotid/tack/api/v1"
 )
 
 // RequestTimeout bounds every request to a site, so a lost site fails fast.
@@ -26,7 +26,7 @@ var Scheme = func() *runtime.Scheme {
 	if err := clientgoscheme.AddToScheme(s); err != nil {
 		panic(err)
 	}
-	if err := v1alpha1.AddToScheme(s); err != nil {
+	if err := failoverv1.AddToScheme(s); err != nil {
 		panic(err)
 	}
 	return s
@@ -137,7 +137,7 @@ func setDefaults(cfg *rest.Config) *rest.Config {
 }
 
 // Contexts maps each site of a workload to its kube context.
-func Contexts(s *v1alpha1.WorkloadSpec) map[string]string {
+func Contexts(s *failoverv1.WorkloadSpec) map[string]string {
 	m := map[string]string{}
 	for _, site := range s.Sites {
 		m[site.Name] = site.KubeContext
