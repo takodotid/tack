@@ -2,5 +2,13 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "local>takodotid/renovate-config"
+  ],
+  "packageRules": [
+    {
+      "description": "go.mod's replace pins kustomize to the version kustomize-controller pins. Newer kustomize needs a k8s.io/kube-openapi built on sigs.k8s.io/structured-merge-diff/v7, which k8s.io/apimachinery v0.37 cannot use. Re-enable together with the replace, once k8s.io moves to structured-merge-diff/v7.",
+      "matchManagers": ["gomod"],
+      "matchPackageNames": ["sigs.k8s.io/kustomize/api", "sigs.k8s.io/kustomize/kyaml"],
+      "enabled": false
+    }
   ]
 }
