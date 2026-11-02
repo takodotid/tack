@@ -61,14 +61,14 @@ The ledger is a `SiteFailover` object at the new primary's site, in the namespac
 
 ## Status
 
-The latest release is v1.0.0. The API is `failover.tako.id/v1`, for both the `SiteFailover` ledger and the Workload file. A change that would break a user comes as a new API version. `failover.tako.id/v1alpha1`, the API of v0.1.x, is deprecated and still served: see [Upgrading from v0.1.x](#upgrading-from-v01x).
+The latest release is v1.1.0. The API is `failover.tako.id/v1`, for both the `SiteFailover` ledger and the Workload file. A change that would break a user comes as a new API version. `failover.tako.id/v1alpha1`, the API of v0.1.x, is deprecated and still served: see [Upgrading from v0.1.x](#upgrading-from-v01x).
 
 ## Install
 
 Each release on the [releases page](https://github.com/takodotid/tack/releases) has an archive per platform, `SHA256SUMS`, the CRD, and a Helm chart of the CRD. Each archive holds `tack`, its man pages and the CRD. The chart is also published at `oci://ghcr.io/takodotid/charts/tack`.
 
 ```sh
-VERSION=v1.0.0
+VERSION=v1.1.0
 OS=linux      # or darwin
 ARCH=amd64    # or arm64
 NAME=tack-$VERSION-$OS-$ARCH
@@ -129,7 +129,7 @@ Tack also needs:
 ## Upgrading from v0.1.x
 
 1. At every site, upgrade the CRD the way it was installed: the `helm upgrade --install` above, or `kubectl apply --server-side` of the new CRD. Do this before running tack v1.0.0 against the site: tack v1.0.0 reads ledgers as `v1`, and against a site still on the v0.1.x CRD it stops and says to upgrade the CRD.
-2. Install tack v1.0.0.
+2. Install tack v1.0.0 or later.
 3. In each Workload file, set `apiVersion: failover.tako.id/v1`. Nothing else changes. Tack still reads `failover.tako.id/v1alpha1`, with a warning.
 
 | After the upgrade | Behaviour |
