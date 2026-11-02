@@ -104,17 +104,40 @@ EOF
   done
 }
 
-# Starts image pulls inside the nodes and returns at once. The kubelet pulls
-# anything still missing. A registry pull inside the node is faster than
-# `kind load`, which also fails on multi-platform images with the containerd
-# image store.
+# The nodes' architecture, as Docker names it.
+node_arch() {
+  case $(uname -m) in
+    x86_64) echo amd64 ;;
+    aarch64 | arm64) echo arm64 ;;
+    *) die "unsupported architecture $(uname -m)" ;;
+  esac
+}
+
+# Puts the images in the nodes. An image already in the host's Docker is
+# loaded from a single-platform archive, so the run needs no registry for it:
+# a registry that slows down makes the installs time out. The nodes pull the
+# others in the background, and the kubelet pulls anything still missing.
+# The host's images are never pulled nor removed here.
 prepull_images() {
-  local site image
-  for site in "${SITES[@]}"; do
-    for image in "${PREPULL_IMAGES[@]}"; do
+  local site image cached=() archive=$WORK/cache/prepull.tar
+  for image in "${PREPULL_IMAGES[@]}"; do
+    if docker image inspect "$image" >/dev/null 2>&1; then
+      cached+=("$image")
+      continue
+    fi
+    for site in "${SITES[@]}"; do
       docker exec -d "$(cluster_name "$site")-control-plane" crictl pull "$image"
     done
   done
+  ((${#cached[@]})) || return 0
+  docker save --platform "linux/$(node_arch)" -o "$archive" "${cached[@]}"
+  for site in "${SITES[@]}"; do
+    kind load image-archive --name "$(cluster_name "$site")" "$archive" \
+      >"$WORK/logs/prepull-$site.log" 2>&1 ||
+      die "loading cached images failed for site $site, see $WORK/logs/prepull-$site.log"
+  done
+  rm -f "$archive"
+  log "loaded from the host's Docker: ${cached[*]}"
 }
 
 install_flux() {
@@ -315,14 +338,9 @@ other_site() { if [[ $1 == a ]]; then echo b; else echo a; fi; }
 # one direct link over the tack-e2e network. A Site needs a WireGuard
 # identity only for wireguard links, so there is none.
 install_strait() {
-  local site peer arch archive=$WORK/cache/strait-image.tar
-  case $(uname -m) in
-    x86_64) arch=amd64 ;;
-    aarch64 | arm64) arch=arm64 ;;
-    *) die "unsupported architecture $(uname -m)" ;;
-  esac
+  local site peer archive=$WORK/cache/strait-image.tar
   build_strait_image
-  docker save --platform "linux/$arch" -o "$archive" "$STRAIT_IMAGE"
+  docker save --platform "linux/$(node_arch)" -o "$archive" "$STRAIT_IMAGE"
   for site in "${SITES[@]}"; do
     kind load image-archive --name "$(cluster_name "$site")" "$archive" \
       >"$WORK/logs/strait-load-$site.log" 2>&1 ||
