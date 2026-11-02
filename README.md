@@ -56,7 +56,7 @@ The ledger is a `SiteFailover` object at the new primary's site, in the namespac
 | Workload | CloudNativePG in the distributed topology: one `Cluster` per site, the primary named by `.spec.replica.primary`, and an optional read-write `Pooler` per site. Driver `cnpg`. |
 | GitOps | Flux kustomize-controller with a `GitRepository` source, one Git repository for all sites. |
 | Routing check | Optional. Reads the `SiteService` status of [Strait](https://github.com/takodotid/strait) v1.0.0 or later, which routes clients to the primary. |
-| Platforms | Linux and macOS, amd64 and arm64. |
+| Platforms | Linux, macOS and Windows, amd64 and arm64. |
 | Tested with | CloudNativePG v1.30.1, Flux v2.10.0 and Kubernetes v1.37, in the end-to-end test. |
 
 ## Status
@@ -80,6 +80,30 @@ sudo install -m 0755 $NAME/tack /usr/local/bin/tack
 sudo mkdir -p /usr/local/share/man/man1
 sudo cp $NAME/man/man1/*.1 /usr/local/share/man/man1/
 ```
+
+On Windows the archive is a `.zip` with `tack.exe`. Install it in PowerShell:
+
+```powershell
+$VERSION = "v1.1.0"
+$NAME = "tack-$VERSION-windows-amd64"    # or arm64
+$URL = "https://github.com/takodotid/tack/releases/download/$VERSION"
+Invoke-WebRequest "$URL/$NAME.zip" -OutFile "$NAME.zip" -UseBasicParsing
+Invoke-WebRequest "$URL/SHA256SUMS" -OutFile SHA256SUMS -UseBasicParsing
+$sum = (Get-Content SHA256SUMS | Where-Object { $_.EndsWith("  $NAME.zip") }).Split(" ")[0]
+if ((Get-FileHash "$NAME.zip" -Algorithm SHA256).Hash -ne $sum) { throw "$NAME.zip does not match SHA256SUMS" }
+Expand-Archive "$NAME.zip" -DestinationPath .
+$bin = "$env:LOCALAPPDATA\Programs\tack"
+New-Item -ItemType Directory -Force $bin | Out-Null
+Copy-Item "$NAME\tack.exe" $bin
+```
+
+Add that folder to `Path` once, then open a new terminal.
+
+| Difference on Windows | Detail |
+|---|---|
+| `KUBECONFIG` | Separates files with `;`, not `:`: see [docs/workload.md](docs/workload.md#every-sites-context-in-one-kubeconfig). |
+| Man pages | Windows has no `man`. `tack --help` and `tack <command> --help` hold the same text. |
+| Skill document | In Windows PowerShell 5.1, `tack --skill > SKILL.md` writes UTF-16LE, not the UTF-8 that `tack` prints. PowerShell 7 and `cmd.exe` keep UTF-8. |
 
 To build from source instead: `make build` writes `bin/tack`.
 
