@@ -56,19 +56,19 @@ The ledger is a `SiteFailover` object at the new primary's site, in the namespac
 | Workload | CloudNativePG in the distributed topology: one `Cluster` per site, the primary named by `.spec.replica.primary`, and an optional read-write `Pooler` per site. Driver `cnpg`. |
 | GitOps | Flux kustomize-controller with a `GitRepository` source, one Git repository for all sites. |
 | Routing check | Optional. Reads the `SiteService` status of [Strait](https://github.com/takodotid/strait) v1.0.0 or later, which routes clients to the primary. |
-| Platforms | Linux and macOS, amd64 and arm64. |
+| Platforms | Linux, macOS and Windows, amd64 and arm64. |
 | Tested with | CloudNativePG v1.30.1, Flux v2.10.0 and Kubernetes v1.37, in the end-to-end test. |
 
 ## Status
 
-The latest release is v1.0.0. The API is `failover.tako.id/v1`, for both the `SiteFailover` ledger and the Workload file. A change that would break a user comes as a new API version. `failover.tako.id/v1alpha1`, the API of v0.1.x, is deprecated and still served: see [Upgrading from v0.1.x](#upgrading-from-v01x).
+The latest release is v1.1.0. The API is `failover.tako.id/v1`, for both the `SiteFailover` ledger and the Workload file. A change that would break a user comes as a new API version. `failover.tako.id/v1alpha1`, the API of v0.1.x, is deprecated and still served: see [Upgrading from v0.1.x](#upgrading-from-v01x).
 
 ## Install
 
 Each release on the [releases page](https://github.com/takodotid/tack/releases) has an archive per platform, `SHA256SUMS`, the CRD, and a Helm chart of the CRD. Each archive holds `tack`, its man pages and the CRD. The chart is also published at `oci://ghcr.io/takodotid/charts/tack`.
 
 ```sh
-VERSION=v1.0.0
+VERSION=v1.1.0
 OS=linux      # or darwin
 ARCH=amd64    # or arm64
 NAME=tack-$VERSION-$OS-$ARCH
@@ -80,6 +80,30 @@ sudo install -m 0755 $NAME/tack /usr/local/bin/tack
 sudo mkdir -p /usr/local/share/man/man1
 sudo cp $NAME/man/man1/*.1 /usr/local/share/man/man1/
 ```
+
+On Windows the archive is a `.zip` with `tack.exe`. Install it in PowerShell:
+
+```powershell
+$VERSION = "v1.1.0"
+$NAME = "tack-$VERSION-windows-amd64"    # or arm64
+$URL = "https://github.com/takodotid/tack/releases/download/$VERSION"
+Invoke-WebRequest "$URL/$NAME.zip" -OutFile "$NAME.zip" -UseBasicParsing
+Invoke-WebRequest "$URL/SHA256SUMS" -OutFile SHA256SUMS -UseBasicParsing
+$sum = (Get-Content SHA256SUMS | Where-Object { $_.EndsWith("  $NAME.zip") }).Split(" ")[0]
+if ((Get-FileHash "$NAME.zip" -Algorithm SHA256).Hash -ne $sum) { throw "$NAME.zip does not match SHA256SUMS" }
+Expand-Archive "$NAME.zip" -DestinationPath .
+$bin = "$env:LOCALAPPDATA\Programs\tack"
+New-Item -ItemType Directory -Force $bin | Out-Null
+Copy-Item "$NAME\tack.exe" $bin
+```
+
+Add that folder to `Path` once, then open a new terminal.
+
+| Difference on Windows | Detail |
+|---|---|
+| `KUBECONFIG` | Separates files with `;`, not `:`: see [docs/workload.md](docs/workload.md#every-sites-context-in-one-kubeconfig). |
+| Man pages | Windows has no `man`. `tack --help` and `tack <command> --help` hold the same text. |
+| Skill document | In Windows PowerShell 5.1, `tack --skill > SKILL.md` writes UTF-16LE, not the UTF-8 that `tack` prints. PowerShell 7 and `cmd.exe` keep UTF-8. |
 
 To build from source instead: `make build` writes `bin/tack`.
 
@@ -105,7 +129,7 @@ Tack also needs:
 ## Upgrading from v0.1.x
 
 1. At every site, upgrade the CRD the way it was installed: the `helm upgrade --install` above, or `kubectl apply --server-side` of the new CRD. Do this before running tack v1.0.0 against the site: tack v1.0.0 reads ledgers as `v1`, and against a site still on the v0.1.x CRD it stops and says to upgrade the CRD.
-2. Install tack v1.0.0.
+2. Install tack v1.0.0 or later.
 3. In each Workload file, set `apiVersion: failover.tako.id/v1`. Nothing else changes. Tack still reads `failover.tako.id/v1alpha1`, with a warning.
 
 | After the upgrade | Behaviour |

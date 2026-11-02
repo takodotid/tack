@@ -132,5 +132,5 @@ Commit and push only when the operator asks.
 | `make build` | builds `bin/tack` |
 | `make test` | unit and golden tests; `go test ./internal/cli -update` rewrites the golden files |
 | `make verify` | regenerates the CRD and deepcopy code, checks gofmt and vet, fails on stale generated files |
-| `make dist` | static binaries for Linux and macOS, man pages, the CRD |
+| `make dist` | static binaries for Linux, macOS and Windows, man pages, the CRD |
 | `make e2e` | the end-to-end test on kind; it creates only `tack-e2e*` clusters, networks, containers and images |

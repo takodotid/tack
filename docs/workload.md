@@ -115,6 +115,13 @@ Tack reads every site's `kubeContext` from one kubeconfig: the file `--kubeconfi
 KUBECONFIG=site-a.kubeconfig:site-b.kubeconfig tack plan -f workload.yaml --to b
 ```
 
+On Windows the separator is `;`. In PowerShell:
+
+```powershell
+$env:KUBECONFIG = "site-a.kubeconfig;site-b.kubeconfig"
+tack plan -f workload.yaml --to b
+```
+
 | Rule | Why |
 |---|---|
 | `--kubeconfig` takes one file. | With it, Tack ignores `KUBECONFIG`. |

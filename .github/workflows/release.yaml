@@ -37,5 +37,5 @@ jobs:
         run: |
           cp config/crd/failover.tako.id_sitefailovers.yaml dist/
           cd dist
-          sha256sum *.tar.gz *.tgz failover.tako.id_sitefailovers.yaml > SHA256SUMS
-          gh release create "$GITHUB_REF_NAME" --verify-tag --title "Tack $GITHUB_REF_NAME" --generate-notes *.tar.gz *.tgz SHA256SUMS failover.tako.id_sitefailovers.yaml
+          sha256sum *.tar.gz *.zip *.tgz failover.tako.id_sitefailovers.yaml > SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "Tack $GITHUB_REF_NAME" --generate-notes *.tar.gz *.zip *.tgz SHA256SUMS failover.tako.id_sitefailovers.yaml
