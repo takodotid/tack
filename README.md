@@ -19,6 +19,40 @@ Moving the primary by hand fails in two ways:
 
 A run has four phases. Each step is written to the ledger before it starts and after it ends.
 
+A planned run from site a to site b:
+
+```mermaid
+sequenceDiagram
+  actor op as operator
+  participant tack
+  participant a as site a, old primary
+  participant b as site b, new primary
+  participant git as Git
+  op->>tack: tack run, then types the workload's name
+  Note over tack,b: Hold
+  tack->>a: annotate the objects the run changes, reconcile disabled
+  tack->>b: annotate the objects the run changes, reconcile disabled
+  tack->>a: wait for a fresh Flux reconcile
+  tack->>b: wait for a fresh Flux reconcile
+  Note over tack,b: Failover, through CloudNativePG's API
+  tack->>a: stop the old Pooler, demote pg-a
+  a-->>tack: demotion token, recorded in the ledger
+  tack->>b: promote pg-b with the token, start the new Pooler
+  Note over tack,git: Promote to GitOps
+  tack->>git: one commit that makes Git equal live
+  tack->>a: wait until Flux applied the commit
+  tack->>b: wait until Flux applied the commit
+  Note over tack,b: Release
+  tack->>a: diff the commit, rendered as Flux does, against live
+  tack->>a: remove the annotations, check Flux changed nothing
+  tack->>b: diff the commit, rendered as Flux does, against live
+  tack->>b: remove the annotations, check Flux changed nothing
+  opt Strait configured
+    tack->>tack: wait until Strait routes to the new primary
+  end
+  tack-->>op: Succeeded
+```
+
 | Phase | Tack does |
 |---|---|
 | Hold | Annotates only the live objects the run changes with `kustomize.toolkit.fluxcd.io/reconcile: disabled`, then waits for a fresh Flux reconcile. Flux stops applying them. |
@@ -27,6 +61,19 @@ A run has four phases. Each step is written to the ledger before it starts and a
 | Release | Renders the commit as Flux does and diffs it against live. Removes the annotations only if they match, then checks that Flux changed nothing. With Strait configured, waits until Strait routes to the new primary. |
 
 The ledger is a `SiteFailover` object at the new primary's site, in the namespace `tack-system` by default. Its `spec` holds the whole plan and never changes; its `status` holds every step's result, the demotion token, the held objects and the Git commit. `tack status` reads it, and so does `kubectl --context site-b -n tack-system get sitefailovers` (short name `sfo`).
+
+A run is in one of four states, recorded in the ledger:
+
+```mermaid
+stateDiagram-v2
+  [*] --> Running: tack run
+  Running --> Succeeded: each step ran or is deferred
+  Running --> Stopped: unexpected, exit code 3
+  Running --> Waiting: Git unreachable, exit code 4
+  Stopped --> Running: tack resume, with the decision's flag
+  Waiting --> Running: tack resume, once Git is back
+  Succeeded --> [*]
+```
 
 | Mode | When | What happens |
 |---|---|---|
