@@ -487,9 +487,30 @@ func TestSiteLossBreakGlassAndReturn(t *testing.T) {
 	if code != exitStopped || !strings.Contains(out, "FencedSiteIsPrimary") {
 		t.Fatalf("resume exit %d, want %d with FencedSiteIsPrimary", code, exitStopped)
 	}
-	if got := jsonpath(t, "b", "cluster", "pg-b", "{.spec.replica.primary}"); got != "pg-b" {
-		t.Fatalf("site b was changed before the operator approved: %s", got)
+	assertUnchanged := func() {
+		t.Helper()
+		if got := jsonpath(t, "b", "cluster", "pg-b", "{.spec.replica.primary}"); got != "pg-b" {
+			t.Fatalf("site b was changed before the operator approved: %s", got)
+		}
+		for kind, name := range map[string]string{"cluster": "pg-b", "pooler": poolerName("b")} {
+			ann := jsonpath(t, "b", kind, name, "{.metadata.annotations}")
+			if strings.Contains(ann, "kustomize.toolkit.fluxcd.io/reconcile") || strings.Contains(ann, "failover.tako.id/held-by") {
+				t.Fatalf("site b: %s %s was held before the operator approved: %s", kind, name, ann)
+			}
+		}
+		if got := stepState(latestRun(t, "a"), "hold-b-cluster-pg-b"); got != "Deferred" {
+			t.Fatalf("hold-b-cluster-pg-b is %q, want Deferred", got)
+		}
 	}
+	assertUnchanged()
+
+	// Issue #23: a second resume without --fence stops again, and still
+	// changes nothing at site b.
+	out, code = tack(t, nil, "resume", run, "-f", workload, "--yes")
+	if code != exitStopped || !strings.Contains(out, "FencedSiteIsPrimary") {
+		t.Fatalf("second resume exit %d, want %d with FencedSiteIsPrimary", code, exitStopped)
+	}
+	assertUnchanged()
 
 	_, code = tack(t, nil, "resume", run, "-f", workload, "--yes", "--fence", "b")
 	if code != exitWaiting {

@@ -111,18 +111,18 @@ func (r *runner) run(ctx context.Context) error {
 				}
 				continue
 			}
-			if st.State == failoverv1.StepDeferred {
+			if step.Deferrable {
 				if err := r.gate(ctx, step.Site); err != nil {
 					if !errors.Is(err, errUnread) {
-						return r.end(ctx, step, err)
+						return r.stopBefore(ctx, step, err)
 					}
 					// The site stays unreachable for this process.
 					r.reachable[step.Site] = err
-					st.Message = fmt.Sprintf("site %s unreachable: %v", step.Site, err)
+					st.State, st.Message = failoverv1.StepDeferred, fmt.Sprintf("site %s unreachable: %v", step.Site, err)
 					if err := r.write(ctx, r.sf); err != nil {
 						return err
 					}
-					r.printf("  deferred  %s (site %s did not answer the read before its deferred steps)\n", step.ID, step.Site)
+					r.printf("  deferred  %s (site %s did not answer the read before its steps)\n", step.ID, step.Site)
 					continue
 				}
 			}
@@ -135,12 +135,15 @@ func (r *runner) run(ctx context.Context) error {
 }
 
 // errUnread is returned by gate when the site did not answer its read.
-var errUnread = errors.New("the site did not answer the read before its deferred steps")
+var errUnread = errors.New("the site did not answer the read before its steps")
 
-// gate stops the run when a site whose steps were deferred comes back
-// answering as primary, unless the operator approved fencing it. A site
-// that does not answer the read is not known to be fenced: gate returns
-// errUnread, and its steps stay deferred.
+// gate reads a site whose steps are deferrable before the first of them
+// that runs in this process, whatever that step's state: an approval to
+// fence lasts one process, and the ledger does not tell a site that came
+// back from one that never left. It stops the run when the site answers as
+// primary, unless the operator approved fencing it. A site that does not
+// answer the read is not known to be fenced: gate returns errUnread, and
+// its steps are deferred.
 //
 // The read checks the site up to 3 times, in every mode: the site has just
 // answered the check before its step, so a failed check is a blip, not a
@@ -153,7 +156,7 @@ func (r *runner) gate(ctx context.Context, site string) error {
 	checks.Once = func(s string) bool { return s != site }
 	topo, err := r.Driver.Discover(ctx, &r.sf.Spec.Workload.Spec, checks)
 	if note := checks.Note(site); note != "" {
-		r.note(site, "the read before its deferred steps: "+note)
+		r.note(site, "the read before its steps: "+note)
 	}
 	if err != nil {
 		return err
@@ -167,7 +170,7 @@ func (r *runner) gate(ctx context.Context, site string) error {
 	}
 	if s.Role == driver.RolePrimary && site != r.sf.Spec.To && !slices.Contains(r.opts.Fence, site) {
 		return stop.Ask(failoverv1.ReasonFencedSiteIsPrimary,
-			"site %s came back and answers as primary (%s); it should be fenced. Check it, then resume with --fence %s", site, s.Summary, site)
+			"site %s answers as primary (%s); it should be fenced. Check it, then resume with --fence %s", site, s.Summary, site)
 	}
 	r.gated[site] = true
 	return nil
@@ -216,8 +219,18 @@ func (r *runner) runStep(ctx context.Context, step *failoverv1.Step) error {
 	return nil
 }
 
-// end records why the run cannot go on.
+// end records why the run cannot go on at a step.
 func (r *runner) end(ctx context.Context, step *failoverv1.Step, err error) error {
+	return r.halt(ctx, step, err, true)
+}
+
+// stopBefore records why the run cannot go on before a step starts, such as
+// a stop by the read before its site's steps. The step keeps its state.
+func (r *runner) stopBefore(ctx context.Context, step *failoverv1.Step, err error) error {
+	return r.halt(ctx, step, err, false)
+}
+
+func (r *runner) halt(ctx context.Context, step *failoverv1.Step, err error, setState bool) error {
 	se, ok := stop.As(err)
 	if !ok {
 		se = &stop.Error{Reason: failoverv1.ReasonStepFailed, Message: err.Error()}
@@ -229,13 +242,16 @@ func (r *runner) end(ctx context.Context, step *failoverv1.Step, err error) erro
 		st.Message += "; " + note
 	}
 	ret := ErrStopped
+	state := failoverv1.StepFailed
 	if se.Wait {
-		st.State = failoverv1.StepPending
+		state = failoverv1.StepPending
 		r.sf.Status.State = failoverv1.RunWaiting
 		ret = ErrWaiting
 	} else {
-		st.State = failoverv1.StepFailed
 		r.sf.Status.State = failoverv1.RunStopped
+	}
+	if setState {
+		st.State = state
 	}
 	r.sf.Status.Reason = se.Reason
 	r.sf.Status.Message = fmt.Sprintf("step %s: %s", step.ID, se.Message)

@@ -133,7 +133,8 @@ decide. Each decision has its own flag:
   GitChanged           Git moved during the run. Review the new commits, then
                        --accept-git-head SHA makes that commit the new base.
   FencedSiteIsPrimary  a lost site came back and answers as primary.
-                       --fence SITE lets the run demote it.
+                       --fence SITE lets this resume demote it. A resume
+                       without it stops again while the site is primary.
   HeldByAnotherRun     another run holds an object. Finish that run, or
                        start a new run with --take-over.
 

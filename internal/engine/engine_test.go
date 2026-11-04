@@ -3,6 +3,7 @@ package engine_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"slices"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
@@ -569,8 +571,306 @@ func TestFenceCheckRetried(t *testing.T) {
 	if field(f.cluster("a"), "spec", "replica", "primary") != "pg-b" {
 		t.Error("site a was not fenced")
 	}
-	if msg := stepMessage(sf, "hold-a-cluster-pg-a"); !strings.Contains(msg, "the read before its deferred steps: site a answered on check 2 of 3") {
+	if msg := stepMessage(sf, "hold-a-cluster-pg-a"); !strings.Contains(msg, "the read before its steps: site a answered on check 2 of 3") {
 		t.Errorf("hold-a-cluster-pg-a message %q", msg)
+	}
+}
+
+// lostSiteReturnsAsPrimary runs a site loss toward b with site a down, and
+// Git down when gitDown is set, then brings a back still primary.
+func (f *fixture) lostSiteReturnsAsPrimary(gitDown bool) {
+	f.t.Helper()
+	f.clients.SetDown("a", true)
+	f.git.Unreachable = gitDown
+	sf, err := f.start("b", failoverv1.ModeSiteLoss, engine.Options{})
+	if gitDown && !errors.Is(err, engine.ErrWaiting) || !gitDown && err != nil {
+		f.t.Fatalf("run: %v %s %s", err, sf.Status.State, sf.Status.Message)
+	}
+	if st := stepState(sf, "hold-a-cluster-pg-a"); st != failoverv1.StepDeferred {
+		f.t.Fatalf("hold-a-cluster-pg-a is %s, want Deferred", st)
+	}
+	f.clients.SetDown("a", false)
+}
+
+// versions returns the resourceVersion of a site's Cluster and Pooler. The
+// same versions mean nothing wrote to them.
+func (f *fixture) versions(site string) string {
+	f.t.Helper()
+	var out []string
+	for _, kind := range []string{"Cluster", "Pooler"} {
+		name := "pg-" + site
+		if kind == "Pooler" {
+			name += "-pooler-rw"
+		}
+		u := testenv.Object("postgresql.cnpg.io/v1", kind, "db", name, nil)
+		if err := f.clients.Sites[site].Get(context.Background(), client.ObjectKeyFromObject(u), u); err != nil {
+			f.t.Fatal(err)
+		}
+		out = append(out, kind+"@"+u.GetResourceVersion())
+	}
+	return strings.Join(out, ",")
+}
+
+// stopsUnchanged resumes without --fence and checks that the run stops
+// with FencedSiteIsPrimary, before step id, and leaves site a unchanged:
+// no write to its Cluster or Pooler, and no hold.
+func (f *fixture) stopsUnchanged(id string, want failoverv1.StepState) *failoverv1.SiteFailover {
+	f.t.Helper()
+	before, holds := f.versions("a"), holdsAt(f.flux, "a")
+	sf, err := f.resume("b", engine.Options{})
+	if !errors.Is(err, engine.ErrStopped) || sf.Status.Reason != failoverv1.ReasonFencedSiteIsPrimary {
+		f.t.Fatalf("err %v, reason %s", err, sf.Status.Reason)
+	}
+	if !strings.HasPrefix(sf.Status.Message, "step "+id+": site a answers as primary") {
+		f.t.Errorf("message %q, want a stop before %s", sf.Status.Message, id)
+	}
+	if st := stepState(sf, id); st != want {
+		f.t.Errorf("%s is %s, want %s", id, st, want)
+	}
+	if after := f.versions("a"); after != before {
+		f.t.Errorf("site a was written to without --fence: %s, then %s", before, after)
+	}
+	if n := holdsAt(f.flux, "a"); n != holds {
+		f.t.Errorf("%d holds at site a without --fence", n-holds)
+	}
+	if field(f.cluster("a"), "spec", "replica", "primary") != "pg-a" {
+		f.t.Error("site a was fenced without --fence")
+	}
+	return sf
+}
+
+// fenceAndFinish resumes with --fence a and Git up, and checks that the run
+// succeeds with site a held before its fence and then fenced.
+func (f *fixture) fenceAndFinish() {
+	f.t.Helper()
+	f.git.Unreachable = false
+	sf, err := f.resume("b", engine.Options{Fence: []string{"a"}})
+	if err != nil || sf.Status.State != failoverv1.RunSucceeded {
+		f.t.Fatalf("resume --fence a: %v %s %s", err, sf.Status.State, sf.Status.Message)
+	}
+	if field(f.cluster("a"), "spec", "replica", "primary") != "pg-b" {
+		f.t.Error("site a was not fenced")
+	}
+	for _, st := range sf.Status.Steps {
+		if st.State != failoverv1.StepSucceeded {
+			f.t.Errorf("step %s is %s", st.ID, st.State)
+		}
+	}
+}
+
+// Issue #23. A lost site comes back still primary. Two resumes in a row
+// without --fence each stop before its first step and change nothing
+// there; the step stays Deferred.
+func TestFencedSiteUnchangedOnRepeatedResume(t *testing.T) {
+	f := newFixture(t)
+	f.lostSiteReturnsAsPrimary(false)
+	for i := 0; i < 2; i++ {
+		sf := f.stopsUnchanged("hold-a-cluster-pg-a", failoverv1.StepDeferred)
+		if msg := stepMessage(sf, "hold-a-cluster-pg-a"); !strings.Contains(msg, "resume with --fence a") {
+			t.Errorf("hold-a-cluster-pg-a message %q", msg)
+		}
+	}
+	f.fenceAndFinish()
+}
+
+// An approval to fence lasts one process. A resume with --fence a fails at
+// a step at site a before its fence; a later resume without --fence stops
+// before that Failed step.
+func TestFenceApprovalLastsOneProcessFailedStep(t *testing.T) {
+	f := newFixture(t)
+	f.lostSiteReturnsAsPrimary(false)
+	f.flux.Fail["Hold"] = errors.New("hold failed")
+	sf, err := f.resume("b", engine.Options{Fence: []string{"a"}})
+	if !errors.Is(err, engine.ErrStopped) || stepState(sf, "hold-a-cluster-pg-a") != failoverv1.StepFailed {
+		t.Fatalf("err %v, hold-a-cluster-pg-a %s", err, stepState(sf, "hold-a-cluster-pg-a"))
+	}
+	delete(f.flux.Fail, "Hold")
+	f.stopsUnchanged("hold-a-cluster-pg-a", failoverv1.StepFailed)
+	f.fenceAndFinish()
+}
+
+// An approval to fence lasts one process. A resume with --fence a holds
+// site a, then stops at site b before a's fence; a later resume without
+// --fence stops before the fence, which was never Deferred.
+func TestFenceApprovalLastsOneProcessPendingStep(t *testing.T) {
+	f := newFixture(t)
+	f.flux.Held["b/Cluster/pg-b"] = "run-0"
+	f.clients.SetDown("a", true)
+	sf, err := f.start("b", failoverv1.ModeSiteLoss, engine.Options{})
+	if !errors.Is(err, engine.ErrStopped) || sf.Status.Reason != failoverv1.ReasonHeldByAnotherRun {
+		t.Fatalf("err %v, reason %s", err, sf.Status.Reason)
+	}
+	f.clients.SetDown("a", false)
+	sf, err = f.resume("b", engine.Options{Fence: []string{"a"}})
+	if !errors.Is(err, engine.ErrStopped) || sf.Status.Reason != failoverv1.ReasonHeldByAnotherRun {
+		t.Fatalf("err %v, reason %s", err, sf.Status.Reason)
+	}
+	if stepState(sf, "reconcile-hold-a") != failoverv1.StepSucceeded || stepState(sf, "fence-a") != failoverv1.StepPending {
+		t.Fatalf("reconcile-hold-a %s, fence-a %s", stepState(sf, "reconcile-hold-a"), stepState(sf, "fence-a"))
+	}
+	delete(f.flux.Held, "b/Cluster/pg-b")
+	sf = f.stopsUnchanged("fence-a", failoverv1.StepPending)
+	if stepState(sf, "hold-b-cluster-pg-b") != failoverv1.StepSucceeded {
+		t.Errorf("hold-b-cluster-pg-b is %s: the steps before the fence should run", stepState(sf, "hold-b-cluster-pg-b"))
+	}
+	f.fenceAndFinish()
+}
+
+// A process dies while it runs a step at a returning site, before the
+// step changed anything. The step is Running; a resume without --fence
+// stops before it while the site is still primary.
+func TestFencedSiteRunningStep(t *testing.T) {
+	f := newFixture(t)
+	f.lostSiteReturnsAsPrimary(true)
+	sf, err := f.resume("b", engine.Options{Fence: []string{"a"}})
+	if !errors.Is(err, engine.ErrWaiting) || stepState(sf, "fence-a") != failoverv1.StepSucceeded {
+		t.Fatalf("err %v, fence-a %s", err, stepState(sf, "fence-a"))
+	}
+	// The fence did not reach site a, and the process died while it ran.
+	setPrimary(t, f, "a", "pg-a")
+	setStepState(t, f, "fence-a", failoverv1.StepRunning)
+	f.stopsUnchanged("fence-a", failoverv1.StepRunning)
+	f.fenceAndFinish()
+}
+
+// The site stops being primary after the stop, fenced by hand. A resume
+// without --fence then runs its steps.
+func TestFencedSiteStoppedBeingPrimary(t *testing.T) {
+	f := newFixture(t)
+	f.lostSiteReturnsAsPrimary(false)
+	f.stopsUnchanged("hold-a-cluster-pg-a", failoverv1.StepDeferred)
+	setPrimary(t, f, "a", "pg-b")
+	sf, err := f.resume("b", engine.Options{})
+	if err != nil || sf.Status.State != failoverv1.RunSucceeded {
+		t.Fatalf("resume: %v %s %s", err, sf.Status.State, sf.Status.Message)
+	}
+	for _, st := range sf.Status.Steps {
+		if st.State != failoverv1.StepSucceeded {
+			t.Errorf("step %s is %s", st.ID, st.State)
+		}
+	}
+	if holdsAt(f.flux, "a") == 0 {
+		t.Error("site a was not held")
+	}
+}
+
+// A site lost at plan time answers as primary when the run starts. The run
+// stops before its first step there, as a resume does.
+func TestRunStopsWhenLostSiteAnswersAsPrimary(t *testing.T) {
+	f := newFixture(t)
+	f.clients.SetDown("a", true)
+	plan := f.plan("b", failoverv1.ModeSiteLoss)
+	f.clients.SetDown("a", false)
+	before := f.versions("a")
+	sf, err := f.run("b", plan, engine.Options{})
+	if !errors.Is(err, engine.ErrStopped) || sf.Status.Reason != failoverv1.ReasonFencedSiteIsPrimary {
+		t.Fatalf("err %v, reason %s", err, sf.Status.Reason)
+	}
+	if st := stepState(sf, "hold-a-cluster-pg-a"); st != failoverv1.StepPending {
+		t.Errorf("hold-a-cluster-pg-a is %s, want Pending", st)
+	}
+	if after := f.versions("a"); after != before || holdsAt(f.flux, "a") != 0 {
+		t.Errorf("site a was changed: %s, then %s; %d holds", before, after, holdsAt(f.flux, "a"))
+	}
+	f.fenceAndFinish()
+}
+
+// A site answers the check before its step, then not the read before it.
+// A step that was not Deferred is deferred too.
+func TestFenceCheckCannotReadDefersPendingStep(t *testing.T) {
+	f := newFixture(t)
+	f.clients.SetDown("a", true)
+	plan := f.plan("b", failoverv1.ModeSiteLoss)
+	f.clients.SetDown("a", false)
+	f.clients.Flap("a", true, false, false, false)
+	sf, err := f.run("b", plan, engine.Options{})
+	if err != nil || sf.Status.State != failoverv1.RunSucceeded {
+		t.Fatalf("run: %v %s %s", err, sf.Status.State, sf.Status.Message)
+	}
+	for _, id := range []string{"hold-a-cluster-pg-a", "fence-a"} {
+		if st := stepState(sf, id); st != failoverv1.StepDeferred {
+			t.Errorf("%s is %s, want Deferred", id, st)
+		}
+	}
+	if msg := stepMessage(sf, "hold-a-cluster-pg-a"); !strings.Contains(msg, "did not answer the read before its steps") {
+		t.Errorf("hold-a-cluster-pg-a message %q", msg)
+	}
+	if field(f.cluster("a"), "spec", "replica", "primary") != "pg-a" || holdsAt(f.flux, "a") != 0 {
+		t.Error("site a was changed although the read could not read it")
+	}
+}
+
+// The read before a site's steps fails with an error, not a lost site. The
+// run stops before the step, which stays Deferred; the next resume reads
+// the site again.
+func TestFenceCheckErrorKeepsStepDeferred(t *testing.T) {
+	f := newFixture(t)
+	f.lostSiteReturnsAsPrimary(false)
+	ctx := context.Background()
+	p := testenv.Pooler("a", 2)
+	if err := f.clients.Sites["a"].Delete(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	sf, err := f.resume("b", engine.Options{})
+	if !errors.Is(err, engine.ErrStopped) || sf.Status.Reason != failoverv1.ReasonStepFailed || !strings.Contains(sf.Status.Message, "read Pooler") {
+		t.Fatalf("err %v, reason %s: %s", err, sf.Status.Reason, sf.Status.Message)
+	}
+	if st := stepState(sf, "hold-a-cluster-pg-a"); st != failoverv1.StepDeferred {
+		t.Errorf("hold-a-cluster-pg-a is %s, want Deferred", st)
+	}
+	if holdsAt(f.flux, "a") != 0 {
+		t.Error("site a was held")
+	}
+	if err := f.clients.Sites["a"].Create(ctx, testenv.Pooler("a", 2)); err != nil {
+		t.Fatal(err)
+	}
+	f.stopsUnchanged("hold-a-cluster-pg-a", failoverv1.StepDeferred)
+}
+
+func holdsAt(f *testenv.Flux, site string) int {
+	n := 0
+	for _, c := range calls(f, "Hold") {
+		if strings.HasPrefix(c, "Hold "+site+" ") {
+			n++
+		}
+	}
+	return n
+}
+
+// setPrimary declares a primary in a site's Cluster by hand, and waits for
+// the fake operator to follow it.
+func setPrimary(t *testing.T, f *fixture, site, primary string) {
+	t.Helper()
+	ctx := context.Background()
+	u := testenv.Object("postgresql.cnpg.io/v1", "Cluster", "db", "pg-"+site, nil)
+	patch := fmt.Sprintf(`{"spec":{"replica":{"primary":%q}}}`, primary)
+	if err := f.clients.Sites[site].Patch(ctx, u, client.RawPatch(types.MergePatchType, []byte(patch))); err != nil {
+		t.Fatal(err)
+	}
+	want := primary == "pg-"+site
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		if field(f.cluster(site), "status", "instancesReportedState", "pg-"+site+"-1", "isPrimary") == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("site %s: isPrimary did not become %v", site, want)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// setStepState writes a step's state into the ledger at b, as a process
+// that died during the step leaves it.
+func setStepState(t *testing.T, f *fixture, id string, state failoverv1.StepState) {
+	t.Helper()
+	sf := f.ledger("b")
+	for i := range sf.Status.Steps {
+		if sf.Status.Steps[i].ID == id {
+			sf.Status.Steps[i].State = state
+		}
+	}
+	if err := f.env("b").Ledger.UpdateStatus(context.Background(), sf); err != nil {
+		t.Fatal(err)
 	}
 }
 
