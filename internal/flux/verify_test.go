@@ -151,15 +151,15 @@ func TestClassify(t *testing.T) {
 			t.Fatalf("%+v", fs)
 		}
 	})
+	// #35 row 39 (RFC0005 Requirement 8): a path found in neither Git nor
+	// live stops the run with GitDiffersFromLive.
 	t.Run("path that resolves nowhere", func(t *testing.T) {
 		g := git.DeepCopy()
 		g.SetAnnotations(map[string]string{"cnpg.io/hibernation": "off"})
 		for _, field := range []string{"spec.replcia.primary", "metadata.annotations.cnpg.io/hibernation"} {
 			_, err := classify([]checked{{Ref: clusterRef, Git: g, Live: g.DeepCopy(), Result: diffResult{Action: ssa.UnchangedAction}}},
 				[]failoverv1.ObjectField{{Object: clusterRef, Field: field}}, mask)
-			if err == nil || !strings.Contains(err.Error(), "resolves in neither") {
-				t.Errorf("%s: got %v", field, err)
-			}
+			wantStop(t, err, failoverv1.ReasonGitDiffersFromLive, field, "resolves in neither")
 		}
 	})
 	t.Run("apply changes the field below it", func(t *testing.T) {

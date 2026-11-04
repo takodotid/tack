@@ -223,7 +223,8 @@ func classify(objs []checked, fields []failoverv1.ObjectField, mask *masker) (fi
 				_, gp := lookup(o.Git.Object, fp[:len(fp)-1])
 				_, lp := lookup(o.Live.Object, fp[:len(fp)-1])
 				if !gp && !lp {
-					return fs, fmt.Errorf("%s field %s: the path resolves in neither Git nor live; a key that holds a dot cannot be written in this form",
+					return fs, stop.Ask(failoverv1.ReasonGitDiffersFromLive,
+						"%s field %s: the path resolves in neither Git nor live; a key that holds a dot cannot be written in this form",
 						refString(o.Ref), names[id][i])
 				}
 			}
