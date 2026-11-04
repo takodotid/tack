@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -483,6 +484,63 @@ func TestFenceCheckCannotRead(t *testing.T) {
 	sf, err = f.resume("b", engine.Options{})
 	if !errors.Is(err, engine.ErrStopped) || sf.Status.Reason != failoverv1.ReasonFencedSiteIsPrimary {
 		t.Fatalf("err %v, reason %s", err, sf.Status.Reason)
+	}
+}
+
+// A short network cut fails a check or two of the to site's API. The plan
+// must still read the site, and note the checks.
+func TestPlanSiteCheckRetried(t *testing.T) {
+	f := newFixture(t)
+	f.clients.Blip("b", 2)
+	p, err := f.env("b").MakePlan(context.Background(), engine.Request{
+		Run: "run-1", Workload: f.w.Name, Spec: &f.w.Spec,
+		Request: driver.Request{From: "a", To: "b", Mode: failoverv1.ModePlanned},
+	})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if n := f.clients.Checks["b"]; n != 3 {
+		t.Errorf("site b checked %d times, want 3", n)
+	}
+	if !slices.Contains(p.Notes, "site b answered on check 3 of 3") {
+		t.Errorf("notes %q", p.Notes)
+	}
+}
+
+// A planned plan needs from. A from site that stays down is refused after
+// the bounded checks.
+func TestPlanSiteCheckBounded(t *testing.T) {
+	f := newFixture(t)
+	f.clients.SetDown("a", true)
+	_, err := f.env("b").MakePlan(context.Background(), engine.Request{
+		Run: "run-1", Workload: f.w.Name, Spec: &f.w.Spec,
+		Request: driver.Request{From: "a", To: "b", Mode: failoverv1.ModePlanned},
+	})
+	if err == nil || !strings.Contains(err.Error(), "a planned switchover needs it") {
+		t.Fatalf("err %v, want a refusal", err)
+	}
+	if n := f.clients.Checks["a"]; n != 3 {
+		t.Errorf("site a checked %d times, want 3", n)
+	}
+}
+
+// A site-loss plan checks the lost site once: it does not answer, and more
+// checks would add to the write outage.
+func TestPlanSiteLossChecksLostSiteOnce(t *testing.T) {
+	f := newFixture(t)
+	f.clients.SetDown("a", true)
+	p, err := f.env("b").MakePlan(context.Background(), engine.Request{
+		Run: "run-1", Workload: f.w.Name, Spec: &f.w.Spec,
+		Request: driver.Request{To: "b", Mode: failoverv1.ModeSiteLoss},
+	})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if n := f.clients.Checks["a"]; n != 1 {
+		t.Errorf("lost site a checked %d times, want 1", n)
+	}
+	if p.SiteFailover.Spec.From != "a" {
+		t.Errorf("from %q, want a, the primary site b declares", p.SiteFailover.Spec.From)
 	}
 }
 

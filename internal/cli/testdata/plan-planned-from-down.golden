@@ -1,1 +1,3 @@
+  retry     site a did not answer check 1 of 3 (site a is unreachable: connection refused); next check in 1ms
+  retry     site a did not answer check 2 of 3 (site a is unreachable: connection refused); next check in 1ms
 tack: site "a" is unreachable: a planned switchover needs it; use --mode site-loss if the site is lost

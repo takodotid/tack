@@ -49,6 +49,9 @@ type options struct {
 	isTerminal func() bool
 	// stderr takes warnings. The root command sets it before any command runs.
 	stderr io.Writer
+	// reachWaits are the pauses between the checks of a site in the search
+	// for runs. Nil uses engine.DefaultReachWaits.
+	reachWaits []time.Duration
 }
 
 const rootLong = `Tack switches a stateful workload's primary from one site to another: a
@@ -90,11 +93,12 @@ var (
 	nowFunc              = time.Now
 	stdin      io.Reader = os.Stdin
 	isTerminal           = stdinIsTerminal
+	reachWaits []time.Duration
 )
 
 // NewRoot returns the tack command.
 func NewRoot(f Factory) *cobra.Command {
-	o := &options{factory: f, now: nowFunc, stdin: stdin, isTerminal: isTerminal, stderr: os.Stderr}
+	o := &options{factory: f, now: nowFunc, stdin: stdin, isTerminal: isTerminal, stderr: os.Stderr, reachWaits: reachWaits}
 	root := &cobra.Command{
 		Use:           "tack",
 		Short:         "Switch a stateful workload's primary between sites, with GitOps kept in step",

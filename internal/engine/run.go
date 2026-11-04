@@ -69,14 +69,17 @@ func (e *Env) Resume(ctx context.Context, sf *failoverv1.SiteFailover, opts Opti
 	if err := e.write(ctx, sf); err != nil {
 		return err
 	}
-	r := &runner{Env: e, sf: sf, opts: opts, reachable: map[string]error{}, retried: map[string]string{}, gated: map[string]bool{}}
+	r := &runner{Env: e, sf: sf, opts: opts, checks: e.SiteChecks(sf.Spec.Mode, sf.Spec.To),
+		reachable: map[string]error{}, retried: map[string]string{}, gated: map[string]bool{}}
 	return r.run(ctx)
 }
 
 type runner struct {
 	*Env
-	sf        *failoverv1.SiteFailover
-	opts      Options
+	sf   *failoverv1.SiteFailover
+	opts Options
+	// checks are the checks of each site before the run's first step there.
+	checks    *SiteChecks
 	reachable map[string]error
 	// retried notes, per site, a check that failed before the site
 	// answered. The site's next step records it in its message.
@@ -258,10 +261,6 @@ func (r *runner) finish(ctx context.Context) error {
 	return nil
 }
 
-// DefaultReachWaits are the pauses between the checks of a site's API.
-// With the 5 s timeout of each check, 3 checks take at most 30 s.
-var DefaultReachWaits = []time.Duration{5 * time.Second, 10 * time.Second}
-
 // siteReachable checks the step's site once per process. The site counts
 // as unreachable only when every check fails, so a short network blip
 // neither stops nor defers a step. A deferrable step of a SiteLoss run has
@@ -271,43 +270,23 @@ func (r *runner) siteReachable(ctx context.Context, step *failoverv1.Step) error
 	if err, ok := r.reachable[site]; ok {
 		return err
 	}
-	waits := r.ReachWaits
-	if waits == nil {
-		waits = DefaultReachWaits
+	err := r.checks.Check(ctx, site, step.Deferrable && r.sf.Spec.Mode == failoverv1.ModeSiteLoss)
+	if ctx.Err() != nil {
+		return err
 	}
-	if step.Deferrable && r.sf.Spec.Mode == failoverv1.ModeSiteLoss {
-		waits = nil
-	}
-	checks := len(waits) + 1
-	start := r.now()
-	var err error
-	for i := 0; ; i++ {
-		err = r.Clients.Reachable(ctx, site)
-		if err == nil {
-			if i > 0 {
-				r.retried[site] = fmt.Sprintf("site %s answered on check %d of %d", site, i+1, checks)
-				r.printf("  answered  site %s on check %d of %d\n", site, i+1, checks)
-			}
-			break
-		}
-		if ctx.Err() != nil {
-			return err
-		}
-		if i == len(waits) {
-			if checks > 1 {
-				err = fmt.Errorf("no answer to %d checks over %s: %w", checks, r.now().Sub(start).Round(time.Second), err)
-			}
-			break
-		}
-		r.printf("  retry     site %s did not answer check %d of %d (%v); next check in %s\n", site, i+1, checks, err, waits[i])
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(waits[i]):
-		}
+	if note := r.checks.Note(site); note != "" {
+		r.note(site, note)
 	}
 	r.reachable[site] = err
 	return err
+}
+
+// note adds to what the site's next step records in its message.
+func (r *runner) note(site, note string) {
+	if r.retried[site] != "" {
+		note = r.retried[site] + "; " + note
+	}
+	r.retried[site] = note
 }
 
 func (r *runner) stepStatus(id string) *failoverv1.StepStatus {

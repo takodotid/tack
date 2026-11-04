@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"github.com/takodotid/tack/internal/config"
 	"github.com/takodotid/tack/internal/driver"
 	"github.com/takodotid/tack/internal/engine"
+	"github.com/takodotid/tack/internal/kube"
 )
 
 type planFlags struct {
@@ -130,30 +132,18 @@ func (o *options) makePlan(ctx context.Context, p *planFlags, progress io.Writer
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	env.Runs = func(ctx context.Context) ([]failoverv1.SiteFailover, error) {
-		found, err := findRuns(ctx, o, &w.Spec, w.Name)
+	env.Runs = func(ctx context.Context, c kube.Clients) ([]failoverv1.SiteFailover, error) {
+		found, err := findRuns(ctx, c, &w.Spec, w.Name)
 		var runs []failoverv1.SiteFailover
 		for _, r := range found {
 			runs = append(runs, *r.sf)
 		}
 		return runs, err
 	}
-	if req.From == "" {
-		topo, err := env.Driver.Discover(ctx, &w.Spec, env.Clients)
-		if err != nil {
-			return nil, nil, closeEnv, err
-		}
-		to, _ := topo.Site(req.To)
-		if to == nil || !to.Reachable {
-			return nil, nil, closeEnv, fmt.Errorf("site %q must be reachable to become primary", req.To)
-		}
-		if to.DeclaredPrimary == "" || to.DeclaredPrimary == req.To {
-			return nil, nil, closeEnv, usagef("site %s declares %q primary; pass --from", req.To, to.DeclaredPrimary)
-		}
-		req.From = to.DeclaredPrimary
-		p.from = req.From
-	}
 	plan, err := env.MakePlan(ctx, req)
+	if errors.Is(err, engine.ErrNoFrom) {
+		err = usageError{err}
+	}
 	return plan, env, closeEnv, err
 }
 
@@ -200,7 +190,7 @@ func newRun(o *options) *cobra.Command {
 			if err := o.confirm(out, yes, plan.SiteFailover.Spec.Workload.Name); err != nil {
 				return err
 			}
-			if err := checkNoActiveRun(cmd.Context(), o, env, plan.SiteFailover, takeOver); err != nil {
+			if err := checkNoActiveRun(cmd.Context(), env, plan.SiteFailover, takeOver); err != nil {
 				return err
 			}
 			return env.Start(cmd.Context(), plan.SiteFailover, engine.Options{TakeOver: takeOver})
@@ -233,9 +223,11 @@ func (o *options) confirm(out io.Writer, yes bool, workload string) error {
 
 func stdinIsTerminal() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
 
-// checkNoActiveRun refuses a second active run of the same workload.
-func checkNoActiveRun(ctx context.Context, o *options, env *engine.Env, sf *failoverv1.SiteFailover, takeOver string) error {
-	runs, err := findRuns(ctx, o, &sf.Spec.Workload.Spec, sf.Spec.Workload.Name)
+// checkNoActiveRun refuses a second active run of the same workload. It
+// checks the sites again: the plan's checks may be older than the
+// operator's confirmation.
+func checkNoActiveRun(ctx context.Context, env *engine.Env, sf *failoverv1.SiteFailover, takeOver string) error {
+	runs, err := findRuns(ctx, env.SiteChecks(sf.Spec.Mode, sf.Spec.To), &sf.Spec.Workload.Spec, sf.Spec.Workload.Name)
 	if err != nil {
 		return err
 	}

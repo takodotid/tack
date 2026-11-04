@@ -36,8 +36,13 @@ type foundRun struct {
 // contextSite names the single site behind --context.
 const contextSite = "context"
 
-// find returns the runs the flags point at, newest first per site.
-func (l *ledgerFlags) find(ctx context.Context, o *options) ([]foundRun, error) {
+// find returns the runs the flags point at, newest first per site. With
+// --file it checks each site of the workload ([RFC#0007] Requirement 5).
+// When name is set, a site that fails its first check gets the rest of its
+// checks only if the run is not found at another site: a resume of a
+// site-loss run finds its ledger at the to site, and does not wait on the
+// lost site. Progress lines go to progress.
+func (l *ledgerFlags) find(ctx context.Context, o *options, name string, progress io.Writer) ([]foundRun, error) {
 	switch {
 	case l.file != "" && l.context != "":
 		return nil, usagef("pass --file or --context, not both")
@@ -46,7 +51,19 @@ func (l *ledgerFlags) find(ctx context.Context, o *options) ([]foundRun, error) 
 		if err != nil {
 			return nil, err
 		}
-		return findRuns(ctx, o, &w.Spec, w.Name)
+		checks := &engine.SiteChecks{Clients: o.factory.Clients(o.kubeconfig, kube.Contexts(&w.Spec)), Waits: o.reachWaits, Out: progress}
+		if name != "" {
+			checks.Once = func(string) bool { return true }
+			runs, err := findRuns(ctx, checks, &w.Spec, w.Name)
+			if err != nil {
+				return nil, err
+			}
+			if _, err := pick(runs, name); err == nil {
+				return runs, nil
+			}
+			checks.Once = nil
+		}
+		return findRuns(ctx, checks, &w.Spec, w.Name)
 	case l.context != "":
 		c := o.factory.Clients(o.kubeconfig, map[string]string{contextSite: l.context})
 		cl, err := c.Client(contextSite)
@@ -67,9 +84,8 @@ func (l *ledgerFlags) find(ctx context.Context, o *options) ([]foundRun, error) 
 	return nil, usagef("pass --file or --context")
 }
 
-// findRuns lists a workload's runs at every reachable site.
-func findRuns(ctx context.Context, o *options, spec *failoverv1.WorkloadSpec, workload string) ([]foundRun, error) {
-	c := o.factory.Clients(o.kubeconfig, kube.Contexts(spec))
+// findRuns lists a workload's runs at every site that answers c.
+func findRuns(ctx context.Context, c kube.Clients, spec *failoverv1.WorkloadSpec, workload string) ([]foundRun, error) {
 	var out []foundRun
 	for _, s := range spec.Sites {
 		if err := c.Reachable(ctx, s.Name); err != nil {
@@ -144,7 +160,8 @@ func newResume(o *options) *cobra.Command {
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			runs, err := l.find(ctx, o)
+			out := cmd.OutOrStdout()
+			runs, err := l.find(ctx, o, args[0], out)
 			if err != nil {
 				return err
 			}
@@ -152,7 +169,6 @@ func newResume(o *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			out := cmd.OutOrStdout()
 			spec := &r.sf.Spec.Workload.Spec
 			ledgerSite := r.sf.Spec.To
 			env, closeEnv, err := o.factory.Env(ctx, o.kubeconfig, spec, ledgerSite, out)
@@ -199,7 +215,11 @@ func newStatus(o *options) *cobra.Command {
 			if output != "text" && output != "yaml" {
 				return usagef("--output must be text or yaml")
 			}
-			runs, err := l.find(cmd.Context(), o)
+			name := ""
+			if len(args) > 0 {
+				name = args[0]
+			}
+			runs, err := l.find(cmd.Context(), o, name, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
