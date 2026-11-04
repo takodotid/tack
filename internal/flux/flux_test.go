@@ -287,3 +287,25 @@ func TestRelease(t *testing.T) {
 		wantStop(t, err, failoverv1.ReasonHeldByAnotherRun, "held outside Tack")
 	})
 }
+
+func TestHeldBy(t *testing.T) {
+	ctx := context.Background()
+	for _, tt := range []struct {
+		name string
+		ann  map[string]string
+		want string
+	}{
+		{name: "held by a run", ann: map[string]string{AnnotationReconcile: "disabled", AnnotationHeldBy: "run-2"}, want: "run-2"},
+		{name: "not held", ann: nil, want: ""},
+		{name: "held-by without the hold", ann: map[string]string{AnnotationHeldBy: "run-2"}, want: ""},
+		{name: "held outside Tack", ann: map[string]string{AnnotationReconcile: "Disabled"}, want: ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := newClient(nil, liveCluster(tt.ann))
+			got, err := New(fakeClients{c}).HeldBy(ctx, "a", clusterRef)
+			if err != nil || got != tt.want {
+				t.Errorf("HeldBy = %q, %v; want %q", got, err, tt.want)
+			}
+		})
+	}
+}

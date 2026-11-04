@@ -18,6 +18,7 @@ import (
 	"github.com/takodotid/tack/internal/driver"
 	"github.com/takodotid/tack/internal/engine"
 	"github.com/takodotid/tack/internal/kube"
+	"github.com/takodotid/tack/internal/ledger"
 )
 
 type planFlags struct {
@@ -132,14 +133,7 @@ func (o *options) makePlan(ctx context.Context, p *planFlags, progress io.Writer
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	env.Runs = func(ctx context.Context, c kube.Clients) ([]failoverv1.SiteFailover, error) {
-		found, err := findRuns(ctx, c, &w.Spec, w.Name)
-		var runs []failoverv1.SiteFailover
-		for _, r := range found {
-			runs = append(runs, *r.sf)
-		}
-		return runs, err
-	}
+	env.Runs = workloadRuns(&w.Spec, w.Name)
 	plan, err := env.MakePlan(ctx, req)
 	if errors.Is(err, engine.ErrNoFrom) {
 		err = usageError{err}
@@ -190,8 +184,12 @@ func newRun(o *options) *cobra.Command {
 			if err := o.confirm(out, yes, plan.SiteFailover.Spec.Workload.Name); err != nil {
 				return err
 			}
-			if err := checkNoActiveRun(cmd.Context(), env, plan.SiteFailover, takeOver); err != nil {
+			old, err := checkNoActiveRun(cmd.Context(), env, plan.SiteFailover, takeOver)
+			if err != nil {
 				return err
+			}
+			if old != nil {
+				env.Supersede = supersede(env.Clients, *old)
 			}
 			return env.Start(cmd.Context(), plan.SiteFailover, engine.Options{TakeOver: takeOver})
 		},
@@ -225,18 +223,56 @@ func stdinIsTerminal() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
 
 // checkNoActiveRun refuses a second active run of the same workload. It
 // checks the sites again: the plan's checks may be older than the
-// operator's confirmation.
-func checkNoActiveRun(ctx context.Context, env *engine.Env, sf *failoverv1.SiteFailover, takeOver string) error {
+// operator's confirmation. A run that another run took over is not active.
+// It returns the run to take over, when it was found.
+func checkNoActiveRun(ctx context.Context, env *engine.Env, sf *failoverv1.SiteFailover, takeOver string) (*foundRun, error) {
 	runs, err := findRuns(ctx, env.SiteChecks(sf.Spec.Mode, sf.Spec.To), &sf.Spec.Workload.Spec, sf.Spec.Workload.Name)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	for _, r := range runs {
-		if r.sf.Status.State == failoverv1.RunSucceeded || r.sf.Name == takeOver {
+	var old *foundRun
+	for i, r := range runs {
+		if r.sf.Name == takeOver {
+			old = &runs[i]
 			continue
 		}
-		return fmt.Errorf("run %s at site %s is %s: resume it (tack resume %s) or take it over (--take-over %s)",
+		if r.sf.Status.State == failoverv1.RunSucceeded || superseded(runs, r.sf) {
+			continue
+		}
+		return nil, fmt.Errorf("run %s at site %s is %s: resume it (tack resume %s) or take it over (--take-over %s)",
 			r.sf.Name, r.site, orPendingRun(r.sf.Status.State), r.sf.Name, r.sf.Name)
 	}
-	return nil
+	return old, nil
+}
+
+// superseded tells whether another run took sf over.
+func superseded(runs []foundRun, sf *failoverv1.SiteFailover) bool {
+	if sf.Status.SupersededBy != "" {
+		return true
+	}
+	for _, r := range runs {
+		if r.sf.Name != sf.Name && r.sf.Spec.TakeOver == sf.Name {
+			return true
+		}
+	}
+	return false
+}
+
+// supersede returns the Supersede of a run that takes over old: it writes
+// the new run's name into old's status at old's site, through c, the
+// clients that found it.
+func supersede(c kube.Clients, old foundRun) func(ctx context.Context, run, by string) error {
+	return func(ctx context.Context, run, by string) error {
+		cl, err := c.Client(old.site)
+		if err != nil {
+			return err
+		}
+		store := &ledger.Store{Client: cl, Namespace: old.sf.Namespace}
+		sf, err := store.Get(ctx, run)
+		if err != nil {
+			return err
+		}
+		sf.Status.SupersededBy = by
+		return store.UpdateStatus(ctx, sf)
+	}
 }

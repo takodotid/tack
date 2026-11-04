@@ -54,7 +54,11 @@ func (r *runner) exec(ctx context.Context, s *failoverv1.Step) (string, error) {
 }
 
 func (r *runner) hold(ctx context.Context, s *failoverv1.Step) (string, error) {
-	ks, err := r.Flux.Hold(ctx, s.Site, s.Hold.Object, r.sf.Name, r.opts.TakeOver)
+	takeOver := r.sf.Spec.TakeOver
+	if takeOver == "" {
+		takeOver = r.opts.TakeOver
+	}
+	ks, err := r.Flux.Hold(ctx, s.Site, s.Hold.Object, r.sf.Name, takeOver)
 	if err != nil {
 		return "", err
 	}
@@ -201,6 +205,9 @@ func (r *runner) patch(ctx context.Context, s *failoverv1.Step) (string, error) 
 	if !json.Valid([]byte(body)) {
 		return "", fmt.Errorf("patch is not valid JSON")
 	}
+	if err := r.checkHeld(ctx, s.Site, s.Patch.Object); err != nil {
+		return "", err
+	}
 	c, err := r.Clients.Client(s.Site)
 	if err != nil {
 		return "", err
@@ -211,6 +218,32 @@ func (r *runner) patch(ctx context.Context, s *failoverv1.Step) (string, error) 
 		return "", fmt.Errorf("patch %s: %w", refString(s.Patch.Object), err)
 	}
 	return fmt.Sprintf("patched; generation %d", u.GetGeneration()), nil
+}
+
+// checkHeld stops the run before it patches an object it holds, when the
+// object's hold no longer names the run: another run took it over, or the
+// hold is gone and Flux could apply Git over the patch.
+func (r *runner) checkHeld(ctx context.Context, site string, obj failoverv1.ObjectRef) error {
+	planned := false
+	for _, s := range r.sf.Spec.Steps {
+		planned = planned || s.Type == failoverv1.StepHold && s.Site == site && s.Hold.Object == obj
+	}
+	if !planned {
+		return nil
+	}
+	by, err := r.Flux.HeldBy(ctx, site, obj)
+	switch {
+	case err != nil:
+		return err
+	case by == r.sf.Name:
+		return nil
+	case by == "":
+		return stop.Ask(failoverv1.ReasonStepFailed,
+			"%s at site %s is no longer held by this run, so Flux may apply Git over the change. Find who removed the hold; to go on, annotate it again with kustomize.toolkit.fluxcd.io/reconcile=disabled and failover.tako.id/held-by=%s, then resume",
+			refString(obj), site, r.sf.Name)
+	}
+	return stop.Ask(failoverv1.ReasonHeldByAnotherRun,
+		"%s at site %s is held by run %s, which took it over: this run must not change it. See tack status %s", refString(obj), site, by, by)
 }
 
 func (r *runner) wait(ctx context.Context, s *failoverv1.Step) (string, error) {

@@ -697,3 +697,34 @@ func routeTo(site, member string) string {
 	return fmt.Sprintf("generation %d, observed %d, route %v, reason %q: %s",
 		ss.Metadata.Generation, ss.Status.ObservedGeneration, r.Members, r.Reason, r.Message)
 }
+
+// TestTakeOver: a run that dies at its first step is taken over by a new
+// run, which records it. The old run then cannot resume. Issue #27.
+func TestTakeOver(t *testing.T) {
+	_, code := tack(t, []string{"TACK_FAULT=hold-a-cluster-pg-a:before"}, "run", "-f", workload, "--to", "b", "--yes")
+	if code != exitFault {
+		t.Fatalf("exit %d, want the fault exit %d", code, exitFault)
+	}
+	old := runName(latestRun(t, "b"))
+	out, code := tack(t, nil, "run", "-f", workload, "--to", "b", "--yes")
+	if code != 1 || !strings.Contains(out, "--take-over "+old) {
+		t.Fatalf("a run without --take-over: exit %d, want 1 naming %s", code, old)
+	}
+
+	tackOK(t, "run", "-f", workload, "--to", "b", "--take-over", old, "--yes")
+	assertPrimary(t, "b", "a")
+	assertGitMatches(t, "b", "a", "b")
+	run := runName(latestRun(t, "b"))
+	if got := strings.TrimSpace(kubectl(t, "b", "-n", ledgerNS, "get", "sitefailover", run, "-o", "jsonpath={.spec.takeOver}")); got != old {
+		t.Errorf("%s: spec.takeOver %q, want %s", run, got, old)
+	}
+	if got := strings.TrimSpace(kubectl(t, "b", "-n", ledgerNS, "get", "sitefailover", old, "-o", "jsonpath={.status.supersededBy}")); got != run {
+		t.Errorf("%s: status.supersededBy %q, want %s", old, got, run)
+	}
+
+	out, code = tack(t, nil, "resume", old, "-f", workload, "--yes")
+	if code != 1 || !strings.Contains(out, "was taken over by run "+run) {
+		t.Fatalf("resume of the old run: exit %d, want 1 with a refusal", code)
+	}
+	assertPrimary(t, "b", "a")
+}

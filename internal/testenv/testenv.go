@@ -230,6 +230,13 @@ func (f *Flux) Hold(_ context.Context, site string, obj failoverv1.ObjectRef, ru
 	return failoverv1.ObjectKey{Namespace: "flux-system", Name: site}, nil
 }
 
+// HeldBy implements engine.Flux.
+func (f *Flux) HeldBy(_ context.Context, site string, obj failoverv1.ObjectRef) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.Held[key(site, obj)], nil
+}
+
 // Release implements engine.Flux.
 func (f *Flux) Release(_ context.Context, site string, obj failoverv1.ObjectRef, run string) (int64, error) {
 	if err := f.call("Release", site, " ", obj.Name); err != nil {

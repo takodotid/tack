@@ -186,6 +186,12 @@ func printStatus(w io.Writer, sf *failoverv1.SiteFailover) {
 	if st.Message != "" {
 		fmt.Fprintf(w, "Message: %s\n", st.Message)
 	}
+	if sf.Spec.TakeOver != "" {
+		fmt.Fprintf(w, "Takes over: run %s\n", sf.Spec.TakeOver)
+	}
+	if st.SupersededBy != "" {
+		fmt.Fprintf(w, "Taken over by: run %s; this run cannot resume\n", st.SupersededBy)
+	}
 	if st.StartedAt != nil {
 		fmt.Fprintf(w, "Started: %s\n", st.StartedAt.UTC().Format("2006-01-02 15:04:05Z"))
 	}

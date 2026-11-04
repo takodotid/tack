@@ -77,6 +77,11 @@ type SiteFailoverSpec struct {
 	// Steps is the plan, in the order the run takes them.
 	// +kubebuilder:validation:MinItems=1
 	Steps []Step `json:"steps"`
+
+	// TakeOver is the earlier run whose holds this run takes over, as the
+	// operator named it with --take-over. That run can no longer resume.
+	// +optional
+	TakeOver string `json:"takeOver,omitempty"`
 }
 
 // WorkloadSnapshot is a copy of a Workload.
@@ -411,6 +416,11 @@ type SiteFailoverStatus struct {
 	// FinishedAt is when the run succeeded.
 	// +optional
 	FinishedAt *metav1.Time `json:"finishedAt,omitempty"`
+
+	// SupersededBy is the later run that took this run over. That run
+	// writes it when this ledger answers; its spec.takeOver is the record.
+	// +optional
+	SupersededBy string `json:"supersededBy,omitempty"`
 }
 
 // PhaseStatus records one phase.

@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"flag"
 	"io"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
+	"github.com/takodotid/tack/internal/config"
 	"github.com/takodotid/tack/internal/driver"
 	_ "github.com/takodotid/tack/internal/driver/cnpg"
 	"github.com/takodotid/tack/internal/engine"
@@ -377,5 +379,64 @@ func TestSearchFailsOnRefusedCredential(t *testing.T) {
 	}
 	if n := f.clients.Checks["b"]; n != 1 {
 		t.Errorf("site b checked %d times, want 1: a refused credential is not repeated", n)
+	}
+}
+
+// stoppedRun is a run of testdata/workload.yaml from a to b that stopped,
+// with its ledger at site b.
+func stoppedRun(t *testing.T, name string) *failoverv1.SiteFailover {
+	t.Helper()
+	w, err := config.Load("testdata/workload.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := metav1.NewTime(fixedNow.Add(-time.Hour))
+	return &failoverv1.SiteFailover{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "tack-system", Labels: map[string]string{engine.LabelWorkload: "pg-main"},
+			CreationTimestamp: started},
+		Spec: failoverv1.SiteFailoverSpec{
+			Workload: failoverv1.WorkloadSnapshot{Name: w.Name, Spec: w.Spec}, Mode: failoverv1.ModePlanned, From: "a", To: "b",
+			Steps: []failoverv1.Step{{ID: "hold-a-cluster-pg-a", Phase: failoverv1.PhaseHold, Type: failoverv1.StepHold, Site: "a",
+				Hold: &failoverv1.ObjectStep{Object: failoverv1.ObjectRef{APIVersion: "postgresql.cnpg.io/v1", Kind: "Cluster", Namespace: "db", Name: "pg-a"}}}},
+		},
+		Status: failoverv1.SiteFailoverStatus{State: failoverv1.RunStopped, Reason: failoverv1.ReasonStepFailed, StartedAt: &started,
+			Steps: []failoverv1.StepStatus{{ID: "hold-a-cluster-pg-a", State: failoverv1.StepFailed}}},
+	}
+}
+
+// A run started with --take-over records the run it took over, and marks
+// that run's ledger. The old run then cannot resume, and no longer blocks
+// a new run. Issue #27.
+func TestTakeOverIsRecorded(t *testing.T) {
+	f := newFactory(map[string][]client.Object{
+		"a": testenv.Site("a", "a", 2),
+		"b": append(testenv.Site("b", "a", 0), stoppedRun(t, "pg-main-earlier")),
+	})
+	f.flux.Fail["Hold"] = errors.New("stop at the first hold")
+	out, code := run(t, f, "run", "-f", "testdata/workload.yaml", "--to", "b", "--take-over", "pg-main-earlier", "--yes")
+	if code != ExitStopped {
+		t.Fatalf("run exit %d, want %d:\n%s", code, ExitStopped, out)
+	}
+	store := &ledger.Store{Client: f.clients.Sites["b"], Namespace: "tack-system"}
+	ctx := context.Background()
+	if sf, err := store.Get(ctx, "pg-main-20261027-101500"); err != nil || sf.Spec.TakeOver != "pg-main-earlier" {
+		t.Fatalf("new run: %v, spec.takeOver %q", err, sf.Spec.TakeOver)
+	}
+	if sf, err := store.Get(ctx, "pg-main-earlier"); err != nil || sf.Status.SupersededBy != "pg-main-20261027-101500" {
+		t.Fatalf("old run: %v, status.supersededBy %q", err, sf.Status.SupersededBy)
+	}
+	delete(f.flux.Fail, "Hold")
+	calls := len(f.flux.Calls)
+
+	out, code = run(t, f, "resume", "pg-main-earlier", "-f", "testdata/workload.yaml", "--yes")
+	if code != ExitError || !strings.Contains(out, "run pg-main-earlier was taken over by run pg-main-20261027-101500") {
+		t.Fatalf("resume of the old run: exit %d, want %d with a refusal:\n%s", code, ExitError, out)
+	}
+	out, code = run(t, f, "run", "-f", "testdata/workload.yaml", "--to", "b", "--yes")
+	if code != ExitError || !strings.Contains(out, "run pg-main-20261027-101500 at site b is Stopped") || strings.Contains(out, "run pg-main-earlier at site") {
+		t.Fatalf("a third run: exit %d, want %d naming only the new run:\n%s", code, ExitError, out)
+	}
+	if len(f.flux.Calls) != calls {
+		t.Errorf("the refused commands changed something: %v", f.flux.Calls[calls:])
 	}
 }

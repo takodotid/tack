@@ -115,6 +115,19 @@ func findRuns(ctx context.Context, c kube.Clients, spec *failoverv1.WorkloadSpec
 	return out, nil
 }
 
+// workloadRuns lists the workload's runs at every site of spec that
+// answers c, as engine.Env.Runs does.
+func workloadRuns(spec *failoverv1.WorkloadSpec, workload string) func(context.Context, kube.Clients) ([]failoverv1.SiteFailover, error) {
+	return func(ctx context.Context, c kube.Clients) ([]failoverv1.SiteFailover, error) {
+		found, err := findRuns(ctx, c, spec, workload)
+		var runs []failoverv1.SiteFailover
+		for _, r := range found {
+			runs = append(runs, *r.sf)
+		}
+		return runs, err
+	}
+}
+
 func pick(runs []foundRun, name string) (foundRun, error) {
 	for _, r := range runs {
 		if r.sf.Name == name {
@@ -142,6 +155,9 @@ decide. Each decision has its own flag:
                        without it stops again while the site is primary.
   HeldByAnotherRun     another run holds an object. Finish that run, or
                        start a new run with --take-over.
+
+A run that another run took over, or that another run of the workload
+started after, cannot resume: its plan may no longer match the sites.
 
 An agent never starts "tack resume" without an explicit instruction from a
 human for that run, and never passes these flags unless that instruction
@@ -182,6 +198,7 @@ func newResume(o *options) *cobra.Command {
 				return err
 			}
 			defer closeEnv()
+			env.Runs = workloadRuns(spec, r.sf.Spec.Workload.Name)
 			sf, err := env.Ledger.Get(ctx, r.sf.Name)
 			if err != nil {
 				return err

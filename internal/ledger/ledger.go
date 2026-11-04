@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -20,9 +21,19 @@ type Store struct {
 	Selector map[string]string
 }
 
-// Create implements engine.Ledger. It fails when the name is taken.
+// Create implements engine.Ledger. It fails when the name is taken, and
+// when the cluster's CRD would drop a field of the spec: a CRD older than
+// this Tack prunes the fields it does not know, without an error. A dry
+// run checks that before the ledger exists.
 func (s *Store) Create(ctx context.Context, sf *failoverv1.SiteFailover) error {
 	sf.Namespace = s.Namespace
+	dry := sf.DeepCopy()
+	if err := s.Client.Create(ctx, dry, client.DryRunAll); err != nil {
+		return served(err)
+	}
+	if !equality.Semantic.DeepEqual(dry.Spec, sf.Spec) {
+		return fmt.Errorf("the cluster's SiteFailover CRD drops fields of the ledger's spec: apply the CRD of this Tack version there; nothing was created")
+	}
 	return served(s.Client.Create(ctx, sf))
 }
 

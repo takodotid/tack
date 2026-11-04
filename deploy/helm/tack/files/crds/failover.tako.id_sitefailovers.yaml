@@ -551,6 +551,11 @@ spec:
                   type: object
                 minItems: 1
                 type: array
+              takeOver:
+                description: |-
+                  TakeOver is the earlier run whose holds this run takes over, as the
+                  operator named it with --take-over. That run can no longer resume.
+                type: string
               to:
                 description: To is the site of the new primary.
                 type: string
@@ -1027,6 +1032,11 @@ spec:
                 x-kubernetes-list-map-keys:
                 - id
                 x-kubernetes-list-type: map
+              supersededBy:
+                description: |-
+                  SupersededBy is the later run that took this run over. That run
+                  writes it when this ledger answers; its spec.takeOver is the record.
+                type: string
             type: object
         required:
         - spec
@@ -1573,6 +1583,11 @@ spec:
                   type: object
                 minItems: 1
                 type: array
+              takeOver:
+                description: |-
+                  TakeOver is the earlier run whose holds this run takes over, as the
+                  operator named it with --take-over. That run can no longer resume.
+                type: string
               to:
                 description: To is the site of the new primary.
                 type: string
@@ -2049,6 +2064,11 @@ spec:
                 x-kubernetes-list-map-keys:
                 - id
                 x-kubernetes-list-type: map
+              supersededBy:
+                description: |-
+                  SupersededBy is the later run that took this run over. That run
+                  writes it when this ledger answers; its spec.takeOver is the record.
+                type: string
             type: object
         required:
         - spec

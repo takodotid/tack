@@ -35,8 +35,13 @@ var ErrStopped = errors.New("run stopped")
 // ErrWaiting is returned when the run waits for something outside it.
 var ErrWaiting = errors.New("run waiting")
 
-// Start creates the ledger and runs the plan.
+// Start creates the ledger and runs the plan. With opts.TakeOver, the
+// ledger's spec records the run it takes over, and that run's ledger is
+// marked superseded when it answers.
 func (e *Env) Start(ctx context.Context, sf *failoverv1.SiteFailover, opts Options) error {
+	if opts.TakeOver != "" {
+		sf.Spec.TakeOver = opts.TakeOver
+	}
 	now := metav1.NewTime(e.now())
 	sf.Status.State = failoverv1.RunRunning
 	sf.Status.StartedAt = &now
@@ -54,15 +59,60 @@ func (e *Env) Start(ctx context.Context, sf *failoverv1.SiteFailover, opts Optio
 		return fmt.Errorf("write the ledger: %w", err)
 	}
 	e.printf("ledger %s/%s created\n", sf.Namespace, sf.Name)
-	return e.Resume(ctx, sf, opts)
+	if sf.Spec.TakeOver != "" && e.Supersede != nil {
+		if err := e.Supersede(ctx, sf.Spec.TakeOver, sf.Name); err != nil {
+			e.printf("  note      run %s is not marked as taken over (%v); spec.takeOver of this run records it\n", sf.Spec.TakeOver, err)
+		}
+	}
+	return e.resume(ctx, sf, opts)
 }
 
-// Resume runs the remaining steps of a ledger.
+// Resume runs the remaining steps of a ledger. It refuses a run that
+// another run took over, and a run older than another run of the workload:
+// its plan may no longer match the sites ([RFC#0003] Requirement 18).
 func (e *Env) Resume(ctx context.Context, sf *failoverv1.SiteFailover, opts Options) error {
 	if sf.Status.State == failoverv1.RunSucceeded && !hasRunnableDeferred(sf) {
 		e.printf("run %s already succeeded\n", sf.Name)
 		return nil
 	}
+	if err := e.checkLatest(ctx, sf); err != nil {
+		return err
+	}
+	return e.resume(ctx, sf, opts)
+}
+
+// ErrSuperseded is returned when a run cannot resume because another run
+// took it over or started after it.
+var ErrSuperseded = errors.New("the run cannot resume")
+
+// checkLatest refuses a run that another run took over or started after.
+// It reads the runs at every site of the run's Workload snapshot that
+// answers.
+func (e *Env) checkLatest(ctx context.Context, sf *failoverv1.SiteFailover) error {
+	if by := sf.Status.SupersededBy; by != "" {
+		return fmt.Errorf("%w: run %s was taken over by run %s; see tack status %s", ErrSuperseded, sf.Name, by, by)
+	}
+	if e.Runs == nil {
+		return nil
+	}
+	runs, err := e.Runs(ctx, e.SiteChecks(sf.Spec.Mode, sf.Spec.To))
+	if err != nil {
+		return fmt.Errorf("search the workload's runs before resuming %s: %w", sf.Name, err)
+	}
+	for _, r := range runs {
+		switch {
+		case r.Name == sf.Name:
+		case r.Spec.TakeOver == sf.Name:
+			return fmt.Errorf("%w: run %s was taken over by run %s; see tack status %s", ErrSuperseded, sf.Name, r.Name, r.Name)
+		case r.CreationTimestamp.After(sf.CreationTimestamp.Time):
+			return fmt.Errorf("%w: run %s started after run %s, so the plan of %s may no longer match the sites; see tack status %s",
+				ErrSuperseded, r.Name, sf.Name, sf.Name, r.Name)
+		}
+	}
+	return nil
+}
+
+func (e *Env) resume(ctx context.Context, sf *failoverv1.SiteFailover, opts Options) error {
 	if opts.AcceptGitHead != "" {
 		sf.Status.Git.AcceptedRevision = opts.AcceptGitHead
 	}
