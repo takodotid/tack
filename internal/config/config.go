@@ -2,7 +2,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -110,6 +112,8 @@ func Validate(name string, s *failoverv1.WorkloadSpec) error {
 	}
 	if s.Git.URL == "" {
 		add("spec.git.url is required")
+	} else if err := checkGitURL(s.Git.URL); err != nil {
+		add("spec.git.url %v", err)
 	}
 	if s.Git.Branch == "" {
 		add("spec.git.branch is required")
@@ -153,6 +157,36 @@ func Validate(name string, s *failoverv1.WorkloadSpec) error {
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("workload %q:\n  %s", name, strings.Join(errs, "\n  "))
+	}
+	return nil
+}
+
+// checkGitURL refuses a Git URL that holds a credential: a password, or a
+// user in an http or https URL, which a Git host may take as a token. The
+// URL is copied into every ledger and printed. A user in an ssh URL or an
+// scp-like address, such as git@host:path, is a name, not a secret. The
+// error never repeats the URL.
+func checkGitURL(raw string) error {
+	const how = "; give the repository only, and the credential through git's own configuration, such as a credential helper or credential.<url>.username"
+	if !strings.Contains(raw, "://") {
+		// An scp-like address, [user@]host:path, or a local path.
+		if user, _, ok := strings.Cut(raw, "@"); ok && strings.Contains(user, ":") && !strings.Contains(user, "/") {
+			return fmt.Errorf("holds a password%s", how)
+		}
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return errors.New("is not a valid URL")
+	}
+	if u.User == nil {
+		return nil
+	}
+	if _, ok := u.User.Password(); ok {
+		return fmt.Errorf("holds a password%s", how)
+	}
+	if u.Scheme == "http" || u.Scheme == "https" {
+		return fmt.Errorf("holds a user name, which a Git host may take as a token%s", how)
 	}
 	return nil
 }

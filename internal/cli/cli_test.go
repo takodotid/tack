@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"flag"
 	"io"
 	"os"
@@ -11,11 +12,14 @@ import (
 	"testing"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
+	"github.com/takodotid/tack/internal/config"
 	"github.com/takodotid/tack/internal/driver"
 	_ "github.com/takodotid/tack/internal/driver/cnpg"
 	"github.com/takodotid/tack/internal/engine"
@@ -359,5 +363,247 @@ func TestPlanDeprecatedWorkload(t *testing.T) {
 	warning := "tack: warning: " + file + ": apiVersion failover.tako.id/v1alpha1 is deprecated; use failover.tako.id/v1\n"
 	if code != ExitOK || !strings.HasPrefix(out, warning) || !strings.Contains(out, "Nothing was changed.") {
 		t.Fatalf("exit %d, want %d with the warning and the plan:\n%s", code, ExitOK, out)
+	}
+}
+
+// A site whose check fails with a refused credential is not lost: the
+// search for runs fails instead of leaving its runs out. Issue #25.
+func TestSearchFailsOnRefusedCredential(t *testing.T) {
+	f := newFactory(map[string][]client.Object{
+		"a": testenv.Site("a", "b", 0),
+		"b": append(testenv.Site("b", "b", 2), siteLossRun("a", fixedNow.Add(-time.Hour))),
+	})
+	f.clients.Fail("b", apierrors.NewUnauthorized("Unauthorized"))
+	out, code := run(t, f, "status", "-f", "testdata/workload.yaml")
+	if code != ExitError || !strings.Contains(out, "site b: search for runs") {
+		t.Fatalf("exit %d, want %d naming site b:\n%s", code, ExitError, out)
+	}
+	if n := f.clients.Checks["b"]; n != 1 {
+		t.Errorf("site b checked %d times, want 1: a refused credential is not repeated", n)
+	}
+}
+
+// stoppedRun is a run of testdata/workload.yaml from a to b that stopped,
+// with its ledger at site b.
+func stoppedRun(t *testing.T, name string) *failoverv1.SiteFailover {
+	t.Helper()
+	w, err := config.Load("testdata/workload.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := metav1.NewTime(fixedNow.Add(-time.Hour))
+	return &failoverv1.SiteFailover{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "tack-system", Labels: map[string]string{engine.LabelWorkload: "pg-main"},
+			CreationTimestamp: started},
+		Spec: failoverv1.SiteFailoverSpec{
+			Workload: failoverv1.WorkloadSnapshot{Name: w.Name, Spec: w.Spec}, Mode: failoverv1.ModePlanned, From: "a", To: "b",
+			Steps: []failoverv1.Step{{ID: "hold-a-cluster-pg-a", Phase: failoverv1.PhaseHold, Type: failoverv1.StepHold, Site: "a",
+				Hold: &failoverv1.ObjectStep{Object: failoverv1.ObjectRef{APIVersion: "postgresql.cnpg.io/v1", Kind: "Cluster", Namespace: "db", Name: "pg-a"}}}},
+		},
+		Status: failoverv1.SiteFailoverStatus{State: failoverv1.RunStopped, Reason: failoverv1.ReasonStepFailed, StartedAt: &started,
+			Steps: []failoverv1.StepStatus{{ID: "hold-a-cluster-pg-a", State: failoverv1.StepFailed}}},
+	}
+}
+
+// A run started with --take-over records the run it took over, and marks
+// that run's ledger. The old run then cannot resume, and no longer blocks
+// a new run. Issue #27.
+func TestTakeOverIsRecorded(t *testing.T) {
+	f := newFactory(map[string][]client.Object{
+		"a": testenv.Site("a", "a", 2),
+		"b": append(testenv.Site("b", "a", 0), stoppedRun(t, "pg-main-earlier")),
+	})
+	f.flux.Fail["Hold"] = errors.New("stop at the first hold")
+	out, code := run(t, f, "run", "-f", "testdata/workload.yaml", "--to", "b", "--take-over", "pg-main-earlier", "--yes")
+	if code != ExitStopped {
+		t.Fatalf("run exit %d, want %d:\n%s", code, ExitStopped, out)
+	}
+	store := &ledger.Store{Client: f.clients.Sites["b"], Namespace: "tack-system"}
+	ctx := context.Background()
+	if sf, err := store.Get(ctx, "pg-main-20261027-101500"); err != nil || sf.Spec.TakeOver != "pg-main-earlier" {
+		t.Fatalf("new run: %v, spec.takeOver %q", err, sf.Spec.TakeOver)
+	}
+	if sf, err := store.Get(ctx, "pg-main-earlier"); err != nil || sf.Status.SupersededBy != "pg-main-20261027-101500" {
+		t.Fatalf("old run: %v, status.supersededBy %q", err, sf.Status.SupersededBy)
+	}
+	delete(f.flux.Fail, "Hold")
+	calls := len(f.flux.Calls)
+
+	out, code = run(t, f, "resume", "pg-main-earlier", "-f", "testdata/workload.yaml", "--yes")
+	if code != ExitError || !strings.Contains(out, "run pg-main-earlier was taken over by run pg-main-20261027-101500") {
+		t.Fatalf("resume of the old run: exit %d, want %d with a refusal:\n%s", code, ExitError, out)
+	}
+	out, code = run(t, f, "run", "-f", "testdata/workload.yaml", "--to", "b", "--yes")
+	if code != ExitError || !strings.Contains(out, "run pg-main-20261027-101500 at site b is Stopped") || strings.Contains(out, "run pg-main-earlier at site") {
+		t.Fatalf("a third run: exit %d, want %d naming only the new run:\n%s", code, ExitError, out)
+	}
+	if len(f.flux.Calls) != calls {
+		t.Errorf("the refused commands changed something: %v", f.flux.Calls[calls:])
+	}
+}
+
+// A run that never recorded its start still counts for the check of a
+// member left to rebuild: its ledger's creation stands in for its start.
+// Issue #28.
+func TestPlanRebuildCheckWithoutStart(t *testing.T) {
+	earlier := siteLossRun("a", fixedNow.Add(-time.Hour))
+	earlier.CreationTimestamp, earlier.Status.StartedAt = metav1.NewTime(fixedNow.Add(-time.Hour)), nil
+	f := newFactory(map[string][]client.Object{
+		"a": {created(testenv.Cluster("a", "b", false, nil), fixedNow.Add(-2*time.Hour)), testenv.Pooler("a", 0)},
+		"b": {testenv.Cluster("b", "b", true, nil), testenv.Pooler("b", 2), earlier},
+	})
+	out, code := run(t, f, "plan", "-f", "testdata/workload.yaml", "--to", "a")
+	if code != ExitError || !strings.Contains(out, "rebuild it before a planned switchover") {
+		t.Fatalf("exit %d, want %d with the rebuild refusal:\n%s", code, ExitError, out)
+	}
+}
+
+// A ledger that never recorded its start cannot resume, and a new run is
+// told to take it over. Issue #28.
+func TestRunNeverStarted(t *testing.T) {
+	never := stoppedRun(t, "pg-main-earlier")
+	never.Status = failoverv1.SiteFailoverStatus{}
+	f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": append(testenv.Site("b", "a", 0), never)})
+	out, code := run(t, f, "resume", "pg-main-earlier", "-f", "testdata/workload.yaml", "--yes")
+	if code != ExitError || !strings.Contains(out, "never recorded its start") || !strings.Contains(out, "--take-over pg-main-earlier") {
+		t.Fatalf("resume: exit %d, want %d with a refusal:\n%s", code, ExitError, out)
+	}
+	out, code = run(t, f, "run", "-f", "testdata/workload.yaml", "--to", "b", "--yes")
+	if code != ExitError || !strings.Contains(out, "run pg-main-earlier at site b never recorded its start") {
+		t.Fatalf("run: exit %d, want %d naming the run:\n%s", code, ExitError, out)
+	}
+	if len(f.flux.Calls) > 0 {
+		t.Errorf("something changed: %v", f.flux.Calls)
+	}
+}
+
+// confirmAfter types the confirmation once f has run, as an operator does
+// after a while.
+type confirmAfter struct {
+	f    func()
+	line io.Reader
+}
+
+func (c *confirmAfter) Read(p []byte) (int, error) {
+	if c.f != nil {
+		c.f()
+		c.f = nil
+	}
+	return c.line.Read(p)
+}
+
+// typeAfter makes the next confirmation read "pg-main" after f ran.
+func typeAfter(t *testing.T, f func()) {
+	t.Helper()
+	isTerminal = func() bool { return true }
+	stdin = &confirmAfter{f: f, line: strings.NewReader("pg-main\n")}
+	t.Cleanup(func() { isTerminal, stdin = stdinIsTerminal, os.Stdin })
+}
+
+func mergePatch(t *testing.T, c client.Client, kind, name, patch string) {
+	t.Helper()
+	u := testenv.Object("postgresql.cnpg.io/v1", kind, "db", name, nil)
+	if err := c.Patch(context.Background(), u, client.RawPatch(types.MergePatchType, []byte(patch))); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Issue #30. While the operator confirms a planned switchover from a to b,
+// another run makes the same switch and succeeds. The confirmed plan must
+// not run: it would capture a's leftover demotion token and write a used
+// token back to b.
+func TestRunRefusesPlanThatWentStale(t *testing.T) {
+	f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": testenv.Site("b", "a", 0)})
+	// A run that starts stops at its first hold, which Flux records.
+	f.flux.Fail["Hold"] = errors.New("stop at the first hold")
+	typeAfter(t, func() {
+		mergePatch(t, f.clients.Sites["a"], "Cluster", "pg-a",
+			`{"spec":{"replica":{"primary":"pg-b"}},"status":{"demotionToken":"token-used","instancesReportedState":{"pg-a-1":{"isPrimary":false}}}}`)
+		mergePatch(t, f.clients.Sites["b"], "Cluster", "pg-b",
+			`{"spec":{"replica":{"primary":"pg-b"}},"status":{"lastPromotionToken":"token-used","instancesReportedState":{"pg-b-1":{"isPrimary":true}}}}`)
+		done := siteLossRun("a", fixedNow)
+		done.Name, done.Spec.Mode, done.Status.FollowUps = "pg-main-other", failoverv1.ModePlanned, nil
+		if err := f.clients.Sites["b"].Create(context.Background(), done); err != nil {
+			t.Fatal(err)
+		}
+	})
+	out, code := run(t, f, "run", "-f", "testdata/workload.yaml", "--to", "b")
+	if code == ExitOK || len(f.flux.Calls) > 0 {
+		t.Fatalf("the stale plan ran: exit %d, Flux %v\n%s", code, f.flux.Calls, out)
+	}
+	var l failoverv1.SiteFailoverList
+	if err := f.clients.Sites["b"].List(context.Background(), &l); err != nil || len(l.Items) != 1 {
+		t.Errorf("%d ledgers at site b, want only the other run's: %v", len(l.Items), err)
+	}
+}
+
+// A run of the workload that started after the plan, at a site the plan
+// searched, refuses the plan even when the sites look the same.
+func TestRunRefusesPlanAfterAnotherRun(t *testing.T) {
+	f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": testenv.Site("b", "a", 0)})
+	f.flux.Fail["Hold"] = errors.New("stop at the first hold")
+	typeAfter(t, func() {
+		other := siteLossRun("a", fixedNow)
+		other.Name, other.Spec.Mode, other.Status.FollowUps = "pg-main-other", failoverv1.ModePlanned, nil
+		if err := f.clients.Sites["a"].Create(context.Background(), other); err != nil {
+			t.Fatal(err)
+		}
+	})
+	out, code := run(t, f, "run", "-f", "testdata/workload.yaml", "--to", "b")
+	if code != ExitError || !strings.Contains(out, "run pg-main-other of the workload started after the plan was made") {
+		t.Fatalf("exit %d, want %d with a refusal:\n%s", code, ExitError, out)
+	}
+	if len(f.flux.Calls) > 0 {
+		t.Errorf("the plan ran: %v", f.flux.Calls)
+	}
+}
+
+// A site that was lost at plan time answers again while the operator
+// confirms, with older ledgers. The plan did not search it, so they do not
+// make it stale.
+func TestRunLostSiteBackAtConfirmation(t *testing.T) {
+	older := siteLossRun("b", fixedNow.Add(-24*time.Hour))
+	older.Name, older.Spec.To = "pg-main-older", "a"
+	f := newFactory(map[string][]client.Object{
+		"a": append(testenv.Site("a", "b", 0), older),
+		"b": testenv.Site("b", "b", 2),
+	}, "b")
+	f.flux.Fail["Hold"] = errors.New("stop at the first hold")
+	typeAfter(t, func() { f.clients.SetDown("b", false) })
+	out, code := run(t, f, "run", "-f", "testdata/workload.yaml", "--to", "a", "--mode", "site-loss")
+	if code != ExitStopped || !strings.Contains(out, "stop at the first hold") {
+		t.Fatalf("exit %d, want %d at the first hold:\n%s", code, ExitStopped, out)
+	}
+}
+
+// A context that reaches another cluster after the plan refuses it, even
+// when that cluster holds the same objects.
+func TestRunRefusesPlanOnAnotherCluster(t *testing.T) {
+	f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": testenv.Site("b", "a", 0)})
+	other := testenv.NewClients(map[string][]client.Object{"x": testenv.Site("a", "a", 2)})
+	typeAfter(t, func() { f.clients.SetSite("a", other.Sites["x"]) })
+	out, code := run(t, f, "run", "-f", "testdata/workload.yaml", "--to", "b")
+	if code != ExitError || !strings.Contains(out, "site a now reaches another cluster: kube-system UID uid-x, the plan read uid-a") {
+		t.Fatalf("exit %d, want %d with a refusal:\n%s", code, ExitError, out)
+	}
+}
+
+// A ledger written before Tack refused a credential in the Git URL prints
+// it redacted in YAML. Issue #31.
+func TestYAMLRedactsGitURL(t *testing.T) {
+	old := stoppedRun(t, "pg-main-earlier")
+	old.Spec.Workload.Spec.Git.URL = "https://user:FAKE-TOKEN-123@git.example.com/gitops.git"
+	f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": append(testenv.Site("b", "a", 0), old)})
+	for _, args := range [][]string{
+		{"status", "-f", "testdata/workload.yaml", "-o", "yaml"},
+		{"status", "pg-main-earlier", "-f", "testdata/workload.yaml", "-o", "yaml"},
+	} {
+		out, code := run(t, f, args...)
+		if code != ExitOK || strings.Contains(out, "FAKE-TOKEN-123") || !strings.Contains(out, "https://***@git.example.com/gitops.git") {
+			t.Errorf("%v: exit %d, the URL is not redacted:\n%s", args, code, out)
+		}
+	}
+	if out, _ := run(t, f, "status", "pg-main-earlier", "-f", "testdata/workload.yaml"); strings.Contains(out, "FAKE-TOKEN-123") {
+		t.Errorf("tack status prints the credential:\n%s", out)
 	}
 }

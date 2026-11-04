@@ -84,12 +84,17 @@ func (l *ledgerFlags) find(ctx context.Context, o *options, name string, progres
 	return nil, usagef("pass --file or --context")
 }
 
-// findRuns lists a workload's runs at every site that answers c.
+// findRuns lists a workload's runs at every site that answers c. A site
+// that gives no answer is skipped; any other error of its check is
+// returned, so a refused credential never hides a site's runs.
 func findRuns(ctx context.Context, c kube.Clients, spec *failoverv1.WorkloadSpec, workload string) ([]foundRun, error) {
 	var out []foundRun
 	for _, s := range spec.Sites {
 		if err := c.Reachable(ctx, s.Name); err != nil {
-			continue
+			if kube.IsUnreachable(err) {
+				continue
+			}
+			return nil, fmt.Errorf("site %s: search for runs: %w", s.Name, err)
 		}
 		cl, err := c.Client(s.Name)
 		if err != nil {
@@ -108,6 +113,19 @@ func findRuns(ctx context.Context, c kube.Clients, spec *failoverv1.WorkloadSpec
 		}
 	}
 	return out, nil
+}
+
+// workloadRuns lists the workload's runs at every site of spec that
+// answers c, as engine.Env.Runs does.
+func workloadRuns(spec *failoverv1.WorkloadSpec, workload string) func(context.Context, kube.Clients) ([]failoverv1.SiteFailover, error) {
+	return func(ctx context.Context, c kube.Clients) ([]failoverv1.SiteFailover, error) {
+		found, err := findRuns(ctx, c, spec, workload)
+		var runs []failoverv1.SiteFailover
+		for _, r := range found {
+			runs = append(runs, *r.sf)
+		}
+		return runs, err
+	}
 }
 
 func pick(runs []foundRun, name string) (foundRun, error) {
@@ -137,6 +155,9 @@ decide. Each decision has its own flag:
                        without it stops again while the site is primary.
   HeldByAnotherRun     another run holds an object. Finish that run, or
                        start a new run with --take-over.
+
+A run that another run took over, or that another run of the workload
+started after, cannot resume: its plan may no longer match the sites.
 
 An agent never starts "tack resume" without an explicit instruction from a
 human for that run, and never passes these flags unless that instruction
@@ -177,11 +198,14 @@ func newResume(o *options) *cobra.Command {
 				return err
 			}
 			defer closeEnv()
+			env.Runs = workloadRuns(spec, r.sf.Spec.Workload.Name)
 			sf, err := env.Ledger.Get(ctx, r.sf.Name)
 			if err != nil {
 				return err
 			}
 			printStatus(out, sf)
+			fmt.Fprintln(out)
+			printClusters(out, sf, env.Clients)
 			if err := o.confirm(out, yes, sf.Spec.Workload.Name); err != nil {
 				return err
 			}
@@ -248,12 +272,21 @@ func newStatus(o *options) *cobra.Command {
 	return cmd
 }
 
+// redacted returns a copy of a ledger whose Git URL holds no user or
+// password. A ledger written before Tack refused them may hold one.
+func redacted(sf *failoverv1.SiteFailover) *failoverv1.SiteFailover {
+	out := sf.DeepCopy()
+	g := &out.Spec.Workload.Spec.Git
+	g.URL = engine.Redact(g.URL)
+	return out
+}
+
 func writeYAML(w io.Writer, runs []foundRun) error {
 	for i, r := range runs {
 		if i > 0 {
 			fmt.Fprintln(w, "---")
 		}
-		b, err := yaml.Marshal(r.sf)
+		b, err := yaml.Marshal(redacted(r.sf))
 		if err != nil {
 			return err
 		}

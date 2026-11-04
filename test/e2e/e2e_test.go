@@ -375,6 +375,48 @@ func TestPlannedSwitchover(t *testing.T) {
 	}
 }
 
+// A site whose check fails with a refused credential, or whose context is
+// missing from the kubeconfig, is not a lost site. A site-loss plan away
+// from the primary at b is refused, not accepted with b read as lost.
+// Issue #25.
+func TestSiteLossPlanRefusesSiteThatCannotBeChecked(t *testing.T) {
+	src, err := os.ReadFile(kubeconfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused := filepath.Join(work, "kubeconfig-refused-b")
+	if err := os.WriteFile(refused, src, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	user := "users." + context("b")
+	for _, args := range [][]string{
+		{"config", "unset", user + ".client-certificate-data"},
+		{"config", "unset", user + ".client-key-data"},
+		{"config", "set-credentials", context("b"), "--token=not-a-real-token"},
+	} {
+		if out, err := exec.Command("kubectl", append([]string{"--kubeconfig", refused}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("kubectl %v: %v\n%s", args, err, out)
+		}
+	}
+	w, err := os.ReadFile(workload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(work, "workload-missing-context.yaml")
+	if err := os.WriteFile(missing, []byte(strings.Replace(string(w), "kubeContext: "+context("b"), "kubeContext: tack-e2e-missing", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for name, args := range map[string][]string{
+		"refused credential": {"plan", "--kubeconfig", refused, "-f", workload, "--to", "a", "--from", "b", "--mode", "site-loss"},
+		"missing context":    {"plan", "-f", missing, "--to", "a", "--from", "b", "--mode", "site-loss"},
+	} {
+		out, code := tack(t, nil, args...)
+		if code != 1 || !strings.Contains(out, "site b") || strings.Contains(out, "Nothing was changed") {
+			t.Errorf("%s: plan exit %d, want 1 with an error naming site b", name, code)
+		}
+	}
+}
+
 // A short cut of the to site's API: the plan checks the site again and
 // succeeds. Pausing the site's node stands in for a network cut between
 // the operator's host and the site: its API does not answer for 10 s.
@@ -445,11 +487,40 @@ func TestGitChangedDuringRun(t *testing.T) {
 	if code != exitStopped || !strings.Contains(out, "GitChanged") {
 		t.Fatalf("resume exit %d, want %d with GitChanged", code, exitStopped)
 	}
-	tackOK(t, "resume", run, "-f", workload, "--yes", "--accept-git-head", other)
+	// Issue #29: the process dies once the run's commit is pushed, and a
+	// commit lands on top of it before Flux applies it.
+	_, code = tack(t, []string{"TACK_FAULT=reconcile-git-a:before"}, "resume", run, "-f", workload, "--yes", "--accept-git-head", other)
+	if code != exitFault {
+		t.Fatalf("resume exit %d, want the fault exit %d", code, exitFault)
+	}
+	commit := gitPull(t)
+	if err := os.WriteFile(filepath.Join(gitDir, "NOTES.md"), []byte("A commit made after the run's commit.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, gitDir, "commit", "-q", "-am", "docs: a change after the run's commit")
+	gitCmd(t, gitDir, "push", "-q", "origin", "HEAD:main")
+	later := gitCmd(t, gitDir, "rev-parse", "HEAD")
+	out, code = tack(t, nil, "resume", run, "-f", workload, "--yes")
+	if code != exitStopped || !strings.Contains(out, "GitChanged") || !strings.Contains(out, "--accept-git-head "+later) {
+		t.Fatalf("resume after a push on top of the run's commit: exit %d, want %d with GitChanged before the release", code, exitStopped)
+	}
+	if got := stepState(latestRun(t, "b"), "verify-git-a"); got != "Failed" {
+		t.Errorf("verify-git-a is %q, want Failed", got)
+	}
+	tackOK(t, "resume", run, "-f", workload, "--yes", "--accept-git-head", later)
 	assertPrimary(t, "b", "a")
 	head := assertGitMatches(t, "b", "a", "b")
-	if parent := gitCmd(t, gitDir, "rev-parse", head+"^"); parent != other {
+	if head != later {
+		t.Errorf("Git head %s, want %s", head, later)
+	}
+	if parent := gitCmd(t, gitDir, "rev-parse", later+"^"); parent != commit {
+		t.Errorf("the later commit is on %s, want the run's %s", parent, commit)
+	}
+	if parent := gitCmd(t, gitDir, "rev-parse", commit+"^"); parent != other {
 		t.Errorf("the run's commit is on %s, want the accepted %s", parent, other)
+	}
+	if got := stepState(latestRun(t, "b"), "verify-noop-a"); got != "Succeeded" {
+		t.Errorf("verify-noop-a is %q", got)
 	}
 }
 
@@ -465,6 +536,9 @@ func TestSiteLossBreakGlassAndReturn(t *testing.T) {
 	out, code := tack(t, nil, "run", "-f", workload, "--to", "a", "--from", "b", "--mode", "site-loss", "--yes")
 	if code != exitWaiting || !strings.Contains(out, "GitUnreachable") {
 		t.Fatalf("exit %d, want %d waiting for Git", code, exitWaiting)
+	}
+	if !strings.Contains(out, "If site b still runs, it stays primary") || !strings.Contains(out, "docs/runbooks/site-loss.md") {
+		t.Error("the site-loss plan lacks the note on a site cut off from this host (issue #26)")
 	}
 	eventually(t, 3*time.Minute, "site a promoted during break-glass", func() string {
 		if ip := jsonpath(t, "a", "cluster", "pg-a", "{.status.instancesReportedState.*.isPrimary}"); !strings.Contains(ip, "true") {
@@ -654,4 +728,74 @@ func routeTo(site, member string) string {
 	}
 	return fmt.Sprintf("generation %d, observed %d, route %v, reason %q: %s",
 		ss.Metadata.Generation, ss.Status.ObservedGeneration, r.Members, r.Reason, r.Message)
+}
+
+// TestTakeOver: a run dies right after it created its ledger; it cannot
+// resume (issue #28). A second run takes it over and dies at its first
+// step. Resumed with a kubeconfig whose context for site a reaches cluster
+// b, it stops before it acts there (issue #32). A third run takes it over
+// and records it; the second run cannot resume (issue #27).
+func TestTakeOver(t *testing.T) {
+	_, code := tack(t, []string{"TACK_FAULT=create-ledger:after"}, "run", "-f", workload, "--to", "b", "--yes")
+	if code != exitFault {
+		t.Fatalf("exit %d, want the fault exit %d", code, exitFault)
+	}
+	never := latestRun(t, "b")
+	if state, _ := runStatus(never); state != "" {
+		t.Fatalf("the ledger has state %q; the API server should have dropped its status on create", state)
+	}
+	out, code := tack(t, nil, "resume", runName(never), "-f", workload, "--yes")
+	if code != 1 || !strings.Contains(out, "never recorded its start") {
+		t.Fatalf("resume of a ledger without a start: exit %d, want 1 with a refusal", code)
+	}
+
+	// A run's name holds its start to the second: start the next one in a
+	// later second.
+	time.Sleep(time.Second)
+	_, code = tack(t, []string{"TACK_FAULT=hold-a-cluster-pg-a:before"}, "run", "-f", workload, "--to", "b", "--take-over", runName(never), "--yes")
+	if code != exitFault {
+		t.Fatalf("exit %d, want the fault exit %d", code, exitFault)
+	}
+	old := runName(latestRun(t, "b"))
+	out, code = tack(t, nil, "run", "-f", workload, "--to", "b", "--yes")
+	if code != 1 || !strings.Contains(out, "--take-over "+old) {
+		t.Fatalf("a run without --take-over: exit %d, want 1 naming %s", code, old)
+	}
+
+	src, err := os.ReadFile(kubeconfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	swapped := filepath.Join(work, "kubeconfig-a-is-b")
+	if err := os.WriteFile(swapped, src, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("kubectl", "--kubeconfig", swapped, "config", "set-context", context("a"),
+		"--cluster", context("b"), "--user", context("b")).CombinedOutput(); err != nil {
+		t.Fatalf("kubectl config set-context: %v\n%s", err, out)
+	}
+	out, code = tack(t, nil, "resume", "--kubeconfig", swapped, old, "-f", workload, "--yes")
+	if code != exitStopped || !strings.Contains(out, "SiteMismatch") {
+		t.Fatalf("resume through a context that reaches cluster b: exit %d, want %d with SiteMismatch", code, exitStopped)
+	}
+	if ann := jsonpath(t, "a", "cluster", "pg-a", "{.metadata.annotations}"); strings.Contains(ann, "failover.tako.id/held-by") {
+		t.Fatalf("site a was held: %s", ann)
+	}
+
+	tackOK(t, "run", "-f", workload, "--to", "b", "--take-over", old, "--yes")
+	assertPrimary(t, "b", "a")
+	assertGitMatches(t, "b", "a", "b")
+	run := runName(latestRun(t, "b"))
+	if got := strings.TrimSpace(kubectl(t, "b", "-n", ledgerNS, "get", "sitefailover", run, "-o", "jsonpath={.spec.takeOver}")); got != old {
+		t.Errorf("%s: spec.takeOver %q, want %s", run, got, old)
+	}
+	if got := strings.TrimSpace(kubectl(t, "b", "-n", ledgerNS, "get", "sitefailover", old, "-o", "jsonpath={.status.supersededBy}")); got != run {
+		t.Errorf("%s: status.supersededBy %q, want %s", old, got, run)
+	}
+
+	out, code = tack(t, nil, "resume", old, "-f", workload, "--yes")
+	if code != 1 || !strings.Contains(out, "was taken over by run "+run) {
+		t.Fatalf("resume of the old run: exit %d, want 1 with a refusal", code)
+	}
+	assertPrimary(t, "b", "a")
 }

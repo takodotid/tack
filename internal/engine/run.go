@@ -13,6 +13,7 @@ import (
 	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/driver"
 	"github.com/takodotid/tack/internal/fault"
+	"github.com/takodotid/tack/internal/kube"
 	"github.com/takodotid/tack/internal/stop"
 )
 
@@ -34,8 +35,13 @@ var ErrStopped = errors.New("run stopped")
 // ErrWaiting is returned when the run waits for something outside it.
 var ErrWaiting = errors.New("run waiting")
 
-// Start creates the ledger and runs the plan.
+// Start creates the ledger and runs the plan. With opts.TakeOver, the
+// ledger's spec records the run it takes over, and that run's ledger is
+// marked superseded when it answers.
 func (e *Env) Start(ctx context.Context, sf *failoverv1.SiteFailover, opts Options) error {
+	if opts.TakeOver != "" {
+		sf.Spec.TakeOver = opts.TakeOver
+	}
 	now := metav1.NewTime(e.now())
 	sf.Status.State = failoverv1.RunRunning
 	sf.Status.StartedAt = &now
@@ -47,30 +53,88 @@ func (e *Env) Start(ctx context.Context, sf *failoverv1.SiteFailover, opts Optio
 	if err := e.Ledger.Create(ctx, sf); err != nil {
 		return fmt.Errorf("create the ledger: %w", err)
 	}
-	// The status subresource ignores status on create.
+	fault.Point("create-ledger", "after")
+	// The status subresource ignores status on create. The first write
+	// outlives a cancelled run: without it the ledger has no follow-ups.
 	sf.Status = *status
-	if err := e.Ledger.UpdateStatus(ctx, sf); err != nil {
-		return fmt.Errorf("write the ledger: %w", err)
+	if err := e.write(ctx, sf); err != nil {
+		return err
 	}
 	e.printf("ledger %s/%s created\n", sf.Namespace, sf.Name)
-	return e.Resume(ctx, sf, opts)
+	if sf.Spec.TakeOver != "" && e.Supersede != nil {
+		if err := e.Supersede(ctx, sf.Spec.TakeOver, sf.Name); err != nil {
+			e.printf("  note      run %s is not marked as taken over (%v); spec.takeOver of this run records it\n", sf.Spec.TakeOver, err)
+		}
+	}
+	return e.resume(ctx, sf, opts)
 }
 
-// Resume runs the remaining steps of a ledger.
+// Resume runs the remaining steps of a ledger. It refuses a ledger that
+// never recorded its start ([RFC#0003] Requirement 20), a run that another
+// run took over, and a run older than another run of the workload: its
+// plan may no longer match the sites ([RFC#0003] Requirement 18).
 func (e *Env) Resume(ctx context.Context, sf *failoverv1.SiteFailover, opts Options) error {
+	if sf.Status.State == "" {
+		return fmt.Errorf("%w: run %s never recorded its start, so none of its steps ran and its follow-ups are not in its ledger. Plan again, and start a new run with --take-over %s",
+			ErrCannotResume, sf.Name, sf.Name)
+	}
 	if sf.Status.State == failoverv1.RunSucceeded && !hasRunnableDeferred(sf) {
 		e.printf("run %s already succeeded\n", sf.Name)
 		return nil
 	}
+	if err := e.checkLatest(ctx, sf); err != nil {
+		return err
+	}
+	return e.resume(ctx, sf, opts)
+}
+
+// ErrCannotResume is returned when a run cannot resume: it never recorded
+// its start, or another run took it over or started after it.
+var ErrCannotResume = errors.New("the run cannot resume")
+
+// checkLatest refuses a run that another run took over or started after.
+// It reads the runs at every site of the run's Workload snapshot that
+// answers.
+func (e *Env) checkLatest(ctx context.Context, sf *failoverv1.SiteFailover) error {
+	if by := sf.Status.SupersededBy; by != "" {
+		return fmt.Errorf("%w: run %s was taken over by run %s; see tack status %s", ErrCannotResume, sf.Name, by, by)
+	}
+	if e.Runs == nil {
+		return nil
+	}
+	runs, err := e.Runs(ctx, e.SiteChecks(sf.Spec.Mode, sf.Spec.To))
+	if err != nil {
+		return fmt.Errorf("search the workload's runs before resuming %s: %w", sf.Name, err)
+	}
+	for _, r := range runs {
+		switch {
+		case r.Name == sf.Name:
+		case r.Spec.TakeOver == sf.Name:
+			return fmt.Errorf("%w: run %s was taken over by run %s; see tack status %s", ErrCannotResume, sf.Name, r.Name, r.Name)
+		case r.CreationTimestamp.After(sf.CreationTimestamp.Time):
+			return fmt.Errorf("%w: run %s started after run %s, so the plan of %s may no longer match the sites; see tack status %s",
+				ErrCannotResume, r.Name, sf.Name, sf.Name, r.Name)
+		}
+	}
+	return nil
+}
+
+func (e *Env) resume(ctx context.Context, sf *failoverv1.SiteFailover, opts Options) error {
 	if opts.AcceptGitHead != "" {
-		sf.Status.Git.AcceptedRevision = opts.AcceptGitHead
+		// Before the run's commit, the accepted head is the commit's base.
+		// After it, the Release phase checks Git against it.
+		if sf.Status.Git.Commit == "" {
+			sf.Status.Git.AcceptedRevision = opts.AcceptGitHead
+		} else {
+			sf.Status.Git.ReleaseRevision = opts.AcceptGitHead
+		}
 	}
 	sf.Status.State, sf.Status.Reason, sf.Status.Message = failoverv1.RunRunning, "", ""
 	if err := e.write(ctx, sf); err != nil {
 		return err
 	}
 	r := &runner{Env: e, sf: sf, opts: opts, checks: e.SiteChecks(sf.Spec.Mode, sf.Spec.To),
-		reachable: map[string]error{}, retried: map[string]string{}, gated: map[string]bool{}}
+		reachable: map[string]error{}, retried: map[string]string{}, gated: map[string]bool{}, identified: map[string]bool{}}
 	return r.run(ctx)
 }
 
@@ -83,8 +147,9 @@ type runner struct {
 	reachable map[string]error
 	// retried notes, per site, a check that failed before the site
 	// answered. The site's next step records it in its message.
-	retried map[string]string
-	gated   map[string]bool
+	retried    map[string]string
+	gated      map[string]bool
+	identified map[string]bool
 }
 
 func (r *runner) run(ctx context.Context) error {
@@ -99,6 +164,11 @@ func (r *runner) run(ctx context.Context) error {
 				if ctx.Err() != nil {
 					return r.end(ctx, step, ctx.Err())
 				}
+				if !kube.IsUnreachable(err) {
+					// The site answered, or could not be checked: it is not
+					// lost, and its step neither runs nor waits for it.
+					return r.stopBefore(ctx, step, stop.Ask(failoverv1.ReasonStepFailed, "site %s: %v", step.Site, err))
+				}
 				if !step.Deferrable {
 					return r.end(ctx, step, stop.Ask(failoverv1.ReasonStepFailed, "site %s is unreachable: %v", step.Site, err))
 				}
@@ -111,13 +181,17 @@ func (r *runner) run(ctx context.Context) error {
 				}
 				continue
 			}
+			if err := r.identify(ctx, step.Site); err != nil {
+				return r.stopBefore(ctx, step, err)
+			}
 			if step.Deferrable {
 				if err := r.gate(ctx, step.Site); err != nil {
 					if !errors.Is(err, errUnread) {
 						return r.stopBefore(ctx, step, err)
 					}
-					// The site stays unreachable for this process.
-					r.reachable[step.Site] = err
+					// The site gave no answer to the read: it stays
+					// unreachable for this process.
+					r.reachable[step.Site] = &kube.UnreachableError{Err: err}
 					st.State, st.Message = failoverv1.StepDeferred, fmt.Sprintf("site %s unreachable: %v", step.Site, err)
 					if err := r.write(ctx, r.sf); err != nil {
 						return err
@@ -173,6 +247,36 @@ func (r *runner) gate(ctx context.Context, site string) error {
 			"site %s answers as primary (%s); it should be fenced. Check it, then resume with --fence %s", site, s.Summary, site)
 	}
 	r.gated[site] = true
+	return nil
+}
+
+// identify checks, once per process, that the site's context reaches the
+// cluster the run recorded for the site. A site the run has no record of,
+// such as one lost at plan time, is recorded on its first read.
+func (r *runner) identify(ctx context.Context, site string) error {
+	if r.identified[site] {
+		return nil
+	}
+	live, err := r.fingerprint(ctx, site)
+	if err != nil {
+		return fmt.Errorf("site %s: %w", site, err)
+	}
+	want, ok := Fingerprint(r.sf, site)
+	switch {
+	case !ok:
+		r.sf.Status.Fingerprints = append(r.sf.Status.Fingerprints, failoverv1.SiteFingerprint{Site: site, KubeSystemUID: live})
+	case want != live:
+		context := ""
+		for _, s := range r.sf.Spec.Workload.Spec.Sites {
+			if s.Name == site {
+				context = s.KubeContext
+			}
+		}
+		return stop.Ask(failoverv1.ReasonSiteMismatch,
+			"context %q of site %s reaches another cluster than the run recorded: its kube-system namespace has UID %s, the ledger has %s. Point the context at the site's cluster, then resume. If the site's cluster was rebuilt, start a new run with --take-over %s",
+			context, site, live, want, r.sf.Name)
+	}
+	r.identified[site] = true
 	return nil
 }
 

@@ -722,3 +722,48 @@ func TestRedact(t *testing.T) {
 		t.Errorf("Resolve with a bad URL: %v", err)
 	}
 }
+
+// BranchHead fetches the branch; Contains tells a descendant of a commit
+// from an older or unrelated commit, fetching what the clone lacks.
+// Issue #29.
+func TestBranchHeadAndContains(t *testing.T) {
+	isolate(t)
+	ctx := context.Background()
+	rm := newRemote(t, fixture())
+	base := rm.head()
+	w := workload(rm.url)
+	r := newRepo(t)
+	if head, err := r.BranchHead(ctx, w); err != nil || head != base {
+		t.Fatalf("BranchHead = %s, %v; want %s", head, err, base)
+	}
+	commit := rm.push(map[string]string{"NOTES.md": "the run's commit\n"}, "run")
+	later := rm.push(map[string]string{"NOTES.md": "a later commit\n"}, "later")
+	for _, tt := range []struct {
+		commit, rev string
+		want        bool
+	}{
+		{commit, later, true},
+		{commit, commit, true},
+		{later, commit, false},
+		{commit, base, false},
+		{commit[:12], later, true},
+	} {
+		got, err := r.Contains(ctx, w, tt.commit, tt.rev)
+		if err != nil || got != tt.want {
+			t.Errorf("Contains(%.7s, %.7s) = %v, %v; want %v", tt.commit, tt.rev, got, err, tt.want)
+		}
+	}
+	if head, err := r.BranchHead(ctx, w); err != nil || head != later {
+		t.Errorf("BranchHead = %s, %v; want %s", head, err, later)
+	}
+	if _, err := r.Contains(ctx, w, "--upload-pack=x", later); err == nil {
+		t.Error("Contains took an option for a commit")
+	}
+	if err := os.Rename(rm.url, rm.url+".gone"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := newRepo(t).BranchHead(ctx, w)
+	if se, ok := stop.As(err); !ok || se.Reason != failoverv1.ReasonGitUnreachable || !se.Wait {
+		t.Errorf("BranchHead without the remote: %v, want to wait with GitUnreachable", err)
+	}
+}

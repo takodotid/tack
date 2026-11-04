@@ -5,6 +5,11 @@ Sites:
   a  unreachable  site a is unreachable: connection refused
   b  Replica      declares a  healthy  Cluster db/pg-b: phase "Cluster in healthy state", declares pg-a primary, pod pg-b-1; Pooler pg-b-pooler-rw has 0 instances
 
+Clusters:
+  site a  context site-a  server https://a.example.invalid:6443  kube-system UID not read yet
+  site b  context site-b  server https://b.example.invalid:6443  kube-system UID uid-b
+Git: https://git.example.com/gitops.git, branch main
+
 Hold
    1. hold-a-cluster-pg-a  site a (waits for the site if unreachable)
       hold Cluster db/pg-a at site a: Flux stops applying it
@@ -73,14 +78,15 @@ PromoteToGitOps
   16. reconcile-git-a  site a (waits for the site if unreachable)
       wait for Flux at site a to apply the run's commit (held objects stay as they are)
         request a reconcile of the Kustomizations of the held objects (found when the step runs) and their GitRepository; wait up to 5m0s
-        until Flux has applied $(git.commit)
+        until Flux has applied the branch head, which must contain the run's commit $(git.commit)
   17. reconcile-git-b  site b
       wait for Flux at site b to apply the run's commit (held objects stay as they are)
         request a reconcile of Kustomizations flux-system/b and their GitRepository; wait up to 5m0s
-        until Flux has applied $(git.commit)
+        until Flux has applied the branch head, which must contain the run's commit $(git.commit)
 Release
   18. verify-git-a  site a (waits for the site if unreachable)
       check at site a that Git, as Flux renders it, equals live
+        stop if the branch moved past the run's commit
         render the run's commit as Flux would and diff it against 2 live objects; stop if they differ
   19. release-a-cluster-pg-a  site a (waits for the site if unreachable)
       release Cluster db/pg-a at site a: Flux applies it again
@@ -91,12 +97,13 @@ Release
   21. reconcile-release-a  site a (waits for the site if unreachable)
       reconcile Flux at site a with the released objects
         request a reconcile of the Kustomizations of the held objects (found when the step runs) and their GitRepository; wait up to 5m0s
-        until Flux has applied $(git.commit)
+        until Flux has applied the branch head, which must contain the run's commit $(git.commit)
   22. verify-noop-a  site a (waits for the site if unreachable)
       check at site a that Flux changed nothing
         check that the generation of 2 released objects did not change
   23. verify-git-b  site b
       check at site b that Git, as Flux renders it, equals live
+        stop if the branch moved past the run's commit
         render the run's commit as Flux would and diff it against 2 live objects; stop if they differ
   24. release-b-cluster-pg-b  site b
       release Cluster db/pg-b at site b: Flux applies it again
@@ -107,7 +114,7 @@ Release
   26. reconcile-release-b  site b
       reconcile Flux at site b with the released objects
         request a reconcile of Kustomizations flux-system/b and their GitRepository; wait up to 5m0s
-        until Flux has applied $(git.commit)
+        until Flux has applied the branch head, which must contain the run's commit $(git.commit)
   27. verify-noop-b  site b
       check at site b that Flux changed nothing
         check that the generation of 2 released objects did not change
@@ -116,6 +123,7 @@ Follow-ups for the operator:
   site a: Rebuild: Cluster pg-b was promoted without a token, so Cluster pg-a may hold writes that pg-b lacks and cannot follow it: recreate pg-a from pg-b (docs/runbooks/rebuild-old-primary.md)
 
 Notes:
+  site loss: Tack cannot tell a lost site from one cut off from this host. If site a still runs, it stays primary until Flux there applies the run's commit or Tack fences it. Confirm the loss and fence it first: docs/runbooks/site-loss.md
   site a is unreachable: connection refused; the steps at site a wait for it to come back
 
 Nothing was changed. To run this plan: tack run -f testdata/workload.yaml --to b --from a --mode site-loss

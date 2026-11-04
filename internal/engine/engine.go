@@ -32,6 +32,10 @@ type Flux interface {
 	// is takeOver. It returns the Kustomization that applies the object.
 	Hold(ctx context.Context, site string, obj failoverv1.ObjectRef, run, takeOver string) (failoverv1.ObjectKey, error)
 
+	// HeldBy returns the run that holds the object, or "" when it is not
+	// held by a run.
+	HeldBy(ctx context.Context, site string, obj failoverv1.ObjectRef) (string, error)
+
 	// Release lets Flux apply the object again, if run holds it. It returns
 	// the object's generation.
 	Release(ctx context.Context, site string, obj failoverv1.ObjectRef, run string) (int64, error)
@@ -64,6 +68,12 @@ type Git interface {
 
 	// Checkout returns a directory holding the repository at revision.
 	Checkout(ctx context.Context, w *failoverv1.WorkloadSpec, revision string) (string, error)
+
+	// BranchHead fetches the branch and returns the commit at its head.
+	BranchHead(ctx context.Context, w *failoverv1.WorkloadSpec) (string, error)
+
+	// Contains reports whether rev is commit or a descendant of it.
+	Contains(ctx context.Context, w *failoverv1.WorkloadSpec, commit, rev string) (bool, error)
 
 	// Close removes local copies.
 	Close() error
@@ -119,6 +129,9 @@ type Env struct {
 	Ledger  Ledger
 	// Runs lists the workload's earlier runs at every site that answers c.
 	Runs func(ctx context.Context, c kube.Clients) ([]failoverv1.SiteFailover, error)
+	// Supersede records in the ledger of run that the run by took it over.
+	// Nil does nothing.
+	Supersede func(ctx context.Context, run, by string) error
 	// Out receives progress lines.
 	Out io.Writer
 	// Now returns the time. Tests replace it.

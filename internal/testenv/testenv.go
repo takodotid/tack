@@ -3,13 +3,18 @@ package testenv
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -43,16 +48,40 @@ type Clients struct {
 	Checks map[string]int
 	// answers holds, by site, the results of the next checks: false fails.
 	answers map[string][]bool
+	// errs holds, by site, an error every check returns, such as a refused
+	// credential.
+	errs map[string]error
 }
 
-// NewClients returns fake clients for the sites, seeded with objects.
-// Writes through Client are counted in Writes.
+// NewClients returns fake clients for the sites, seeded with objects. Each
+// site's cluster has a kube-system namespace with UID uid-<site>, unless
+// objects hold one. Writes through Client are counted in Writes.
 func NewClients(objects map[string][]client.Object) *Clients {
-	c := &Clients{Sites: map[string]client.Client{}, Down: map[string]bool{}, Checks: map[string]int{}, answers: map[string][]bool{}}
+	c := &Clients{Sites: map[string]client.Client{}, Down: map[string]bool{}, Checks: map[string]int{}, answers: map[string][]bool{}, errs: map[string]error{}}
 	for site, objs := range objects {
+		has := false
+		for _, o := range objs {
+			has = has || o.GetName() == metav1.NamespaceSystem && o.GetNamespace() == "" && o.GetObjectKind().GroupVersionKind().Kind == "Namespace"
+		}
+		if !has {
+			objs = append(objs, KubeSystem("uid-"+site))
+		}
 		c.Sites[site] = NewClient(objs...)
 	}
 	return c
+}
+
+// KubeSystem returns a kube-system namespace with uid, which fingerprints
+// a cluster.
+func KubeSystem(uid string) *corev1.Namespace {
+	ns := &corev1.Namespace{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Namespace"}}
+	ns.Name, ns.UID = metav1.NamespaceSystem, types.UID(uid)
+	return ns
+}
+
+// Server implements the optional Server of kube.Clients.
+func (c *Clients) Server(site string) (string, error) {
+	return "https://" + site + ".example.invalid:6443", nil
 }
 
 func (c *Clients) counted(cl client.Client) client.Client {
@@ -87,12 +116,20 @@ func NewClient(objs ...client.Object) client.Client {
 	for _, gvk := range GVKs {
 		mapper.Add(gvk, meta.RESTScopeNamespace)
 	}
+	mapper.Add(corev1.SchemeGroupVersion.WithKind("Namespace"), meta.RESTScopeRoot)
 	return fake.NewClientBuilder().
 		WithScheme(kube.Scheme).
 		WithRESTMapper(mapper).
 		WithObjects(objs...).
 		WithStatusSubresource(&failoverv1.SiteFailover{}).
 		Build()
+}
+
+// SetSite makes a site's client c, such as one for another cluster.
+func (c *Clients) SetSite(site string, cl client.Client) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.Sites[site] = cl
 }
 
 // SetDown marks a site unreachable or back.
@@ -137,18 +174,30 @@ func (c *Clients) Flap(site string, answers ...bool) {
 	c.answers[site] = answers
 }
 
-// Reachable implements kube.Clients.
+// Fail makes every check of a site return err, as a site whose API
+// refuses the operator's credential answers. Nil clears it.
+func (c *Clients) Fail(site string, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.errs[site] = err
+}
+
+// Reachable implements kube.Clients. A site that is down or blips gives no
+// answer: its error is a kube.UnreachableError.
 func (c *Clients) Reachable(_ context.Context, site string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.Checks[site]++
+	if err := c.errs[site]; err != nil {
+		return err
+	}
 	if c.Down[site] {
-		return fmt.Errorf("site %s is unreachable: connection refused", site)
+		return fmt.Errorf("site %s is unreachable: %w", site, &kube.UnreachableError{Err: errors.New("connection refused")})
 	}
 	if a := c.answers[site]; len(a) > 0 {
 		c.answers[site] = a[1:]
 		if !a[0] {
-			return fmt.Errorf("site %s is unreachable: context deadline exceeded", site)
+			return fmt.Errorf("site %s is unreachable: %w", site, &kube.UnreachableError{Err: errors.New("context deadline exceeded")})
 		}
 	}
 	return nil
@@ -214,6 +263,13 @@ func (f *Flux) Hold(_ context.Context, site string, obj failoverv1.ObjectRef, ru
 	return failoverv1.ObjectKey{Namespace: "flux-system", Name: site}, nil
 }
 
+// HeldBy implements engine.Flux.
+func (f *Flux) HeldBy(_ context.Context, site string, obj failoverv1.ObjectRef) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.Held[key(site, obj)], nil
+}
+
 // Release implements engine.Flux.
 func (f *Flux) Release(_ context.Context, site string, obj failoverv1.ObjectRef, run string) (int64, error) {
 	if err := f.call("Release", site, " ", obj.Name); err != nil {
@@ -268,11 +324,16 @@ func (f *Flux) VerifyNoop(_ context.Context, site string, _ []failoverv1.HeldObj
 }
 
 // Git is a fake engine.Git. It maps each field to clusters/<site>/<kind>.yaml.
+// The branch's history is the commits Commit made, in order; a Head set by
+// a test on top of them is a commit pushed after them.
 type Git struct {
 	mu          sync.Mutex
 	Unreachable bool
 	Head        string
 	Commits     []engine.CommitRequest
+	// Checkouts are the revisions Checkout was asked for.
+	Checkouts []string
+	made      []string
 }
 
 // Resolve implements engine.Git.
@@ -304,12 +365,42 @@ func (g *Git) Commit(_ context.Context, _ *failoverv1.WorkloadSpec, req engine.C
 	}
 	g.Commits = append(g.Commits, req)
 	g.Head = fmt.Sprintf("c%039d", len(g.Commits))
+	g.made = append(g.made, g.Head)
 	return g.Head, nil
 }
 
 // Checkout implements engine.Git.
-func (g *Git) Checkout(context.Context, *failoverv1.WorkloadSpec, string) (string, error) {
+func (g *Git) Checkout(_ context.Context, _ *failoverv1.WorkloadSpec, rev string) (string, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.Checkouts = append(g.Checkouts, rev)
 	return "/nonexistent", nil
+}
+
+// BranchHead implements engine.Git.
+func (g *Git) BranchHead(context.Context, *failoverv1.WorkloadSpec) (string, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.Unreachable {
+		return "", stop.Wait(failoverv1.ReasonGitUnreachable, "remote unreachable")
+	}
+	return g.Head, nil
+}
+
+// Contains implements engine.Git. Head, when Commit did not make it, comes
+// after every commit Commit made.
+func (g *Git) Contains(_ context.Context, _ *failoverv1.WorkloadSpec, commit, rev string) (bool, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if commit == rev {
+		return true, nil
+	}
+	order := g.made
+	if g.Head != "" && !slices.Contains(order, g.Head) {
+		order = append(slices.Clone(order), g.Head)
+	}
+	i, j := slices.Index(order, commit), slices.Index(order, rev)
+	return i >= 0 && j >= 0 && i <= j, nil
 }
 
 // Close implements engine.Git.

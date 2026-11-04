@@ -184,6 +184,23 @@ func (f *Flux) Hold(ctx context.Context, site string, obj failoverv1.ObjectRef, 
 	}
 }
 
+// HeldBy implements engine.Flux. It returns the held-by annotation of an
+// object that kustomize-controller skips, and "" otherwise.
+func (f *Flux) HeldBy(ctx context.Context, site string, obj failoverv1.ObjectRef) (string, error) {
+	c, err := f.Clients.Client(site)
+	if err != nil {
+		return "", err
+	}
+	u, err := getObject(ctx, c, obj)
+	if err != nil {
+		return "", err
+	}
+	if !isHeld(u) {
+		return "", nil
+	}
+	return u.GetAnnotations()[AnnotationHeldBy], nil
+}
+
 // Release implements engine.Flux. It removes the hold only when run set it.
 func (f *Flux) Release(ctx context.Context, site string, obj failoverv1.ObjectRef, run string) (int64, error) {
 	if run == "" {

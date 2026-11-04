@@ -9,6 +9,7 @@ import (
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/engine"
+	"github.com/takodotid/tack/internal/kube"
 )
 
 // The annotations of a hold, as the plan prints them.
@@ -17,8 +18,9 @@ const (
 	annHeldBy    = "failover.tako.id/held-by"
 )
 
-// printPlan writes the dry run: every step and every change, in order.
-func printPlan(w io.Writer, p *engine.Plan) {
+// printPlan writes the dry run: every step and every change, in order. c
+// gives the API server of each site's context.
+func printPlan(w io.Writer, p *engine.Plan, c kube.Clients) {
 	sf := p.SiteFailover
 	fmt.Fprintf(w, "Plan for workload %s: %s, site %s to site %s\n", sf.Spec.Workload.Name, sf.Spec.Mode, sf.Spec.From, sf.Spec.To)
 	fmt.Fprintf(w, "Ledger: SiteFailover %s/%s at site %s\n\n", sf.Namespace, sf.Name, sf.Spec.To)
@@ -38,6 +40,8 @@ func printPlan(w io.Writer, p *engine.Plan) {
 	}
 	tw.Flush()
 	fmt.Fprintln(w)
+	printClusters(w, sf, c)
+	fmt.Fprintln(w)
 
 	printSteps(w, sf, false)
 
@@ -53,6 +57,37 @@ func printPlan(w io.Writer, p *engine.Plan) {
 			fmt.Fprintf(w, "  %s\n", n)
 		}
 	}
+}
+
+// serverer is a kube.Clients that knows each context's API server.
+type serverer interface {
+	Server(site string) (string, error)
+}
+
+// printClusters writes what a run acts on: per site, its context, the API
+// server the context points at in this kubeconfig, and the cluster the run
+// recorded; then the Git repository, without credentials.
+func printClusters(w io.Writer, sf *failoverv1.SiteFailover, c kube.Clients) {
+	fmt.Fprintln(w, "Clusters:")
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	spec := &sf.Spec.Workload.Spec
+	for _, s := range spec.Sites {
+		server := "unknown"
+		if sv, ok := c.(serverer); ok {
+			if u, err := sv.Server(s.Name); err != nil {
+				server = "unknown (" + err.Error() + ")"
+			} else {
+				server = u
+			}
+		}
+		fp, ok := engine.Fingerprint(sf, s.Name)
+		if !ok {
+			fp = "not read yet"
+		}
+		fmt.Fprintf(tw, "  site %s\tcontext %s\tserver %s\tkube-system UID %s\n", s.Name, s.KubeContext, engine.Redact(server), fp)
+	}
+	tw.Flush()
+	fmt.Fprintf(w, "Git: %s, branch %s\n", engine.Redact(spec.Git.URL), spec.Git.Branch)
 }
 
 // printSteps writes the steps by phase, with their state when withState.
@@ -126,7 +161,11 @@ func stepDetail(s *failoverv1.Step, run string, mode failoverv1.Mode) []string {
 			line = fmt.Sprintf("request a reconcile of %s on the artifact Flux has, without a Git fetch; wait up to %s", target, s.Reconcile.Timeout.Duration)
 		}
 		out := []string{line}
-		if s.Reconcile.Revision != "" {
+		switch s.Reconcile.Revision {
+		case "":
+		case engine.GitCommitRef:
+			out = append(out, "until Flux has applied the branch head, which must contain the run's commit "+engine.GitCommitRef)
+		default:
 			out = append(out, "until Flux has applied "+s.Reconcile.Revision)
 		}
 		return out
@@ -164,7 +203,10 @@ func stepDetail(s *failoverv1.Step, run string, mode failoverv1.Mode) []string {
 		out = append(out, "commit message: "+firstLine(s.Git.Message))
 		return out
 	case failoverv1.StepVerifyGit:
-		return []string{fmt.Sprintf("render the run's commit as Flux would and diff it against %d live objects; stop if they differ", len(s.VerifyGit.Objects))}
+		return []string{
+			"stop if the branch moved past the run's commit",
+			fmt.Sprintf("render the run's commit as Flux would and diff it against %d live objects; stop if they differ", len(s.VerifyGit.Objects)),
+		}
 	case failoverv1.StepVerifyNoop:
 		return []string{fmt.Sprintf("check that the generation of %d released objects did not change", len(s.VerifyNoop.Objects))}
 	case failoverv1.StepRouting:
@@ -186,6 +228,12 @@ func printStatus(w io.Writer, sf *failoverv1.SiteFailover) {
 	if st.Message != "" {
 		fmt.Fprintf(w, "Message: %s\n", st.Message)
 	}
+	if sf.Spec.TakeOver != "" {
+		fmt.Fprintf(w, "Takes over: run %s\n", sf.Spec.TakeOver)
+	}
+	if st.SupersededBy != "" {
+		fmt.Fprintf(w, "Taken over by: run %s; this run cannot resume\n", st.SupersededBy)
+	}
 	if st.StartedAt != nil {
 		fmt.Fprintf(w, "Started: %s\n", st.StartedAt.UTC().Format("2006-01-02 15:04:05Z"))
 	}
@@ -198,7 +246,11 @@ func printStatus(w io.Writer, sf *failoverv1.SiteFailover) {
 		if g.AcceptedRevision != "" {
 			fmt.Fprintf(w, ", accepted %s", g.AcceptedRevision)
 		}
-		fmt.Fprintf(w, ", commit %s\n", orNone(g.Commit))
+		fmt.Fprintf(w, ", commit %s", orNone(g.Commit))
+		if g.ReleaseRevision != "" {
+			fmt.Fprintf(w, ", release checked against %s", g.ReleaseRevision)
+		}
+		fmt.Fprintln(w)
 	}
 	if len(st.Captured) > 0 {
 		var keys []string

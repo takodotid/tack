@@ -116,6 +116,9 @@ func (Driver) Discover(ctx context.Context, w *failoverv1.WorkloadSpec, c kube.C
 		s := &w.Sites[i]
 		st := driver.SiteState{Name: s.Name, Role: driver.RoleUnknown, Objects: objects(s), Facts: map[string]string{}}
 		if err := c.Reachable(ctx, s.Name); err != nil {
+			if !kube.IsUnreachable(err) {
+				return nil, fmt.Errorf("site %s: %w", s.Name, err)
+			}
 			st.Error = err.Error()
 			t.Sites = append(t.Sites, st)
 			continue

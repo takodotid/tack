@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/driver"
+	"github.com/takodotid/tack/internal/kube"
 )
 
 // LabelWorkload carries the workload's name on its SiteFailover objects.
@@ -37,6 +39,11 @@ type Plan struct {
 	Topology     *driver.Topology
 	// Notes are facts the operator should see before approving.
 	Notes []string
+
+	// checks are the plan's checks of each site; Recheck reuses them.
+	checks *SiteChecks
+	// runs are the names of the runs the plan found.
+	runs map[string]bool
 }
 
 // Inputs is everything Compose needs. Reading the clusters and Git fills it.
@@ -52,6 +59,8 @@ type Inputs struct {
 	FollowUps []failoverv1.FollowUp
 	// GitChanges are the resolved Git changes.
 	GitChanges []failoverv1.GitChange
+	// Fingerprints identify the cluster of each site that answered.
+	Fingerprints []failoverv1.SiteFingerprint
 }
 
 // ErrNoFrom is returned when the request names no from site and the to
@@ -93,10 +102,17 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 	}
 	in := Inputs{Request: req, Topology: topo, Owners: map[string]map[failoverv1.ObjectRef]failoverv1.ObjectKey{}}
 	var notes []string
+	if req.Mode == failoverv1.ModeSiteLoss {
+		notes = append(notes, fmt.Sprintf("site loss: Tack cannot tell a lost site from one cut off from this host. If site %s still runs, it stays primary until Flux there applies the run's commit or Tack fences it. Confirm the loss and fence it first: docs/runbooks/site-loss.md", req.From))
+	}
+	seen := map[string]bool{}
 	if e.Runs != nil {
 		runs, err := e.Runs(ctx, checks)
 		if err != nil {
 			return nil, err
+		}
+		for _, r := range runs {
+			seen[r.Name] = true
 		}
 		if err := checkRebuilt(req, to, runs, &notes); err != nil {
 			return nil, err
@@ -110,6 +126,11 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 		if note := checks.Note(s.Name); note != "" {
 			notes = append(notes, note)
 		}
+		fp, err := e.fingerprint(ctx, s.Name)
+		if err != nil {
+			return nil, fmt.Errorf("site %s: %w", s.Name, err)
+		}
+		in.Fingerprints = append(in.Fingerprints, failoverv1.SiteFingerprint{Site: s.Name, KubeSystemUID: fp})
 		owners := map[failoverv1.ObjectRef]failoverv1.ObjectKey{}
 		for _, obj := range s.Objects {
 			o, err := e.Flux.Owner(ctx, s.Name, obj)
@@ -161,7 +182,104 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Plan{SiteFailover: sf, Topology: topo, Notes: notes}, nil
+	return &Plan{SiteFailover: sf, Topology: topo, Notes: notes, checks: checks, runs: seen}, nil
+}
+
+// ErrStalePlan is returned by Recheck when the sites changed since the
+// plan was made.
+var ErrStalePlan = errors.New("the plan is stale")
+
+// Recheck reads the sites again once the operator confirmed a plan, and
+// refuses it when they changed since it was made: a confirmation can take
+// any time, and another run may have switched the workload meanwhile
+// ([RFC#0009] Requirement 13). It reuses the plan's checks, so a site that
+// did not answer the plan is not checked again, and changes nothing.
+func (e *Env) Recheck(ctx context.Context, p *Plan) error {
+	sf := p.SiteFailover
+	spec := &sf.Spec.Workload.Spec
+	stale := func(format string, a ...any) error {
+		return fmt.Errorf("%w: %s. Nothing was changed; plan again", ErrStalePlan, fmt.Sprintf(format, a...))
+	}
+	checks := p.checks
+	if checks == nil {
+		checks = e.SiteChecks(sf.Spec.Mode, sf.Spec.To)
+	}
+	topo, err := e.Driver.Discover(ctx, spec, checks)
+	if err != nil {
+		return stale("the sites could not be read again: %v", err)
+	}
+	for _, was := range p.Topology.Sites {
+		now, ok := topo.Site(was.Name)
+		if !ok {
+			return stale("site %s is no longer in the topology", was.Name)
+		}
+		if diff := siteChanges(was, *now); diff != "" {
+			return stale("site %s changed since the plan: %s", was.Name, diff)
+		}
+	}
+	if _, _, err := e.Driver.Plan(spec, topo, driver.Request{From: sf.Spec.From, To: sf.Spec.To, Mode: sf.Spec.Mode}); err != nil {
+		return stale("the plan is no longer allowed: %v", err)
+	}
+	for _, f := range sf.Spec.Fingerprints {
+		uid, err := e.fingerprint(ctx, f.Site)
+		if err != nil {
+			return stale("site %s could not be read again: %v", f.Site, err)
+		}
+		if uid != f.KubeSystemUID {
+			return stale("site %s now reaches another cluster: kube-system UID %s, the plan read %s", f.Site, uid, f.KubeSystemUID)
+		}
+	}
+	if e.Runs != nil {
+		runs, err := e.Runs(ctx, checks)
+		if err != nil {
+			return stale("the workload's runs could not be read again: %v", err)
+		}
+		for _, r := range runs {
+			if !p.runs[r.Name] {
+				return stale("run %s of the workload started after the plan was made", r.Name)
+			}
+		}
+	}
+	return nil
+}
+
+// siteChanges lists what differs between two reads of a site, among what
+// the driver's checks use; the summary is left out.
+func siteChanges(was, now driver.SiteState) string {
+	var out []string
+	add := func(what string, a, b any) {
+		if !reflect.DeepEqual(a, b) {
+			out = append(out, fmt.Sprintf("%s was %v, is %v", what, a, b))
+		}
+	}
+	add("reachable", was.Reachable, now.Reachable)
+	add("role", was.Role, now.Role)
+	add("declared primary", orNone(was.DeclaredPrimary), orNone(now.DeclaredPrimary))
+	add("healthy", was.Healthy, now.Healthy)
+	add("created", was.Created.UTC(), now.Created.UTC())
+	keys := map[string]bool{}
+	for k := range was.Facts {
+		keys[k] = true
+	}
+	for k := range now.Facts {
+		keys[k] = true
+	}
+	var names []string
+	for k := range keys {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	for _, k := range names {
+		add(k, fmt.Sprintf("%q", was.Facts[k]), fmt.Sprintf("%q", now.Facts[k]))
+	}
+	return strings.Join(out, ", ")
+}
+
+func orNone(s string) string {
+	if s == "" {
+		return "none"
+	}
+	return s
 }
 
 // FollowUpRebuild is the follow-up that asks the operator to recreate a
@@ -169,18 +287,20 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 const FollowUpRebuild = "Rebuild"
 
 // checkRebuilt refuses a planned run to a site whose member an earlier run
-// left to rebuild, until the member was created again after that run.
+// left to rebuild, until the member was created again after that run
+// started: its startedAt, or its ledger's creation when it has none.
 // The workload's status cannot tell such a member from a healthy replica.
 func checkRebuilt(req Request, to *driver.SiteState, runs []failoverv1.SiteFailover, notes *[]string) error {
 	for _, r := range runs {
-		if r.Status.StartedAt == nil {
-			continue
+		started := r.CreationTimestamp.Time
+		if r.Status.StartedAt != nil {
+			started = r.Status.StartedAt.Time
 		}
 		for _, f := range r.Status.FollowUps {
 			if f.Site != req.To || f.Action != FollowUpRebuild {
 				continue
 			}
-			if !to.Created.IsZero() && to.Created.After(r.Status.StartedAt.Time) {
+			if !to.Created.IsZero() && to.Created.After(started) {
 				continue
 			}
 			msg := fmt.Sprintf("run %s left site %s to rebuild (%s), and its member was not created again since", r.Name, req.To, f.Reason)
@@ -279,7 +399,7 @@ func Compose(in Inputs) (*failoverv1.SiteFailover, error) {
 	}
 	add(failoverv1.Step{
 		ID: "git-commit", Phase: failoverv1.PhasePromoteToGitOps, Type: failoverv1.StepGit,
-		Description: fmt.Sprintf("commit the live state to %s branch %s", redact(spec.Git.URL), spec.Git.Branch),
+		Description: fmt.Sprintf("commit the live state to %s branch %s", Redact(spec.Git.URL), spec.Git.Branch),
 		Git: &failoverv1.GitStep{
 			Changes: in.GitChanges,
 			Message: fmt.Sprintf("tack: %s primary %s to %s (%s)\n\nRun %s, mode %s.", in.Workload, in.From, in.To, strings.ToLower(string(in.Mode)), in.Run, in.Mode),
@@ -370,11 +490,12 @@ func Compose(in Inputs) (*failoverv1.SiteFailover, error) {
 			Labels:    map[string]string{LabelWorkload: in.Workload},
 		},
 		Spec: failoverv1.SiteFailoverSpec{
-			Workload: failoverv1.WorkloadSnapshot{Name: in.Workload, Spec: *spec.DeepCopy()},
-			Mode:     in.Mode,
-			From:     in.From,
-			To:       in.To,
-			Steps:    steps,
+			Workload:     failoverv1.WorkloadSnapshot{Name: in.Workload, Spec: *spec.DeepCopy()},
+			Mode:         in.Mode,
+			From:         in.From,
+			To:           in.To,
+			Steps:        steps,
+			Fingerprints: in.Fingerprints,
 		},
 		Status: failoverv1.SiteFailoverStatus{FollowUps: in.FollowUps},
 	}
@@ -383,8 +504,31 @@ func Compose(in Inputs) (*failoverv1.SiteFailover, error) {
 
 var userinfo = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/\s]+@`)
 
-// redact hides the user and password of a URL.
-func redact(s string) string { return userinfo.ReplaceAllString(s, "${1}***@") }
+// Redact hides the user and password of every URL in s.
+func Redact(s string) string { return userinfo.ReplaceAllString(s, "${1}***@") }
+
+// fingerprint reads the fingerprint of a site's cluster.
+func (e *Env) fingerprint(ctx context.Context, site string) (string, error) {
+	c, err := e.Clients.Client(site)
+	if err != nil {
+		return "", err
+	}
+	return kube.Fingerprint(ctx, c)
+}
+
+// Fingerprint returns the fingerprint the run recorded for a site: in its
+// spec when the site answered the plan, else in its status once a process
+// read it. ok is false when neither has it.
+func Fingerprint(sf *failoverv1.SiteFailover, site string) (uid string, ok bool) {
+	for _, list := range [][]failoverv1.SiteFingerprint{sf.Spec.Fingerprints, sf.Status.Fingerprints} {
+		for _, f := range list {
+			if f.Site == site {
+				return f.KubeSystemUID, true
+			}
+		}
+	}
+	return "", false
+}
 
 func stepID(verb, site string, obj failoverv1.ObjectRef) string {
 	return strings.ToLower(fmt.Sprintf("%s-%s-%s-%s", verb, site, obj.Kind, obj.Name))
