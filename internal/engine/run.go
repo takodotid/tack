@@ -235,7 +235,7 @@ func (r *runner) run(ctx context.Context) error {
 					return r.end(ctx, step, stop.Ask(failoverv1.ReasonStepFailed, "site %s is unreachable: %v", step.Site, err))
 				}
 				if st.State != failoverv1.StepDeferred {
-					st.State, st.Message = failoverv1.StepDeferred, fmt.Sprintf("site %s unreachable: %v", step.Site, err)
+					r.deferStep(step, fmt.Sprintf("site %s unreachable: %v", step.Site, err))
 					if err := r.write(ctx, r.sf); err != nil {
 						return err
 					}
@@ -254,7 +254,7 @@ func (r *runner) run(ctx context.Context) error {
 					// The site gave no answer to the read: it stays
 					// unreachable for this process.
 					r.reachable[step.Site] = &kube.UnreachableError{Err: err}
-					st.State, st.Message = failoverv1.StepDeferred, fmt.Sprintf("site %s unreachable: %v", step.Site, err)
+					r.deferStep(step, fmt.Sprintf("site %s unreachable: %v", step.Site, err))
 					if err := r.write(ctx, r.sf); err != nil {
 						return err
 					}
@@ -288,6 +288,15 @@ func (r *runner) verifyStep(site string) *failoverv1.Step {
 		}
 	}
 	return nil
+}
+
+// deferStep records a step Deferred, with the time, and ends its phase when
+// that was its last step that could run ([RFC#0003] Requirements 4 and 12).
+func (r *runner) deferStep(step *failoverv1.Step, msg string) {
+	now := metav1.NewTime(r.now())
+	st := r.stepStatus(step.ID)
+	st.State, st.FinishedAt, st.Message = failoverv1.StepDeferred, &now, msg
+	r.endPhase(step.Phase, now)
 }
 
 // errUnread is returned by gate when the site did not answer its read.
@@ -441,6 +450,10 @@ func (r *runner) halt(ctx context.Context, step *failoverv1.Step, err error, set
 	}
 	if setState {
 		st.State = state
+		if state == failoverv1.StepFailed {
+			now := metav1.NewTime(r.now())
+			st.FinishedAt = &now
+		}
 	}
 	r.sf.Status.Reason = se.Reason
 	r.sf.Status.Message = fmt.Sprintf("step %s: %s", step.ID, se.Message)
@@ -513,17 +526,22 @@ func (r *runner) stepStatus(id string) *failoverv1.StepStatus {
 	return &r.sf.Status.Steps[len(r.sf.Status.Steps)-1]
 }
 
+// startPhase records a phase's start at its first step. A step of a phase
+// that already finished, such as a deferred step whose site came back,
+// makes it unfinished again until endPhase.
 func (r *runner) startPhase(p failoverv1.Phase, now metav1.Time) {
 	r.sf.Status.Phase = p
 	for i := range r.sf.Status.Phases {
 		if r.sf.Status.Phases[i].Name == p {
+			r.sf.Status.Phases[i].FinishedAt = nil
 			return
 		}
 	}
 	r.sf.Status.Phases = append(r.sf.Status.Phases, failoverv1.PhaseStatus{Name: p, StartedAt: &now})
 }
 
-// endPhase records a phase's end once its last step that can run has run.
+// endPhase records a phase's end once each of its steps is Succeeded or
+// Deferred.
 func (r *runner) endPhase(p failoverv1.Phase, now metav1.Time) {
 	for _, s := range r.sf.Spec.Steps {
 		if s.Phase != p {
