@@ -405,6 +405,27 @@ func stoppedRun(t *testing.T, name string) *failoverv1.SiteFailover {
 	}
 }
 
+// tack resume with --context finds the run at one site, but searches every
+// site of the run's Workload snapshot for a newer run. Issue #27.
+func TestResumeContextSearchesEverySite(t *testing.T) {
+	older := stoppedRun(t, "pg-main-older")
+	newer := siteLossRun("a", fixedNow)
+	newer.Name, newer.CreationTimestamp = "pg-main-newer", metav1.NewTime(fixedNow)
+	f := newFactory(map[string][]client.Object{
+		"a": append(testenv.Site("a", "b", 0), newer),
+		"b": append(testenv.Site("b", "b", 2), older),
+	})
+	// The fakes ignore contexts: the context's site is site b's cluster.
+	f.clients.Sites[contextSite] = f.clients.Sites["b"]
+	out, code := run(t, f, "resume", "pg-main-older", "--context", "site-b", "--yes")
+	if code != ExitError || !strings.Contains(out, "run pg-main-newer started after run pg-main-older") {
+		t.Fatalf("exit %d, want %d with a refusal naming the newer run at site a:\n%s", code, ExitError, out)
+	}
+	if len(f.flux.Calls) > 0 {
+		t.Errorf("the refused resume changed something: %v", f.flux.Calls)
+	}
+}
+
 // A run started with --take-over records the run it took over, and marks
 // that run's ledger. The old run then cannot resume, and no longer blocks
 // a new run. Issue #27.
