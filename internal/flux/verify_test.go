@@ -4,12 +4,14 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/fluxcd/pkg/ssa"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
 )
@@ -380,7 +382,7 @@ func TestVerifyNoop(t *testing.T) {
 		return u
 	}
 	run := func(strict bool, ks *unstructured.Unstructured, live *unstructured.Unstructured, h []failoverv1.HeldObject, f []failoverv1.ObjectField) (string, error) {
-		return New(fakeClients{newClient(nil, ks, live)}).VerifyNoop(ctx, "a", h, f, strict)
+		return New(fakeClients{newClient(nil, ks, live)}).VerifyNoop(ctx, "a", h, f, strict, time.Minute)
 	}
 
 	msg, err := run(true, ready("True", ReasonSucceeded), liveCluster(nil), held, fields)
@@ -416,5 +418,68 @@ func TestVerifyNoop(t *testing.T) {
 	notReleased[0].ReleasedAt = nil
 	if _, err = run(true, ready("True", ReasonSucceeded), liveCluster(nil), notReleased, fields); err == nil {
 		t.Fatal("want an error for an object not released")
+	}
+}
+
+// #35 row 18 (RFC0005 Requirement 10). The check after release needs each
+// Kustomization Ready with reason ReconciliationSucceeded. A reconcile in
+// flight is waited on, up to the timeout; Ready=Unknown, or True with
+// another reason, then fails the step.
+func TestVerifyNoopNeedsReady(t *testing.T) {
+	ctx := context.Background()
+	released := metav1.Now()
+	held := []failoverv1.HeldObject{{Site: "a", Object: clusterRef, Kustomization: ksKey, ReleasedAt: &released, Generation: 4}}
+	for _, tt := range []struct{ status, reason string }{
+		{"Unknown", "Progressing"},
+		{"True", "Progressing"},
+		{"", ""},
+	} {
+		ks := kustomization(ksKey, false)
+		conds := readyCond(tt.status, tt.reason, "msg")
+		if tt.status == "" {
+			conds = nil
+		}
+		_ = unstructured.SetNestedSlice(ks.Object, conds, "status", "conditions")
+		f := New(fakeClients{newClient(nil, ks, liveCluster(nil))})
+		f.Poll = time.Millisecond
+		msg, err := f.VerifyNoop(ctx, "a", held, []failoverv1.ObjectField{primaryField}, true, 20*time.Millisecond)
+		if err == nil || !strings.Contains(err.Error(), "Kustomization flux-system/db is not Ready") {
+			t.Errorf("Ready=%s %s: %q, %v; want a failure once the wait timed out", tt.status, tt.reason, msg, err)
+		}
+	}
+}
+
+// The check waits for a reconcile in flight, and reads the objects only
+// once it ended: an apply that ends with it is seen.
+func TestVerifyNoopWaitsForReady(t *testing.T) {
+	ctx := context.Background()
+	released := metav1.Now()
+	held := []failoverv1.HeldObject{{Site: "a", Object: clusterRef, Kustomization: ksKey, ReleasedAt: &released, Generation: 4}}
+	gets, done := 0, false
+	funcs := &interceptor.Funcs{Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+		if err := c.Get(ctx, key, obj, opts...); err != nil {
+			return err
+		}
+		u := obj.(*unstructured.Unstructured)
+		switch u.GetKind() {
+		case "Kustomization":
+			if gets++; gets < 3 {
+				_ = unstructured.SetNestedSlice(u.Object, readyCond("Unknown", "Progressing", "Reconciliation in progress"), "status", "conditions")
+			} else {
+				done = true
+			}
+		case "Cluster":
+			if done {
+				u.SetGeneration(5)
+			}
+		}
+		return nil
+	}}
+	f := New(fakeClients{newClient(funcs, kustomization(ksKey, false), liveCluster(nil))})
+	f.Poll = time.Millisecond
+	_, err := f.VerifyNoop(ctx, "a", held, []failoverv1.ObjectField{primaryField}, true, time.Minute)
+	wantStop(t, err, failoverv1.ReasonFluxChanged, "generation 4 at release, now 5")
+	if gets != 3 {
+		t.Errorf("Kustomization read %d times, want 3", gets)
 	}
 }

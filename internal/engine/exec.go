@@ -18,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
+	"github.com/takodotid/tack/internal/config"
 	"github.com/takodotid/tack/internal/stop"
 )
 
@@ -43,7 +44,7 @@ func (r *runner) exec(ctx context.Context, s *failoverv1.Step) (string, error) {
 	case failoverv1.StepRelease:
 		return r.release(ctx, s)
 	case failoverv1.StepVerifyNoop:
-		return r.Flux.VerifyNoop(ctx, s.Site, r.siteHeld(s.Site), s.VerifyNoop.Fields, r.strict())
+		return r.Flux.VerifyNoop(ctx, s.Site, r.siteHeld(s.Site), s.VerifyNoop.Fields, r.strict(), r.fluxTimeout())
 	case failoverv1.StepRouting:
 		if r.Routing == nil {
 			return "", fmt.Errorf("routing is not available in this build")
@@ -277,6 +278,15 @@ func (r *runner) verifyGit(ctx context.Context, s *failoverv1.Step) (string, err
 		return "", err
 	}
 	return r.Flux.VerifyGit(ctx, s.Site, r.siteHeld(s.Site), s.VerifyGit.Fields, dir, r.strict())
+}
+
+// fluxTimeout bounds a wait on Flux outside a Reconcile step, which
+// carries its own: the Workload's timeouts.flux, or its default.
+func (r *runner) fluxTimeout() time.Duration {
+	if t := r.sf.Spec.Workload.Spec.Timeouts.Flux; t != nil && t.Duration > 0 {
+		return t.Duration
+	}
+	return config.DefaultFlux
 }
 
 // strict is false once the operator accepted a Git commit made during the
