@@ -442,6 +442,29 @@ func TestTakeOverIsRecorded(t *testing.T) {
 	}
 }
 
+// Issue #37. A run that takes over a run planned in the same second gets
+// the next free name: the run it takes over never recorded its start, and
+// holds the name. The e2e's TestTakeOver hits this on a fast machine.
+func TestTakeOverInTheSameSecond(t *testing.T) {
+	never := stoppedRun(t, "pg-main-20261027-101500")
+	never.Status = failoverv1.SiteFailoverStatus{}
+	f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": append(testenv.Site("b", "a", 0), never)})
+	f.flux.Fail["Hold"] = errors.New("stop at the first hold")
+	out, code := run(t, f, "run", "-f", "testdata/workload.yaml", "--to", "b", "--take-over", "pg-main-20261027-101500", "--yes")
+	if code != ExitStopped || !strings.Contains(out, "this run is named pg-main-20261027-101500-2\n") ||
+		!strings.Contains(out, "ledger tack-system/pg-main-20261027-101500-2 created") {
+		t.Fatalf("exit %d, want %d with a run named pg-main-20261027-101500-2:\n%s", code, ExitStopped, out)
+	}
+	store := &ledger.Store{Client: f.clients.Sites["b"], Namespace: "tack-system"}
+	ctx := context.Background()
+	if sf, err := store.Get(ctx, "pg-main-20261027-101500-2"); err != nil || sf.Spec.TakeOver != "pg-main-20261027-101500" {
+		t.Fatalf("new run: %v, spec.takeOver %q", err, sf.Spec.TakeOver)
+	}
+	if sf, err := store.Get(ctx, "pg-main-20261027-101500"); err != nil || sf.Status.SupersededBy != "pg-main-20261027-101500-2" {
+		t.Fatalf("old run: %v, status.supersededBy %q", err, sf.Status.SupersededBy)
+	}
+}
+
 // A run that never recorded its start still counts for the check of a
 // member left to rebuild: its ledger's creation stands in for its start.
 // Issue #28.

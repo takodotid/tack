@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
@@ -50,7 +51,7 @@ func (e *Env) Start(ctx context.Context, sf *failoverv1.SiteFailover, opts Optio
 		sf.Status.Steps = append(sf.Status.Steps, failoverv1.StepStatus{ID: s.ID, State: failoverv1.StepPending})
 	}
 	status := sf.Status.DeepCopy()
-	if err := e.Ledger.Create(ctx, sf); err != nil {
+	if err := e.create(ctx, sf, opts.TakeOver); err != nil {
 		return fmt.Errorf("create the ledger: %w", err)
 	}
 	fault.Point("create-ledger", "after")
@@ -67,6 +68,64 @@ func (e *Env) Start(ctx context.Context, sf *failoverv1.SiteFailover, opts Optio
 		}
 	}
 	return e.resume(ctx, sf, opts)
+}
+
+// MaxRunNames is how many names Start tries for a run: the plan's name,
+// then the same name with -2 up to -9 appended.
+const MaxRunNames = 9
+
+// create creates the ledger. A run's name holds its plan's time to the
+// second, so two runs of a workload planned in one second get one name.
+// When the name is taken by a run that no longer blocks a new one (it
+// succeeded, another run took it over, or this run takes it over), create
+// tries the name with -2, -3 and so on appended ([RFC#0003] Requirement 7).
+// Any other run with the name refuses the run, as the search for active
+// runs does: it may be a second tack process starting the same switch.
+func (e *Env) create(ctx context.Context, sf *failoverv1.SiteFailover, takeOver string) error {
+	base := sf.Name
+	for n := 1; ; n++ {
+		err := e.Ledger.Create(ctx, sf)
+		if !apierrors.IsAlreadyExists(err) {
+			return err
+		}
+		other, gerr := e.Ledger.Get(ctx, sf.Name)
+		if gerr != nil {
+			return fmt.Errorf("the name %s is taken, and its ledger cannot be read: %w", sf.Name, gerr)
+		}
+		switch {
+		case other.Status.State == failoverv1.RunSucceeded, other.Status.SupersededBy != "", other.Name == takeOver:
+		case other.Status.State == "":
+			return fmt.Errorf("the name %s is taken by a run that has not recorded its start: another tack process may be starting it. Nothing was changed; check tack status %s, then plan again",
+				sf.Name, sf.Name)
+		default:
+			return fmt.Errorf("the name %s is taken by a run that is %s: another tack process may be running it. Nothing was changed; check tack status %s",
+				sf.Name, other.Status.State, sf.Name)
+		}
+		if n == MaxRunNames {
+			return fmt.Errorf("the names %s to %s-%d are all taken: %w", base, base, n, err)
+		}
+		name := fmt.Sprintf("%s-%d", base, n+1)
+		e.printf("  note      the name %s is taken by a run that is %s; this run is named %s\n", sf.Name, orPending(other.Status.State), name)
+		rename(sf, name)
+	}
+}
+
+// rename names a run that has no ledger yet. The run's commit message names
+// it too.
+func rename(sf *failoverv1.SiteFailover, name string) {
+	sf.Name = name
+	for i := range sf.Spec.Steps {
+		if g := sf.Spec.Steps[i].Git; g != nil {
+			g.Message = commitMessage(sf.Spec.Workload.Name, sf.Spec.From, sf.Spec.To, sf.Spec.Mode, name)
+		}
+	}
+}
+
+func orPending(s failoverv1.RunState) string {
+	if s == "" {
+		return "not started"
+	}
+	return string(s)
 }
 
 // Resume runs the remaining steps of a ledger. It refuses a ledger that
