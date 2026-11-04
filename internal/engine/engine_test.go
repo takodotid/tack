@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -449,9 +450,9 @@ func TestSiteLossSiteStaysDown(t *testing.T) {
 	}
 }
 
-// A lost site answers the check before its deferred steps, then fails the
-// read of the fence check. Its steps must stay deferred: an unread site
-// is not known to be fenced.
+// A lost site answers the check before its deferred steps, then fails
+// every check of the read of the fence check. Its steps must stay
+// deferred: an unread site is not known to be fenced.
 func TestFenceCheckCannotRead(t *testing.T) {
 	f := newFixture(t)
 	f.clients.SetDown("a", true)
@@ -462,7 +463,7 @@ func TestFenceCheckCannotRead(t *testing.T) {
 
 	// Site a comes back, still primary, and flaps.
 	f.clients.SetDown("a", false)
-	f.clients.Flap("a", true, false)
+	f.clients.Flap("a", true, false, false, false)
 	sf, err = f.resume("b", engine.Options{})
 	if err != nil || sf.Status.State != failoverv1.RunSucceeded {
 		t.Fatalf("resume: %v %s %s", err, sf.Status.State, sf.Status.Message)
@@ -475,7 +476,7 @@ func TestFenceCheckCannotRead(t *testing.T) {
 			t.Errorf("%s is %s, want Deferred", id, st)
 		}
 	}
-	if msg := stepMessage(sf, "hold-a-cluster-pg-a"); !strings.Contains(msg, "did not answer the read") {
+	if msg := stepMessage(sf, "hold-a-cluster-pg-a"); !strings.Contains(msg, "did not answer the read") || !strings.Contains(msg, "no answer to 3 checks") {
 		t.Errorf("hold-a-cluster-pg-a message %q", msg)
 	}
 
@@ -483,6 +484,93 @@ func TestFenceCheckCannotRead(t *testing.T) {
 	sf, err = f.resume("b", engine.Options{})
 	if !errors.Is(err, engine.ErrStopped) || sf.Status.Reason != failoverv1.ReasonFencedSiteIsPrimary {
 		t.Fatalf("err %v, reason %s", err, sf.Status.Reason)
+	}
+}
+
+// A short network cut fails a check or two of the to site's API. The plan
+// must still read the site, and note the checks.
+func TestPlanSiteCheckRetried(t *testing.T) {
+	f := newFixture(t)
+	f.clients.Blip("b", 2)
+	p, err := f.env("b").MakePlan(context.Background(), engine.Request{
+		Run: "run-1", Workload: f.w.Name, Spec: &f.w.Spec,
+		Request: driver.Request{From: "a", To: "b", Mode: failoverv1.ModePlanned},
+	})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if n := f.clients.Checks["b"]; n != 3 {
+		t.Errorf("site b checked %d times, want 3", n)
+	}
+	if !slices.Contains(p.Notes, "site b answered on check 3 of 3") {
+		t.Errorf("notes %q", p.Notes)
+	}
+}
+
+// A planned plan needs from. A from site that stays down is refused after
+// the bounded checks.
+func TestPlanSiteCheckBounded(t *testing.T) {
+	f := newFixture(t)
+	f.clients.SetDown("a", true)
+	_, err := f.env("b").MakePlan(context.Background(), engine.Request{
+		Run: "run-1", Workload: f.w.Name, Spec: &f.w.Spec,
+		Request: driver.Request{From: "a", To: "b", Mode: failoverv1.ModePlanned},
+	})
+	if err == nil || !strings.Contains(err.Error(), "a planned switchover needs it") {
+		t.Fatalf("err %v, want a refusal", err)
+	}
+	if n := f.clients.Checks["a"]; n != 3 {
+		t.Errorf("site a checked %d times, want 3", n)
+	}
+}
+
+// A site-loss plan checks the lost site once: it does not answer, and more
+// checks would add to the write outage.
+func TestPlanSiteLossChecksLostSiteOnce(t *testing.T) {
+	f := newFixture(t)
+	f.clients.SetDown("a", true)
+	p, err := f.env("b").MakePlan(context.Background(), engine.Request{
+		Run: "run-1", Workload: f.w.Name, Spec: &f.w.Spec,
+		Request: driver.Request{To: "b", Mode: failoverv1.ModeSiteLoss},
+	})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if n := f.clients.Checks["a"]; n != 1 {
+		t.Errorf("lost site a checked %d times, want 1", n)
+	}
+	if p.SiteFailover.Spec.From != "a" {
+		t.Errorf("from %q, want a, the primary site b declares", p.SiteFailover.Spec.From)
+	}
+}
+
+// A lost site comes back and fails the first check of the read before its
+// deferred steps. It has just answered the check before that step, so the
+// read checks it again, and its steps run.
+func TestFenceCheckRetried(t *testing.T) {
+	f := newFixture(t)
+	f.clients.SetDown("a", true)
+	sf, err := f.start("b", failoverv1.ModeSiteLoss, engine.Options{})
+	if err != nil || sf.Status.State != failoverv1.RunSucceeded {
+		t.Fatalf("run: %v %s", err, sf.Status.Message)
+	}
+
+	f.clients.SetDown("a", false)
+	f.clients.Flap("a", true, false)
+	sf, err = f.resume("b", engine.Options{Fence: []string{"a"}})
+	if err != nil || sf.Status.State != failoverv1.RunSucceeded {
+		t.Fatalf("resume: %v %s %s", err, sf.Status.State, sf.Status.Message)
+	}
+	for _, id := range []string{"hold-a-cluster-pg-a", "fence-a"} {
+		if st := stepState(sf, id); st != failoverv1.StepSucceeded {
+			t.Errorf("%s is %s, want Succeeded", id, st)
+		}
+	}
+	if field(f.cluster("a"), "spec", "replica", "primary") != "pg-b" {
+		t.Error("site a was not fenced")
+	}
+	if msg := stepMessage(sf, "hold-a-cluster-pg-a"); !strings.Contains(msg, "the read before its deferred steps: site a answered on check 2 of 3") {
+		t.Errorf("hold-a-cluster-pg-a message %q", msg)
 	}
 }
 

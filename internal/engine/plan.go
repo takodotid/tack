@@ -54,7 +54,13 @@ type Inputs struct {
 	GitChanges []failoverv1.GitChange
 }
 
-// MakePlan reads the sites and Git, and composes the plan. It changes nothing.
+// ErrNoFrom is returned when the request names no from site and the to
+// site declares no other site primary.
+var ErrNoFrom = errors.New("pass --from")
+
+// MakePlan reads the sites and Git, and composes the plan. It changes
+// nothing. Without req.From, from is the site that to declares primary.
+// The plan and its search for runs share one set of checks per site.
 func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 	if err := checkRequest(req); err != nil {
 		return nil, err
@@ -62,13 +68,23 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 	if err := e.Driver.Validate(req.Spec); err != nil {
 		return nil, err
 	}
-	topo, err := e.Driver.Discover(ctx, req.Spec, e.Clients)
+	checks := e.SiteChecks(req.Mode, req.To)
+	topo, err := e.Driver.Discover(ctx, req.Spec, checks)
 	if err != nil {
 		return nil, err
 	}
 	to, _ := topo.Site(req.To)
 	if to == nil || !to.Reachable {
 		return nil, fmt.Errorf("site %q must be reachable to become primary", req.To)
+	}
+	if req.From == "" {
+		if to.DeclaredPrimary == "" || to.DeclaredPrimary == req.To {
+			return nil, fmt.Errorf("site %s declares %q primary; %w", req.To, to.DeclaredPrimary, ErrNoFrom)
+		}
+		req.From = to.DeclaredPrimary
+		if err := checkRequest(req); err != nil {
+			return nil, err
+		}
 	}
 	if req.Mode == failoverv1.ModePlanned {
 		if from, _ := topo.Site(req.From); from == nil || !from.Reachable {
@@ -78,7 +94,7 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 	in := Inputs{Request: req, Topology: topo, Owners: map[string]map[failoverv1.ObjectRef]failoverv1.ObjectKey{}}
 	var notes []string
 	if e.Runs != nil {
-		runs, err := e.Runs(ctx)
+		runs, err := e.Runs(ctx, checks)
 		if err != nil {
 			return nil, err
 		}
@@ -90,6 +106,9 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 		if !s.Reachable {
 			notes = append(notes, fmt.Sprintf("%s; the steps at site %s wait for it to come back", s.Error, s.Name))
 			continue
+		}
+		if note := checks.Note(s.Name); note != "" {
+			notes = append(notes, note)
 		}
 		owners := map[failoverv1.ObjectRef]failoverv1.ObjectKey{}
 		for _, obj := range s.Objects {
@@ -174,6 +193,8 @@ func checkRebuilt(req Request, to *driver.SiteState, runs []failoverv1.SiteFailo
 	return nil
 }
 
+// checkRequest checks the request. An empty From is checked once MakePlan
+// has filled it.
 func checkRequest(req Request) error {
 	if req.From == req.To {
 		return fmt.Errorf("from and to are the same site %q", req.To)
@@ -182,7 +203,11 @@ func checkRequest(req Request) error {
 	for _, s := range req.Spec.Sites {
 		names = append(names, s.Name)
 	}
-	for _, n := range []string{req.From, req.To} {
+	check := []string{req.From, req.To}
+	if req.From == "" {
+		check = check[1:]
+	}
+	for _, n := range check {
 		found := false
 		for _, s := range names {
 			found = found || s == n

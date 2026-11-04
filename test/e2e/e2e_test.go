@@ -375,6 +375,37 @@ func TestPlannedSwitchover(t *testing.T) {
 	}
 }
 
+// A short cut of the to site's API: the plan checks the site again and
+// succeeds. Pausing the site's node stands in for a network cut between
+// the operator's host and the site: its API does not answer for 10 s.
+func TestPlanDuringBlip(t *testing.T) {
+	docker(t, "pause", node("a"))
+	unpaused := make(chan struct{})
+	go func() {
+		time.Sleep(10 * time.Second)
+		exec.Command("docker", "unpause", node("a")).Run()
+		close(unpaused)
+	}()
+	t.Cleanup(func() { <-unpaused })
+
+	out, code := tack(t, nil, "plan", "-f", workload, "--to", "a")
+	<-unpaused
+	if code != 0 {
+		t.Fatalf("plan exit %d, want 0 after a retry", code)
+	}
+	for _, want := range []string{"retry     site a did not answer check 1 of 3", "\n  site a answered on check ", "Nothing was changed"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("plan lacks %q", want)
+		}
+	}
+	eventually(t, 3*time.Minute, "site a is healthy again", func() string {
+		if p := jsonpath(t, "a", "cluster", clusterName("a"), "{.status.phase}"); p != "Cluster in healthy state" {
+			return "phase " + p
+		}
+		return ""
+	})
+}
+
 func TestInterruptedRunResumes(t *testing.T) {
 	// The process dies right after promoting site a, before the ledger
 	// records it.

@@ -108,14 +108,14 @@ stateDiagram-v2
 
 ## Status
 
-The latest release is v1.1.1. The API is `failover.tako.id/v1`, for both the `SiteFailover` ledger and the Workload file. A change that would break a user comes as a new API version. `failover.tako.id/v1alpha1`, the API of v0.1.x, is deprecated and still served: see [Upgrading from v0.1.x](#upgrading-from-v01x).
+The latest release is v1.1.2. The API is `failover.tako.id/v1`, for both the `SiteFailover` ledger and the Workload file. A change that would break a user comes as a new API version. `failover.tako.id/v1alpha1`, the API of v0.1.x, is deprecated and still served: see [Upgrading from v0.1.x](#upgrading-from-v01x).
 
 ## Install
 
 Each release on the [releases page](https://github.com/takodotid/tack/releases) has an archive per platform, `SHA256SUMS`, the CRD, and a Helm chart of the CRD. Each archive holds `tack`, its man pages and the CRD. The chart is also published at `oci://ghcr.io/takodotid/charts/tack`.
 
 ```sh
-VERSION=v1.1.1
+VERSION=v1.1.2
 OS=linux      # or darwin
 ARCH=amd64    # or arm64
 NAME=tack-$VERSION-$OS-$ARCH
@@ -131,7 +131,7 @@ sudo cp $NAME/man/man1/*.1 /usr/local/share/man/man1/
 On Windows the archive is a `.zip` with `tack.exe`. Install it in PowerShell:
 
 ```powershell
-$VERSION = "v1.1.1"
+$VERSION = "v1.1.2"
 $NAME = "tack-$VERSION-windows-amd64"    # or arm64
 $URL = "https://github.com/takodotid/tack/releases/download/$VERSION"
 Invoke-WebRequest "$URL/$NAME.zip" -OutFile "$NAME.zip" -UseBasicParsing
@@ -275,6 +275,7 @@ make e2e
 | Scenario | What it checks |
 |---|---|
 | Planned switchover | the token moves, no write is lost, Git equals live, Flux changes nothing after release |
+| A blip during a plan | with one site's node paused for 10 s, the plan checks the site again, succeeds and notes the retry |
 | Interrupted run | a run killed mid-step resumes from its ledger |
 | Git changed during a run | the run stops; it goes on once the operator accepts the new head |
 | Site loss with Git down | Tack switches live and waits for Git (break-glass) |
