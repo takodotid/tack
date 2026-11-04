@@ -375,6 +375,48 @@ func TestPlannedSwitchover(t *testing.T) {
 	}
 }
 
+// A site whose check fails with a refused credential, or whose context is
+// missing from the kubeconfig, is not a lost site. A site-loss plan away
+// from the primary at b is refused, not accepted with b read as lost.
+// Issue #25.
+func TestSiteLossPlanRefusesSiteThatCannotBeChecked(t *testing.T) {
+	src, err := os.ReadFile(kubeconfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused := filepath.Join(work, "kubeconfig-refused-b")
+	if err := os.WriteFile(refused, src, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	user := "users." + context("b")
+	for _, args := range [][]string{
+		{"config", "unset", user + ".client-certificate-data"},
+		{"config", "unset", user + ".client-key-data"},
+		{"config", "set-credentials", context("b"), "--token=not-a-real-token"},
+	} {
+		if out, err := exec.Command("kubectl", append([]string{"--kubeconfig", refused}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("kubectl %v: %v\n%s", args, err, out)
+		}
+	}
+	w, err := os.ReadFile(workload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(work, "workload-missing-context.yaml")
+	if err := os.WriteFile(missing, []byte(strings.Replace(string(w), "kubeContext: "+context("b"), "kubeContext: tack-e2e-missing", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for name, args := range map[string][]string{
+		"refused credential": {"plan", "--kubeconfig", refused, "-f", workload, "--to", "a", "--from", "b", "--mode", "site-loss"},
+		"missing context":    {"plan", "-f", missing, "--to", "a", "--from", "b", "--mode", "site-loss"},
+	} {
+		out, code := tack(t, nil, args...)
+		if code != 1 || !strings.Contains(out, "site b") || strings.Contains(out, "Nothing was changed") {
+			t.Errorf("%s: plan exit %d, want 1 with an error naming site b", name, code)
+		}
+	}
+}
+
 // A short cut of the to site's API: the plan checks the site again and
 // succeeds. Pausing the site's node stands in for a network cut between
 // the operator's host and the site: its API does not answer for 10 s.

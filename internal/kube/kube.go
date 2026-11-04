@@ -4,10 +4,17 @@ package kube
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
 	"fmt"
+	"io"
+	"net"
 	"sync"
+	"syscall"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -19,6 +26,9 @@ import (
 
 // RequestTimeout bounds every request to a site, so a lost site fails fast.
 const RequestTimeout = 15 * time.Second
+
+// CheckTimeout bounds one check of a site's API.
+const CheckTimeout = 5 * time.Second
 
 // Scheme knows the core types and the ledger.
 var Scheme = func() *runtime.Scheme {
@@ -36,8 +46,84 @@ var Scheme = func() *runtime.Scheme {
 type Clients interface {
 	// Client returns the site's client.
 	Client(site string) (client.Client, error)
-	// Reachable returns nil when the site's API server answers.
+	// Reachable returns nil when the site's API server answers that it is
+	// ready. An error that IsUnreachable accepts means the site gave no
+	// answer; any other error means it answered, or could not be checked.
 	Reachable(ctx context.Context, site string) error
+}
+
+// UnreachableError is a check of a site's API that got no answer: no
+// connection, a reset, a DNS failure, or a timeout. Only such a check
+// counts toward a lost site ([RFC#0007] Requirement 5).
+type UnreachableError struct{ Err error }
+
+func (e *UnreachableError) Error() string { return e.Err.Error() }
+func (e *UnreachableError) Unwrap() error { return e.Err }
+
+// IsUnreachable reports whether err is a check of a site's API that got no
+// answer. A context missing from the kubeconfig, a credential the site
+// refuses, a certificate Tack does not trust, or any HTTP answer is not.
+func IsUnreachable(err error) bool {
+	var u *UnreachableError
+	return errors.As(err, &u)
+}
+
+// Retryable reports whether a failed check is worth repeating: it got no
+// answer, or the API server answered that it is not ready yet (5xx, 429).
+// A 5xx or 429 still never counts as no answer.
+func Retryable(err error) bool {
+	if IsUnreachable(err) {
+		return true
+	}
+	var st apierrors.APIStatus
+	if errors.As(err, &st) {
+		code := st.Status().Code
+		return code >= 500 || code == 429
+	}
+	return false
+}
+
+// noAnswer reports whether a failed request got no answer from the server.
+// An unknown error counts as an answer: only a known transport failure may
+// make a site count as lost.
+func noAnswer(err error) bool {
+	var (
+		st      apierrors.APIStatus
+		verify  *tls.CertificateVerificationError
+		unknown x509.UnknownAuthorityError
+		host    x509.HostnameError
+		invalid x509.CertificateInvalidError
+		record  tls.RecordHeaderError
+	)
+	switch {
+	case errors.As(err, &st):
+		// The server answered with an HTTP status.
+		return false
+	case errors.As(err, &verify), errors.As(err, &unknown), errors.As(err, &host),
+		errors.As(err, &invalid), errors.As(err, &record):
+		// The server answered with a certificate Tack does not trust, or
+		// not with TLS: the kubeconfig does not match the server.
+		return false
+	}
+	var op *net.OpError
+	if errors.As(err, &op) {
+		// "remote error" is a TLS alert the server sent, such as a refused
+		// client certificate.
+		return op.Op != "remote error"
+	}
+	var dns *net.DNSError
+	var ne net.Error
+	switch {
+	case errors.As(err, &dns):
+		return true
+	case errors.As(err, &ne) && ne.Timeout():
+		return true
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF),
+		errors.Is(err, syscall.ECONNREFUSED), errors.Is(err, syscall.ECONNRESET),
+		errors.Is(err, syscall.EHOSTUNREACH), errors.Is(err, syscall.ENETUNREACH):
+		return true
+	}
+	return false
 }
 
 // Kubeconfig builds clients from a kubeconfig file.
@@ -46,6 +132,9 @@ type Kubeconfig struct {
 	Path string
 	// Contexts maps each site to its context.
 	Contexts map[string]string
+
+	// CheckTimeout bounds one check of a site's API. Zero uses CheckTimeout.
+	CheckTimeout time.Duration
 
 	mu      sync.Mutex
 	clients map[string]client.Client
@@ -111,24 +200,32 @@ func (k *Kubeconfig) Client(site string) (client.Client, error) {
 	return c, nil
 }
 
-// Reachable implements Clients.
+// Reachable implements Clients. Only a check that gets no answer returns
+// an UnreachableError.
 func (k *Kubeconfig) Reachable(ctx context.Context, site string) error {
 	k.mu.Lock()
 	cfg, err := k.restConfig(site)
 	k.mu.Unlock()
 	if err != nil {
-		return err
+		return fmt.Errorf("%w; a site that cannot be checked is not counted as lost", err)
 	}
 	cfg = rest.CopyConfig(cfg)
-	cfg.Timeout = 5 * time.Second
+	cfg.Timeout = CheckTimeout
+	if k.CheckTimeout > 0 {
+		cfg.Timeout = k.CheckTimeout
+	}
 	rc, err := rest.UnversionedRESTClientFor(setDefaults(cfg))
 	if err != nil {
-		return err
+		return fmt.Errorf("site %q: %w; a site that cannot be checked is not counted as lost", site, err)
 	}
-	if err := rc.Get().AbsPath("/readyz").Do(ctx).Error(); err != nil {
-		return fmt.Errorf("site %q is unreachable: %w", site, err)
+	err = rc.Get().AbsPath("/readyz").Do(ctx).Error()
+	switch {
+	case err == nil:
+		return nil
+	case noAnswer(err):
+		return fmt.Errorf("site %q is unreachable: %w", site, &UnreachableError{Err: err})
 	}
-	return nil
+	return fmt.Errorf("site %q answered its check with an error, so it is not counted as lost: %w", site, err)
 }
 
 func setDefaults(cfg *rest.Config) *rest.Config {

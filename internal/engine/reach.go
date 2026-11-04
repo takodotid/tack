@@ -60,7 +60,10 @@ func (c *SiteChecks) Reachable(ctx context.Context, site string) error {
 
 // Check checks the site until it answers: up to len(Waits)+1 times, or once
 // when once is set. A site that failed a single check gets the rest of its
-// checks on a later call without once.
+// checks on a later call without once. Only a check that got no answer, or
+// an answer that the API server is not ready yet, is repeated; any other
+// error, such as a refused credential, is final. Only a site that gave no
+// answer to its last check is unreachable (kube.IsUnreachable).
 func (c *SiteChecks) Check(ctx context.Context, site string, once bool) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -81,11 +84,15 @@ func (c *SiteChecks) Check(ctx context.Context, site string, once bool) error {
 	if once {
 		limit = 1
 	}
-	for s.n == 0 || s.err != nil && s.n < limit {
+	for s.n == 0 || s.err != nil && s.n < limit && kube.Retryable(s.err) {
 		if s.n == 0 {
 			s.start = c.now()
 		} else {
-			c.printf("  retry     site %s did not answer check %d of %d (%v); next check in %s\n", site, s.n, checks, s.err, waits[s.n-1])
+			verb := "did not answer"
+			if !kube.IsUnreachable(s.err) {
+				verb = "answered not ready to"
+			}
+			c.printf("  retry     site %s %s check %d of %d (%v); next check in %s\n", site, verb, s.n, checks, s.err, waits[s.n-1])
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -102,8 +109,11 @@ func (c *SiteChecks) Check(ctx context.Context, site string, once bool) error {
 			return s.err
 		}
 	}
-	if s.err != nil && s.n > 1 {
+	switch {
+	case s.err != nil && s.n > 1 && kube.IsUnreachable(s.err):
 		return fmt.Errorf("no answer to %d checks over %s: %w", s.n, s.end.Sub(s.start).Round(time.Second), s.err)
+	case s.err != nil && s.n > 1:
+		return fmt.Errorf("%d checks over %s: %w", s.n, s.end.Sub(s.start).Round(time.Second), s.err)
 	}
 	return s.err
 }

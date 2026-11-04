@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -359,5 +360,22 @@ func TestPlanDeprecatedWorkload(t *testing.T) {
 	warning := "tack: warning: " + file + ": apiVersion failover.tako.id/v1alpha1 is deprecated; use failover.tako.id/v1\n"
 	if code != ExitOK || !strings.HasPrefix(out, warning) || !strings.Contains(out, "Nothing was changed.") {
 		t.Fatalf("exit %d, want %d with the warning and the plan:\n%s", code, ExitOK, out)
+	}
+}
+
+// A site whose check fails with a refused credential is not lost: the
+// search for runs fails instead of leaving its runs out. Issue #25.
+func TestSearchFailsOnRefusedCredential(t *testing.T) {
+	f := newFactory(map[string][]client.Object{
+		"a": testenv.Site("a", "b", 0),
+		"b": append(testenv.Site("b", "b", 2), siteLossRun("a", fixedNow.Add(-time.Hour))),
+	})
+	f.clients.Fail("b", apierrors.NewUnauthorized("Unauthorized"))
+	out, code := run(t, f, "status", "-f", "testdata/workload.yaml")
+	if code != ExitError || !strings.Contains(out, "site b: search for runs") {
+		t.Fatalf("exit %d, want %d naming site b:\n%s", code, ExitError, out)
+	}
+	if n := f.clients.Checks["b"]; n != 1 {
+		t.Errorf("site b checked %d times, want 1: a refused credential is not repeated", n)
 	}
 }

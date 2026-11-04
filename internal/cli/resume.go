@@ -84,12 +84,17 @@ func (l *ledgerFlags) find(ctx context.Context, o *options, name string, progres
 	return nil, usagef("pass --file or --context")
 }
 
-// findRuns lists a workload's runs at every site that answers c.
+// findRuns lists a workload's runs at every site that answers c. A site
+// that gives no answer is skipped; any other error of its check is
+// returned, so a refused credential never hides a site's runs.
 func findRuns(ctx context.Context, c kube.Clients, spec *failoverv1.WorkloadSpec, workload string) ([]foundRun, error) {
 	var out []foundRun
 	for _, s := range spec.Sites {
 		if err := c.Reachable(ctx, s.Name); err != nil {
-			continue
+			if kube.IsUnreachable(err) {
+				continue
+			}
+			return nil, fmt.Errorf("site %s: search for runs: %w", s.Name, err)
 		}
 		cl, err := c.Client(s.Name)
 		if err != nil {

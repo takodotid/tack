@@ -3,6 +3,7 @@ package testenv
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -43,12 +44,15 @@ type Clients struct {
 	Checks map[string]int
 	// answers holds, by site, the results of the next checks: false fails.
 	answers map[string][]bool
+	// errs holds, by site, an error every check returns, such as a refused
+	// credential.
+	errs map[string]error
 }
 
 // NewClients returns fake clients for the sites, seeded with objects.
 // Writes through Client are counted in Writes.
 func NewClients(objects map[string][]client.Object) *Clients {
-	c := &Clients{Sites: map[string]client.Client{}, Down: map[string]bool{}, Checks: map[string]int{}, answers: map[string][]bool{}}
+	c := &Clients{Sites: map[string]client.Client{}, Down: map[string]bool{}, Checks: map[string]int{}, answers: map[string][]bool{}, errs: map[string]error{}}
 	for site, objs := range objects {
 		c.Sites[site] = NewClient(objs...)
 	}
@@ -137,18 +141,30 @@ func (c *Clients) Flap(site string, answers ...bool) {
 	c.answers[site] = answers
 }
 
-// Reachable implements kube.Clients.
+// Fail makes every check of a site return err, as a site whose API
+// refuses the operator's credential answers. Nil clears it.
+func (c *Clients) Fail(site string, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.errs[site] = err
+}
+
+// Reachable implements kube.Clients. A site that is down or blips gives no
+// answer: its error is a kube.UnreachableError.
 func (c *Clients) Reachable(_ context.Context, site string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.Checks[site]++
+	if err := c.errs[site]; err != nil {
+		return err
+	}
 	if c.Down[site] {
-		return fmt.Errorf("site %s is unreachable: connection refused", site)
+		return fmt.Errorf("site %s is unreachable: %w", site, &kube.UnreachableError{Err: errors.New("connection refused")})
 	}
 	if a := c.answers[site]; len(a) > 0 {
 		c.answers[site] = a[1:]
 		if !a[0] {
-			return fmt.Errorf("site %s is unreachable: context deadline exceeded", site)
+			return fmt.Errorf("site %s is unreachable: %w", site, &kube.UnreachableError{Err: errors.New("context deadline exceeded")})
 		}
 	}
 	return nil

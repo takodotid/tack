@@ -13,6 +13,7 @@ import (
 	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/driver"
 	"github.com/takodotid/tack/internal/fault"
+	"github.com/takodotid/tack/internal/kube"
 	"github.com/takodotid/tack/internal/stop"
 )
 
@@ -99,6 +100,11 @@ func (r *runner) run(ctx context.Context) error {
 				if ctx.Err() != nil {
 					return r.end(ctx, step, ctx.Err())
 				}
+				if !kube.IsUnreachable(err) {
+					// The site answered, or could not be checked: it is not
+					// lost, and its step neither runs nor waits for it.
+					return r.stopBefore(ctx, step, stop.Ask(failoverv1.ReasonStepFailed, "site %s: %v", step.Site, err))
+				}
 				if !step.Deferrable {
 					return r.end(ctx, step, stop.Ask(failoverv1.ReasonStepFailed, "site %s is unreachable: %v", step.Site, err))
 				}
@@ -116,8 +122,9 @@ func (r *runner) run(ctx context.Context) error {
 					if !errors.Is(err, errUnread) {
 						return r.stopBefore(ctx, step, err)
 					}
-					// The site stays unreachable for this process.
-					r.reachable[step.Site] = err
+					// The site gave no answer to the read: it stays
+					// unreachable for this process.
+					r.reachable[step.Site] = &kube.UnreachableError{Err: err}
 					st.State, st.Message = failoverv1.StepDeferred, fmt.Sprintf("site %s unreachable: %v", step.Site, err)
 					if err := r.write(ctx, r.sf); err != nil {
 						return err
