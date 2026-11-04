@@ -102,6 +102,9 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 	}
 	in := Inputs{Request: req, Topology: topo, Owners: map[string]map[failoverv1.ObjectRef]failoverv1.ObjectKey{}}
 	var notes []string
+	if req.Mode == failoverv1.ModeSiteLoss {
+		notes = append(notes, fmt.Sprintf("site loss: Tack cannot tell a lost site from one cut off from this host. If site %s still runs, it stays primary until Flux there applies the run's commit or Tack fences it. Confirm the loss and fence it first: docs/runbooks/site-loss.md", req.From))
+	}
 	seen := map[string]bool{}
 	if e.Runs != nil {
 		runs, err := e.Runs(ctx, checks)

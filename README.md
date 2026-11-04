@@ -78,7 +78,7 @@ stateDiagram-v2
 | Mode | When | What happens |
 |---|---|---|
 | `--mode planned` (default) | Both sites answer. | The old primary demotes and hands its token to the new one. No write is lost. |
-| `--mode site-loss` | The old site is lost. | The new site promotes without a token. The old primary needs a rebuild before it can follow again: [runbook](docs/runbooks/rebuild-old-primary.md). |
+| `--mode site-loss` | The old site is lost. Confirm it first: [runbook](docs/runbooks/site-loss.md). | The new site promotes without a token. The old primary needs a rebuild before it can follow again: [runbook](docs/runbooks/rebuild-old-primary.md). |
 
 ## Safety
 
@@ -297,6 +297,7 @@ Everything the test creates is named `tack-e2e*`. [test/e2e/env/README.md](test/
 |---|---|
 | [docs/workload.md](docs/workload.md) | every field of the Workload file, with a complete example |
 | [docs/operations.md](docs/operations.md) | reading a run, stop reasons, break-glass, permissions |
+| [docs/runbooks/site-loss.md](docs/runbooks/site-loss.md) | confirming a site loss and fencing the old primary before a site-loss run |
 | [docs/runbooks/rebuild-old-primary.md](docs/runbooks/rebuild-old-primary.md) | rebuilding an old primary after a site loss |
 | [rfcs/](rfcs/) | the design, one subject per RFC |
 | `tack --help`, `tack <command> --help`, `man tack` | every command, flag and exit code |

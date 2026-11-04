@@ -537,6 +537,9 @@ func TestSiteLossBreakGlassAndReturn(t *testing.T) {
 	if code != exitWaiting || !strings.Contains(out, "GitUnreachable") {
 		t.Fatalf("exit %d, want %d waiting for Git", code, exitWaiting)
 	}
+	if !strings.Contains(out, "If site b still runs, it stays primary") || !strings.Contains(out, "docs/runbooks/site-loss.md") {
+		t.Error("the site-loss plan lacks the note on a site cut off from this host (issue #26)")
+	}
 	eventually(t, 3*time.Minute, "site a promoted during break-glass", func() string {
 		if ip := jsonpath(t, "a", "cluster", "pg-a", "{.status.instancesReportedState.*.isPrimary}"); !strings.Contains(ip, "true") {
 			return "isPrimary " + ip

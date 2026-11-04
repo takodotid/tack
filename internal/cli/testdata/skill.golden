@@ -152,7 +152,10 @@ SiteFailover ledger at the target site, and takes the steps in order.
 Modes:
   planned    the old primary demotes; its demotion token promotes the new one
   site-loss  the new site promotes without a token; the old primary then
-             needs a rebuild. Use it only when the old site is lost.
+             needs a rebuild. Use it only when the old site is lost:
+             Tack cannot tell a lost site from one cut off from this
+             host. Confirm the loss and fence the old primary first
+             (docs/runbooks/site-loss.md).
 
 If Git cannot be reached (break-glass), the run still holds and switches the
 live objects, then waits with exit code 4; "tack resume" finishes it once Git
