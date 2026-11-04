@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -38,6 +39,11 @@ type Plan struct {
 	Topology     *driver.Topology
 	// Notes are facts the operator should see before approving.
 	Notes []string
+
+	// checks are the plan's checks of each site; Recheck reuses them.
+	checks *SiteChecks
+	// runs are the names of the runs the plan found.
+	runs map[string]bool
 }
 
 // Inputs is everything Compose needs. Reading the clusters and Git fills it.
@@ -96,10 +102,14 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 	}
 	in := Inputs{Request: req, Topology: topo, Owners: map[string]map[failoverv1.ObjectRef]failoverv1.ObjectKey{}}
 	var notes []string
+	seen := map[string]bool{}
 	if e.Runs != nil {
 		runs, err := e.Runs(ctx, checks)
 		if err != nil {
 			return nil, err
+		}
+		for _, r := range runs {
+			seen[r.Name] = true
 		}
 		if err := checkRebuilt(req, to, runs, &notes); err != nil {
 			return nil, err
@@ -169,7 +179,104 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Plan{SiteFailover: sf, Topology: topo, Notes: notes}, nil
+	return &Plan{SiteFailover: sf, Topology: topo, Notes: notes, checks: checks, runs: seen}, nil
+}
+
+// ErrStalePlan is returned by Recheck when the sites changed since the
+// plan was made.
+var ErrStalePlan = errors.New("the plan is stale")
+
+// Recheck reads the sites again once the operator confirmed a plan, and
+// refuses it when they changed since it was made: a confirmation can take
+// any time, and another run may have switched the workload meanwhile
+// ([RFC#0009] Requirement 13). It reuses the plan's checks, so a site that
+// did not answer the plan is not checked again, and changes nothing.
+func (e *Env) Recheck(ctx context.Context, p *Plan) error {
+	sf := p.SiteFailover
+	spec := &sf.Spec.Workload.Spec
+	stale := func(format string, a ...any) error {
+		return fmt.Errorf("%w: %s. Nothing was changed; plan again", ErrStalePlan, fmt.Sprintf(format, a...))
+	}
+	checks := p.checks
+	if checks == nil {
+		checks = e.SiteChecks(sf.Spec.Mode, sf.Spec.To)
+	}
+	topo, err := e.Driver.Discover(ctx, spec, checks)
+	if err != nil {
+		return stale("the sites could not be read again: %v", err)
+	}
+	for _, was := range p.Topology.Sites {
+		now, ok := topo.Site(was.Name)
+		if !ok {
+			return stale("site %s is no longer in the topology", was.Name)
+		}
+		if diff := siteChanges(was, *now); diff != "" {
+			return stale("site %s changed since the plan: %s", was.Name, diff)
+		}
+	}
+	if _, _, err := e.Driver.Plan(spec, topo, driver.Request{From: sf.Spec.From, To: sf.Spec.To, Mode: sf.Spec.Mode}); err != nil {
+		return stale("the plan is no longer allowed: %v", err)
+	}
+	for _, f := range sf.Spec.Fingerprints {
+		uid, err := e.fingerprint(ctx, f.Site)
+		if err != nil {
+			return stale("site %s could not be read again: %v", f.Site, err)
+		}
+		if uid != f.KubeSystemUID {
+			return stale("site %s now reaches another cluster: kube-system UID %s, the plan read %s", f.Site, uid, f.KubeSystemUID)
+		}
+	}
+	if e.Runs != nil {
+		runs, err := e.Runs(ctx, checks)
+		if err != nil {
+			return stale("the workload's runs could not be read again: %v", err)
+		}
+		for _, r := range runs {
+			if !p.runs[r.Name] {
+				return stale("run %s of the workload started after the plan was made", r.Name)
+			}
+		}
+	}
+	return nil
+}
+
+// siteChanges lists what differs between two reads of a site, among what
+// the driver's checks use; the summary is left out.
+func siteChanges(was, now driver.SiteState) string {
+	var out []string
+	add := func(what string, a, b any) {
+		if !reflect.DeepEqual(a, b) {
+			out = append(out, fmt.Sprintf("%s was %v, is %v", what, a, b))
+		}
+	}
+	add("reachable", was.Reachable, now.Reachable)
+	add("role", was.Role, now.Role)
+	add("declared primary", orNone(was.DeclaredPrimary), orNone(now.DeclaredPrimary))
+	add("healthy", was.Healthy, now.Healthy)
+	add("created", was.Created.UTC(), now.Created.UTC())
+	keys := map[string]bool{}
+	for k := range was.Facts {
+		keys[k] = true
+	}
+	for k := range now.Facts {
+		keys[k] = true
+	}
+	var names []string
+	for k := range keys {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	for _, k := range names {
+		add(k, fmt.Sprintf("%q", was.Facts[k]), fmt.Sprintf("%q", now.Facts[k]))
+	}
+	return strings.Join(out, ", ")
+}
+
+func orNone(s string) string {
+	if s == "" {
+		return "none"
+	}
+	return s
 }
 
 // FollowUpRebuild is the follow-up that asks the operator to recreate a

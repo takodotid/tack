@@ -184,6 +184,9 @@ func newRun(o *options) *cobra.Command {
 			if err := o.confirm(out, yes, plan.SiteFailover.Spec.Workload.Name); err != nil {
 				return err
 			}
+			if err := env.Recheck(cmd.Context(), plan); err != nil {
+				return err
+			}
 			old, err := checkNoActiveRun(cmd.Context(), env, plan.SiteFailover, takeOver)
 			if err != nil {
 				return err

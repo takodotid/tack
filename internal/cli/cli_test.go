@@ -15,6 +15,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
@@ -473,5 +474,116 @@ func TestRunNeverStarted(t *testing.T) {
 	}
 	if len(f.flux.Calls) > 0 {
 		t.Errorf("something changed: %v", f.flux.Calls)
+	}
+}
+
+// confirmAfter types the confirmation once f has run, as an operator does
+// after a while.
+type confirmAfter struct {
+	f    func()
+	line io.Reader
+}
+
+func (c *confirmAfter) Read(p []byte) (int, error) {
+	if c.f != nil {
+		c.f()
+		c.f = nil
+	}
+	return c.line.Read(p)
+}
+
+// typeAfter makes the next confirmation read "pg-main" after f ran.
+func typeAfter(t *testing.T, f func()) {
+	t.Helper()
+	isTerminal = func() bool { return true }
+	stdin = &confirmAfter{f: f, line: strings.NewReader("pg-main\n")}
+	t.Cleanup(func() { isTerminal, stdin = stdinIsTerminal, os.Stdin })
+}
+
+func mergePatch(t *testing.T, c client.Client, kind, name, patch string) {
+	t.Helper()
+	u := testenv.Object("postgresql.cnpg.io/v1", kind, "db", name, nil)
+	if err := c.Patch(context.Background(), u, client.RawPatch(types.MergePatchType, []byte(patch))); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Issue #30. While the operator confirms a planned switchover from a to b,
+// another run makes the same switch and succeeds. The confirmed plan must
+// not run: it would capture a's leftover demotion token and write a used
+// token back to b.
+func TestRunRefusesPlanThatWentStale(t *testing.T) {
+	f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": testenv.Site("b", "a", 0)})
+	// A run that starts stops at its first hold, which Flux records.
+	f.flux.Fail["Hold"] = errors.New("stop at the first hold")
+	typeAfter(t, func() {
+		mergePatch(t, f.clients.Sites["a"], "Cluster", "pg-a",
+			`{"spec":{"replica":{"primary":"pg-b"}},"status":{"demotionToken":"token-used","instancesReportedState":{"pg-a-1":{"isPrimary":false}}}}`)
+		mergePatch(t, f.clients.Sites["b"], "Cluster", "pg-b",
+			`{"spec":{"replica":{"primary":"pg-b"}},"status":{"lastPromotionToken":"token-used","instancesReportedState":{"pg-b-1":{"isPrimary":true}}}}`)
+		done := siteLossRun("a", fixedNow)
+		done.Name, done.Spec.Mode, done.Status.FollowUps = "pg-main-other", failoverv1.ModePlanned, nil
+		if err := f.clients.Sites["b"].Create(context.Background(), done); err != nil {
+			t.Fatal(err)
+		}
+	})
+	out, code := run(t, f, "run", "-f", "testdata/workload.yaml", "--to", "b")
+	if code == ExitOK || len(f.flux.Calls) > 0 {
+		t.Fatalf("the stale plan ran: exit %d, Flux %v\n%s", code, f.flux.Calls, out)
+	}
+	var l failoverv1.SiteFailoverList
+	if err := f.clients.Sites["b"].List(context.Background(), &l); err != nil || len(l.Items) != 1 {
+		t.Errorf("%d ledgers at site b, want only the other run's: %v", len(l.Items), err)
+	}
+}
+
+// A run of the workload that started after the plan, at a site the plan
+// searched, refuses the plan even when the sites look the same.
+func TestRunRefusesPlanAfterAnotherRun(t *testing.T) {
+	f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": testenv.Site("b", "a", 0)})
+	f.flux.Fail["Hold"] = errors.New("stop at the first hold")
+	typeAfter(t, func() {
+		other := siteLossRun("a", fixedNow)
+		other.Name, other.Spec.Mode, other.Status.FollowUps = "pg-main-other", failoverv1.ModePlanned, nil
+		if err := f.clients.Sites["a"].Create(context.Background(), other); err != nil {
+			t.Fatal(err)
+		}
+	})
+	out, code := run(t, f, "run", "-f", "testdata/workload.yaml", "--to", "b")
+	if code != ExitError || !strings.Contains(out, "run pg-main-other of the workload started after the plan was made") {
+		t.Fatalf("exit %d, want %d with a refusal:\n%s", code, ExitError, out)
+	}
+	if len(f.flux.Calls) > 0 {
+		t.Errorf("the plan ran: %v", f.flux.Calls)
+	}
+}
+
+// A site that was lost at plan time answers again while the operator
+// confirms, with older ledgers. The plan did not search it, so they do not
+// make it stale.
+func TestRunLostSiteBackAtConfirmation(t *testing.T) {
+	older := siteLossRun("b", fixedNow.Add(-24*time.Hour))
+	older.Name, older.Spec.To = "pg-main-older", "a"
+	f := newFactory(map[string][]client.Object{
+		"a": append(testenv.Site("a", "b", 0), older),
+		"b": testenv.Site("b", "b", 2),
+	}, "b")
+	f.flux.Fail["Hold"] = errors.New("stop at the first hold")
+	typeAfter(t, func() { f.clients.SetDown("b", false) })
+	out, code := run(t, f, "run", "-f", "testdata/workload.yaml", "--to", "a", "--mode", "site-loss")
+	if code != ExitStopped || !strings.Contains(out, "stop at the first hold") {
+		t.Fatalf("exit %d, want %d at the first hold:\n%s", code, ExitStopped, out)
+	}
+}
+
+// A context that reaches another cluster after the plan refuses it, even
+// when that cluster holds the same objects.
+func TestRunRefusesPlanOnAnotherCluster(t *testing.T) {
+	f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": testenv.Site("b", "a", 0)})
+	other := testenv.NewClients(map[string][]client.Object{"x": testenv.Site("a", "a", 2)})
+	typeAfter(t, func() { f.clients.SetSite("a", other.Sites["x"]) })
+	out, code := run(t, f, "run", "-f", "testdata/workload.yaml", "--to", "b")
+	if code != ExitError || !strings.Contains(out, "site a now reaches another cluster: kube-system UID uid-x, the plan read uid-a") {
+		t.Fatalf("exit %d, want %d with a refusal:\n%s", code, ExitError, out)
 	}
 }
