@@ -12,6 +12,7 @@ import (
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/driver"
+	"github.com/takodotid/tack/internal/kube"
 )
 
 // LabelWorkload carries the workload's name on its SiteFailover objects.
@@ -52,6 +53,8 @@ type Inputs struct {
 	FollowUps []failoverv1.FollowUp
 	// GitChanges are the resolved Git changes.
 	GitChanges []failoverv1.GitChange
+	// Fingerprints identify the cluster of each site that answered.
+	Fingerprints []failoverv1.SiteFingerprint
 }
 
 // ErrNoFrom is returned when the request names no from site and the to
@@ -110,6 +113,11 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 		if note := checks.Note(s.Name); note != "" {
 			notes = append(notes, note)
 		}
+		fp, err := e.fingerprint(ctx, s.Name)
+		if err != nil {
+			return nil, fmt.Errorf("site %s: %w", s.Name, err)
+		}
+		in.Fingerprints = append(in.Fingerprints, failoverv1.SiteFingerprint{Site: s.Name, KubeSystemUID: fp})
 		owners := map[failoverv1.ObjectRef]failoverv1.ObjectKey{}
 		for _, obj := range s.Objects {
 			o, err := e.Flux.Owner(ctx, s.Name, obj)
@@ -279,7 +287,7 @@ func Compose(in Inputs) (*failoverv1.SiteFailover, error) {
 	}
 	add(failoverv1.Step{
 		ID: "git-commit", Phase: failoverv1.PhasePromoteToGitOps, Type: failoverv1.StepGit,
-		Description: fmt.Sprintf("commit the live state to %s branch %s", redact(spec.Git.URL), spec.Git.Branch),
+		Description: fmt.Sprintf("commit the live state to %s branch %s", Redact(spec.Git.URL), spec.Git.Branch),
 		Git: &failoverv1.GitStep{
 			Changes: in.GitChanges,
 			Message: fmt.Sprintf("tack: %s primary %s to %s (%s)\n\nRun %s, mode %s.", in.Workload, in.From, in.To, strings.ToLower(string(in.Mode)), in.Run, in.Mode),
@@ -370,11 +378,12 @@ func Compose(in Inputs) (*failoverv1.SiteFailover, error) {
 			Labels:    map[string]string{LabelWorkload: in.Workload},
 		},
 		Spec: failoverv1.SiteFailoverSpec{
-			Workload: failoverv1.WorkloadSnapshot{Name: in.Workload, Spec: *spec.DeepCopy()},
-			Mode:     in.Mode,
-			From:     in.From,
-			To:       in.To,
-			Steps:    steps,
+			Workload:     failoverv1.WorkloadSnapshot{Name: in.Workload, Spec: *spec.DeepCopy()},
+			Mode:         in.Mode,
+			From:         in.From,
+			To:           in.To,
+			Steps:        steps,
+			Fingerprints: in.Fingerprints,
 		},
 		Status: failoverv1.SiteFailoverStatus{FollowUps: in.FollowUps},
 	}
@@ -383,8 +392,31 @@ func Compose(in Inputs) (*failoverv1.SiteFailover, error) {
 
 var userinfo = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/\s]+@`)
 
-// redact hides the user and password of a URL.
-func redact(s string) string { return userinfo.ReplaceAllString(s, "${1}***@") }
+// Redact hides the user and password of every URL in s.
+func Redact(s string) string { return userinfo.ReplaceAllString(s, "${1}***@") }
+
+// fingerprint reads the fingerprint of a site's cluster.
+func (e *Env) fingerprint(ctx context.Context, site string) (string, error) {
+	c, err := e.Clients.Client(site)
+	if err != nil {
+		return "", err
+	}
+	return kube.Fingerprint(ctx, c)
+}
+
+// Fingerprint returns the fingerprint the run recorded for a site: in its
+// spec when the site answered the plan, else in its status once a process
+// read it. ok is false when neither has it.
+func Fingerprint(sf *failoverv1.SiteFailover, site string) (uid string, ok bool) {
+	for _, list := range [][]failoverv1.SiteFingerprint{sf.Spec.Fingerprints, sf.Status.Fingerprints} {
+		for _, f := range list {
+			if f.Site == site {
+				return f.KubeSystemUID, true
+			}
+		}
+	}
+	return "", false
+}
 
 func stepID(verb, site string, obj failoverv1.ObjectRef) string {
 	return strings.ToLower(fmt.Sprintf("%s-%s-%s-%s", verb, site, obj.Kind, obj.Name))

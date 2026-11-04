@@ -121,7 +121,7 @@ func (e *Env) resume(ctx context.Context, sf *failoverv1.SiteFailover, opts Opti
 		return err
 	}
 	r := &runner{Env: e, sf: sf, opts: opts, checks: e.SiteChecks(sf.Spec.Mode, sf.Spec.To),
-		reachable: map[string]error{}, retried: map[string]string{}, gated: map[string]bool{}}
+		reachable: map[string]error{}, retried: map[string]string{}, gated: map[string]bool{}, identified: map[string]bool{}}
 	return r.run(ctx)
 }
 
@@ -134,8 +134,9 @@ type runner struct {
 	reachable map[string]error
 	// retried notes, per site, a check that failed before the site
 	// answered. The site's next step records it in its message.
-	retried map[string]string
-	gated   map[string]bool
+	retried    map[string]string
+	gated      map[string]bool
+	identified map[string]bool
 }
 
 func (r *runner) run(ctx context.Context) error {
@@ -166,6 +167,9 @@ func (r *runner) run(ctx context.Context) error {
 					r.printf("  deferred  %s (site %s unreachable)\n", step.ID, step.Site)
 				}
 				continue
+			}
+			if err := r.identify(ctx, step.Site); err != nil {
+				return r.stopBefore(ctx, step, err)
 			}
 			if step.Deferrable {
 				if err := r.gate(ctx, step.Site); err != nil {
@@ -230,6 +234,36 @@ func (r *runner) gate(ctx context.Context, site string) error {
 			"site %s answers as primary (%s); it should be fenced. Check it, then resume with --fence %s", site, s.Summary, site)
 	}
 	r.gated[site] = true
+	return nil
+}
+
+// identify checks, once per process, that the site's context reaches the
+// cluster the run recorded for the site. A site the run has no record of,
+// such as one lost at plan time, is recorded on its first read.
+func (r *runner) identify(ctx context.Context, site string) error {
+	if r.identified[site] {
+		return nil
+	}
+	live, err := r.fingerprint(ctx, site)
+	if err != nil {
+		return fmt.Errorf("site %s: %w", site, err)
+	}
+	want, ok := Fingerprint(r.sf, site)
+	switch {
+	case !ok:
+		r.sf.Status.Fingerprints = append(r.sf.Status.Fingerprints, failoverv1.SiteFingerprint{Site: site, KubeSystemUID: live})
+	case want != live:
+		context := ""
+		for _, s := range r.sf.Spec.Workload.Spec.Sites {
+			if s.Name == site {
+				context = s.KubeContext
+			}
+		}
+		return stop.Ask(failoverv1.ReasonSiteMismatch,
+			"context %q of site %s reaches another cluster than the run recorded: its kube-system namespace has UID %s, the ledger has %s. Point the context at the site's cluster, then resume. If the site's cluster was rebuilt, start a new run with --take-over %s",
+			context, site, live, want, r.sf.Name)
+	}
+	r.identified[site] = true
 	return nil
 }
 

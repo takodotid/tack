@@ -78,10 +78,26 @@ type SiteFailoverSpec struct {
 	// +kubebuilder:validation:MinItems=1
 	Steps []Step `json:"steps"`
 
+	// Fingerprints identify the cluster of each site that answered the
+	// plan. Every process checks a site against it before its first step
+	// there.
+	// +optional
+	// +listType=map
+	// +listMapKey=site
+	Fingerprints []SiteFingerprint `json:"fingerprints,omitempty"`
+
 	// TakeOver is the earlier run whose holds this run takes over, as the
 	// operator named it with --take-over. That run can no longer resume.
 	// +optional
 	TakeOver string `json:"takeOver,omitempty"`
+}
+
+// SiteFingerprint identifies the Kubernetes cluster of a site.
+type SiteFingerprint struct {
+	// Site is the site's name.
+	Site string `json:"site"`
+	// KubeSystemUID is the UID of the cluster's kube-system namespace.
+	KubeSystemUID string `json:"kubeSystemUID"`
 }
 
 // WorkloadSnapshot is a copy of a Workload.
@@ -346,6 +362,7 @@ const (
 	ReasonFencedSiteIsPrimary = "FencedSiteIsPrimary"
 	ReasonHeldByAnotherRun    = "HeldByAnotherRun"
 	ReasonFluxChanged         = "FluxChanged"
+	ReasonSiteMismatch        = "SiteMismatch"
 	ReasonStepFailed          = "StepFailed"
 )
 
@@ -416,6 +433,13 @@ type SiteFailoverStatus struct {
 	// FinishedAt is when the run succeeded.
 	// +optional
 	FinishedAt *metav1.Time `json:"finishedAt,omitempty"`
+
+	// Fingerprints identify the cluster of each site that did not answer
+	// the plan, as first read during the run.
+	// +optional
+	// +listType=map
+	// +listMapKey=site
+	Fingerprints []SiteFingerprint `json:"fingerprints,omitempty"`
 
 	// SupersededBy is the later run that took this run over. That run
 	// writes it when this ledger answers; its spec.takeOver is the record.

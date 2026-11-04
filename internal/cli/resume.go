@@ -204,6 +204,8 @@ func newResume(o *options) *cobra.Command {
 				return err
 			}
 			printStatus(out, sf)
+			fmt.Fprintln(out)
+			printClusters(out, sf, env.Clients)
 			if err := o.confirm(out, yes, sf.Spec.Workload.Name); err != nil {
 				return err
 			}

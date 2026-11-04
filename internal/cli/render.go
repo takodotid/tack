@@ -9,6 +9,7 @@ import (
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/engine"
+	"github.com/takodotid/tack/internal/kube"
 )
 
 // The annotations of a hold, as the plan prints them.
@@ -17,8 +18,9 @@ const (
 	annHeldBy    = "failover.tako.id/held-by"
 )
 
-// printPlan writes the dry run: every step and every change, in order.
-func printPlan(w io.Writer, p *engine.Plan) {
+// printPlan writes the dry run: every step and every change, in order. c
+// gives the API server of each site's context.
+func printPlan(w io.Writer, p *engine.Plan, c kube.Clients) {
 	sf := p.SiteFailover
 	fmt.Fprintf(w, "Plan for workload %s: %s, site %s to site %s\n", sf.Spec.Workload.Name, sf.Spec.Mode, sf.Spec.From, sf.Spec.To)
 	fmt.Fprintf(w, "Ledger: SiteFailover %s/%s at site %s\n\n", sf.Namespace, sf.Name, sf.Spec.To)
@@ -38,6 +40,8 @@ func printPlan(w io.Writer, p *engine.Plan) {
 	}
 	tw.Flush()
 	fmt.Fprintln(w)
+	printClusters(w, sf, c)
+	fmt.Fprintln(w)
 
 	printSteps(w, sf, false)
 
@@ -53,6 +57,37 @@ func printPlan(w io.Writer, p *engine.Plan) {
 			fmt.Fprintf(w, "  %s\n", n)
 		}
 	}
+}
+
+// serverer is a kube.Clients that knows each context's API server.
+type serverer interface {
+	Server(site string) (string, error)
+}
+
+// printClusters writes what a run acts on: per site, its context, the API
+// server the context points at in this kubeconfig, and the cluster the run
+// recorded; then the Git repository, without credentials.
+func printClusters(w io.Writer, sf *failoverv1.SiteFailover, c kube.Clients) {
+	fmt.Fprintln(w, "Clusters:")
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	spec := &sf.Spec.Workload.Spec
+	for _, s := range spec.Sites {
+		server := "unknown"
+		if sv, ok := c.(serverer); ok {
+			if u, err := sv.Server(s.Name); err != nil {
+				server = "unknown (" + err.Error() + ")"
+			} else {
+				server = u
+			}
+		}
+		fp, ok := engine.Fingerprint(sf, s.Name)
+		if !ok {
+			fp = "not read yet"
+		}
+		fmt.Fprintf(tw, "  site %s\tcontext %s\tserver %s\tkube-system UID %s\n", s.Name, s.KubeContext, engine.Redact(server), fp)
+	}
+	tw.Flush()
+	fmt.Fprintf(w, "Git: %s, branch %s\n", engine.Redact(spec.Git.URL), spec.Git.Branch)
 }
 
 // printSteps writes the steps by phase, with their state when withState.

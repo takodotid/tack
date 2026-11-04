@@ -8,9 +8,12 @@ import (
 	"sync"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -49,14 +52,35 @@ type Clients struct {
 	errs map[string]error
 }
 
-// NewClients returns fake clients for the sites, seeded with objects.
-// Writes through Client are counted in Writes.
+// NewClients returns fake clients for the sites, seeded with objects. Each
+// site's cluster has a kube-system namespace with UID uid-<site>, unless
+// objects hold one. Writes through Client are counted in Writes.
 func NewClients(objects map[string][]client.Object) *Clients {
 	c := &Clients{Sites: map[string]client.Client{}, Down: map[string]bool{}, Checks: map[string]int{}, answers: map[string][]bool{}, errs: map[string]error{}}
 	for site, objs := range objects {
+		has := false
+		for _, o := range objs {
+			has = has || o.GetName() == metav1.NamespaceSystem && o.GetNamespace() == "" && o.GetObjectKind().GroupVersionKind().Kind == "Namespace"
+		}
+		if !has {
+			objs = append(objs, KubeSystem("uid-"+site))
+		}
 		c.Sites[site] = NewClient(objs...)
 	}
 	return c
+}
+
+// KubeSystem returns a kube-system namespace with uid, which fingerprints
+// a cluster.
+func KubeSystem(uid string) *corev1.Namespace {
+	ns := &corev1.Namespace{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Namespace"}}
+	ns.Name, ns.UID = metav1.NamespaceSystem, types.UID(uid)
+	return ns
+}
+
+// Server implements the optional Server of kube.Clients.
+func (c *Clients) Server(site string) (string, error) {
+	return "https://" + site + ".example.invalid:6443", nil
 }
 
 func (c *Clients) counted(cl client.Client) client.Client {
@@ -91,12 +115,20 @@ func NewClient(objs ...client.Object) client.Client {
 	for _, gvk := range GVKs {
 		mapper.Add(gvk, meta.RESTScopeNamespace)
 	}
+	mapper.Add(corev1.SchemeGroupVersion.WithKind("Namespace"), meta.RESTScopeRoot)
 	return fake.NewClientBuilder().
 		WithScheme(kube.Scheme).
 		WithRESTMapper(mapper).
 		WithObjects(objs...).
 		WithStatusSubresource(&failoverv1.SiteFailover{}).
 		Build()
+}
+
+// SetSite makes a site's client c, such as one for another cluster.
+func (c *Clients) SetSite(site string, cl client.Client) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.Sites[site] = cl
 }
 
 // SetDown marks a site unreachable or back.

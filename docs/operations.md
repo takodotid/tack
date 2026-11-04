@@ -88,6 +88,7 @@ Tack acts with the operator's credentials for each site's kube context. Per site
 | For | Listed in |
 |---|---|
 | The ledger: `SiteFailover` objects in the ledger namespace | [RFC#0003](../rfcs/RFC0003.md#security-considerations), Security Considerations |
+| Identifying the site's cluster: `get` on the namespace `kube-system` | [RFC#0003](../rfcs/RFC0003.md#security-considerations), Security Considerations |
 | Holding and releasing objects, Flux reconciles, rendering and diffing Git | [RFC#0005](../rfcs/RFC0005.md#security-considerations), Security Considerations |
 | The Pooler waits: `get` on the `apps/v1` Deployment named after each Pooler | [RFC#0004](../rfcs/RFC0004.md#requirements), Requirement 6 |
 | The routing check: `get` on Strait's `SiteService` | [RFC#0008](../rfcs/RFC0008.md#requirements), Requirement 1 |

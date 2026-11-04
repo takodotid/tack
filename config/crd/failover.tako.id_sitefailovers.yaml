@@ -66,6 +66,30 @@ spec:
               SiteFailoverSpec is the run's request and its plan. It never changes
               after the run starts.
             properties:
+              fingerprints:
+                description: |-
+                  Fingerprints identify the cluster of each site that answered the
+                  plan. Every process checks a site against it before its first step
+                  there.
+                items:
+                  description: SiteFingerprint identifies the Kubernetes cluster of
+                    a site.
+                  properties:
+                    kubeSystemUID:
+                      description: KubeSystemUID is the UID of the cluster's kube-system
+                        namespace.
+                      type: string
+                    site:
+                      description: Site is the site's name.
+                      type: string
+                  required:
+                  - kubeSystemUID
+                  - site
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - site
+                x-kubernetes-list-type: map
               from:
                 description: From is the site of the current primary.
                 type: string
@@ -850,6 +874,29 @@ spec:
                 description: Captured holds the values captured for later steps, such
                   as tokens.
                 type: object
+              fingerprints:
+                description: |-
+                  Fingerprints identify the cluster of each site that did not answer
+                  the plan, as first read during the run.
+                items:
+                  description: SiteFingerprint identifies the Kubernetes cluster of
+                    a site.
+                  properties:
+                    kubeSystemUID:
+                      description: KubeSystemUID is the UID of the cluster's kube-system
+                        namespace.
+                      type: string
+                    site:
+                      description: Site is the site's name.
+                      type: string
+                  required:
+                  - kubeSystemUID
+                  - site
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - site
+                x-kubernetes-list-type: map
               finishedAt:
                 description: FinishedAt is when the run succeeded.
                 format: date-time
@@ -1098,6 +1145,30 @@ spec:
               SiteFailoverSpec is the run's request and its plan. It never changes
               after the run starts.
             properties:
+              fingerprints:
+                description: |-
+                  Fingerprints identify the cluster of each site that answered the
+                  plan. Every process checks a site against it before its first step
+                  there.
+                items:
+                  description: SiteFingerprint identifies the Kubernetes cluster of
+                    a site.
+                  properties:
+                    kubeSystemUID:
+                      description: KubeSystemUID is the UID of the cluster's kube-system
+                        namespace.
+                      type: string
+                    site:
+                      description: Site is the site's name.
+                      type: string
+                  required:
+                  - kubeSystemUID
+                  - site
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - site
+                x-kubernetes-list-type: map
               from:
                 description: From is the site of the current primary.
                 type: string
@@ -1882,6 +1953,29 @@ spec:
                 description: Captured holds the values captured for later steps, such
                   as tokens.
                 type: object
+              fingerprints:
+                description: |-
+                  Fingerprints identify the cluster of each site that did not answer
+                  the plan, as first read during the run.
+                items:
+                  description: SiteFingerprint identifies the Kubernetes cluster of
+                    a site.
+                  properties:
+                    kubeSystemUID:
+                      description: KubeSystemUID is the UID of the cluster's kube-system
+                        namespace.
+                      type: string
+                    site:
+                      description: Site is the site's name.
+                      type: string
+                  required:
+                  - kubeSystemUID
+                  - site
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - site
+                x-kubernetes-list-type: map
               finishedAt:
                 description: FinishedAt is when the run succeeded.
                 format: date-time

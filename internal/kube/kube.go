@@ -14,7 +14,9 @@ import (
 	"syscall"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -226,6 +228,31 @@ func (k *Kubeconfig) Reachable(ctx context.Context, site string) error {
 		return fmt.Errorf("site %q is unreachable: %w", site, &UnreachableError{Err: err})
 	}
 	return fmt.Errorf("site %q answered its check with an error, so it is not counted as lost: %w", site, err)
+}
+
+// Server implements the optional Server of Clients: the API server URL of
+// the site's context.
+func (k *Kubeconfig) Server(site string) (string, error) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	cfg, err := k.restConfig(site)
+	if err != nil {
+		return "", err
+	}
+	return cfg.Host, nil
+}
+
+// Fingerprint returns the UID of the cluster's kube-system namespace. It
+// tells one cluster from another whatever the kubeconfig calls them.
+func Fingerprint(ctx context.Context, c client.Client) (string, error) {
+	ns := &corev1.Namespace{}
+	if err := c.Get(ctx, client.ObjectKey{Name: metav1.NamespaceSystem}, ns); err != nil {
+		return "", fmt.Errorf("read namespace %s, which identifies the site's cluster: %w", metav1.NamespaceSystem, err)
+	}
+	if ns.UID == "" {
+		return "", fmt.Errorf("namespace %s has no UID", metav1.NamespaceSystem)
+	}
+	return string(ns.UID), nil
 }
 
 func setDefaults(cfg *rest.Config) *rest.Config {

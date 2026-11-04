@@ -90,7 +90,7 @@ func newPlan(o *options) *cobra.Command {
 			if p.output != "text" && p.output != "yaml" {
 				return usagef("--output must be text or yaml")
 			}
-			plan, _, cleanup, err := o.makePlan(cmd.Context(), &p, cmd.ErrOrStderr())
+			plan, env, cleanup, err := o.makePlan(cmd.Context(), &p, cmd.ErrOrStderr())
 			if cleanup != nil {
 				defer cleanup()
 			}
@@ -106,7 +106,7 @@ func newPlan(o *options) *cobra.Command {
 				_, err = out.Write(b)
 				return err
 			}
-			printPlan(out, plan)
+			printPlan(out, plan, env.Clients)
 			fmt.Fprintf(out, "\nNothing was changed. To run this plan: tack run -f %s --to %s --from %s --mode %s\n",
 				p.file, plan.SiteFailover.Spec.To, plan.SiteFailover.Spec.From, p.mode)
 			return nil
@@ -180,7 +180,7 @@ func newRun(o *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			printPlan(out, plan)
+			printPlan(out, plan, env.Clients)
 			if err := o.confirm(out, yes, plan.SiteFailover.Spec.Workload.Name); err != nil {
 				return err
 			}

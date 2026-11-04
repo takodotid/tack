@@ -6,6 +6,12 @@ Sites:
   b  Replica  declares a  healthy  Cluster db/pg-b: phase "Cluster in healthy state", declares pg-a primary, pod pg-b-1
   c  Replica  declares a  healthy  Cluster db/pg-c: phase "Cluster in healthy state", declares pg-a primary, pod pg-c-1
 
+Clusters:
+  site a  context site-a  server https://a.example.invalid:6443  kube-system UID uid-a
+  site b  context site-b  server https://b.example.invalid:6443  kube-system UID uid-b
+  site c  context site-c  server https://c.example.invalid:6443  kube-system UID uid-c
+Git: https://git.example.com/gitops.git, branch main
+
 Hold
    1. hold-a-cluster-pg-a  site a
       hold Cluster db/pg-a at site a: Flux stops applying it

@@ -698,8 +698,10 @@ func routeTo(site, member string) string {
 		ss.Metadata.Generation, ss.Status.ObservedGeneration, r.Members, r.Reason, r.Message)
 }
 
-// TestTakeOver: a run that dies at its first step is taken over by a new
-// run, which records it. The old run then cannot resume. Issue #27.
+// TestTakeOver: a run that dies at its first step is resumed with a
+// kubeconfig whose context for site a reaches cluster b, and stops before
+// it acts there (issue #32). A new run then takes it over and records it;
+// the old run cannot resume (issue #27).
 func TestTakeOver(t *testing.T) {
 	_, code := tack(t, []string{"TACK_FAULT=hold-a-cluster-pg-a:before"}, "run", "-f", workload, "--to", "b", "--yes")
 	if code != exitFault {
@@ -709,6 +711,26 @@ func TestTakeOver(t *testing.T) {
 	out, code := tack(t, nil, "run", "-f", workload, "--to", "b", "--yes")
 	if code != 1 || !strings.Contains(out, "--take-over "+old) {
 		t.Fatalf("a run without --take-over: exit %d, want 1 naming %s", code, old)
+	}
+
+	src, err := os.ReadFile(kubeconfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	swapped := filepath.Join(work, "kubeconfig-a-is-b")
+	if err := os.WriteFile(swapped, src, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("kubectl", "--kubeconfig", swapped, "config", "set-context", context("a"),
+		"--cluster", context("b"), "--user", context("b")).CombinedOutput(); err != nil {
+		t.Fatalf("kubectl config set-context: %v\n%s", err, out)
+	}
+	out, code = tack(t, nil, "resume", "--kubeconfig", swapped, old, "-f", workload, "--yes")
+	if code != exitStopped || !strings.Contains(out, "SiteMismatch") {
+		t.Fatalf("resume through a context that reaches cluster b: exit %d, want %d with SiteMismatch", code, exitStopped)
+	}
+	if ann := jsonpath(t, "a", "cluster", "pg-a", "{.metadata.annotations}"); strings.Contains(ann, "failover.tako.id/held-by") {
+		t.Fatalf("site a was held: %s", ann)
 	}
 
 	tackOK(t, "run", "-f", workload, "--to", "b", "--take-over", old, "--yes")

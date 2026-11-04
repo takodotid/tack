@@ -5,6 +5,11 @@ Sites:
   a  unreachable  site a is unreachable: connection refused
   b  Replica      declares a  healthy  Cluster db/pg-b: phase "Cluster in healthy state", declares pg-a primary, pod pg-b-1; Pooler pg-b-pooler-rw has 0 instances
 
+Clusters:
+  site a  context site-a  server https://a.example.invalid:6443  kube-system UID not read yet
+  site b  context site-b  server https://b.example.invalid:6443  kube-system UID uid-b
+Git: https://git.example.com/gitops.git, branch main
+
 Hold
    1. hold-a-cluster-pg-a  site a (waits for the site if unreachable)
       hold Cluster db/pg-a at site a: Flux stops applying it
