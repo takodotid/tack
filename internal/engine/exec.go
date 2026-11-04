@@ -432,7 +432,9 @@ func (r *runner) capture(ctx context.Context, s *failoverv1.Step) (string, error
 var placeholder = regexp.MustCompile(`\$\(([a-zA-Z0-9_.-]+)\)`)
 
 // subst replaces $(name) with the captured value of that name, and
-// $(git.commit) with the run's commit.
+// $(git.commit) with the run's commit. An absent or empty value stops the
+// run with TokenMissing: a promotion without its token would not wait for
+// the demotion's checkpoint.
 func (r *runner) subst(s string) (string, error) {
 	var missing []string
 	out := placeholder.ReplaceAllStringFunc(s, func(m string) string {
@@ -443,8 +445,8 @@ func (r *runner) subst(s string) (string, error) {
 			}
 			return r.sf.Status.Git.Commit
 		}
-		v, ok := r.sf.Status.Captured[name]
-		if !ok {
+		v := r.sf.Status.Captured[name]
+		if v == "" {
 			missing = append(missing, name)
 		}
 		return v
