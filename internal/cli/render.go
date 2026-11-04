@@ -161,7 +161,11 @@ func stepDetail(s *failoverv1.Step, run string, mode failoverv1.Mode) []string {
 			line = fmt.Sprintf("request a reconcile of %s on the artifact Flux has, without a Git fetch; wait up to %s", target, s.Reconcile.Timeout.Duration)
 		}
 		out := []string{line}
-		if s.Reconcile.Revision != "" {
+		switch s.Reconcile.Revision {
+		case "":
+		case engine.GitCommitRef:
+			out = append(out, "until Flux has applied the branch head, which must contain the run's commit "+engine.GitCommitRef)
+		default:
 			out = append(out, "until Flux has applied "+s.Reconcile.Revision)
 		}
 		return out
@@ -199,7 +203,10 @@ func stepDetail(s *failoverv1.Step, run string, mode failoverv1.Mode) []string {
 		out = append(out, "commit message: "+firstLine(s.Git.Message))
 		return out
 	case failoverv1.StepVerifyGit:
-		return []string{fmt.Sprintf("render the run's commit as Flux would and diff it against %d live objects; stop if they differ", len(s.VerifyGit.Objects))}
+		return []string{
+			"stop if the branch moved past the run's commit",
+			fmt.Sprintf("render the run's commit as Flux would and diff it against %d live objects; stop if they differ", len(s.VerifyGit.Objects)),
+		}
 	case failoverv1.StepVerifyNoop:
 		return []string{fmt.Sprintf("check that the generation of %d released objects did not change", len(s.VerifyNoop.Objects))}
 	case failoverv1.StepRouting:
@@ -239,7 +246,11 @@ func printStatus(w io.Writer, sf *failoverv1.SiteFailover) {
 		if g.AcceptedRevision != "" {
 			fmt.Fprintf(w, ", accepted %s", g.AcceptedRevision)
 		}
-		fmt.Fprintf(w, ", commit %s\n", orNone(g.Commit))
+		fmt.Fprintf(w, ", commit %s", orNone(g.Commit))
+		if g.ReleaseRevision != "" {
+			fmt.Fprintf(w, ", release checked against %s", g.ReleaseRevision)
+		}
+		fmt.Fprintln(w)
 	}
 	if len(st.Captured) > 0 {
 		var keys []string

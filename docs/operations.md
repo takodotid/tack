@@ -51,7 +51,7 @@ Most reasons go on with a plain `tack resume RUN -f workload.yaml` once the caus
 
 | Flag | When | Example |
 |---|---|---|
-| `--accept-git-head SHA` | The run stopped with `GitChanged`. | Review the commits between the base and the new head named in the message, such as `git log --oneline 6dd30f7..a2c8b96`, then `tack resume RUN -f workload.yaml --accept-git-head a2c8b96`. |
+| `--accept-git-head SHA` | The run stopped with `GitChanged`. | Review the commits between the base and the new head named in the message, such as `git log --oneline 6dd30f7..a2c8b96`, then `tack resume RUN -f workload.yaml --accept-git-head a2c8b96`. Before the run's commit, the accepted head becomes its base. After it, the release checks Git against the accepted head, which must contain the run's commit. |
 | `--fence SITE` | The run stopped with `FencedSiteIsPrimary`. | A lost site came back and answers as primary. Check it, then `tack resume RUN -f workload.yaml --fence a` declares the new primary there. |
 | `--take-over RUN` | Another run of the workload can no longer finish, such as when its ledger is at a lost site. Without the flag, the new run is refused while that run is listed and not `Succeeded`, or stops on its holds. | Pass it when starting the new run: `tack run -f workload.yaml --to b --mode site-loss --take-over RUN` takes over the holds of `RUN`, and records it in its ledger. `RUN` can then never resume. |
 

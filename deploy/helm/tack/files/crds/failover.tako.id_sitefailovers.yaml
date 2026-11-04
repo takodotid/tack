@@ -935,6 +935,12 @@ spec:
                   commit:
                     description: Commit is the run's own commit.
                     type: string
+                  releaseRevision:
+                    description: |-
+                      ReleaseRevision is a commit after the run's own that the operator
+                      accepted with --accept-git-head. The Release phase checks Git against
+                      it instead of the run's commit. It contains the run's commit.
+                    type: string
                 type: object
               held:
                 description: Held lists the objects this run holds or held.
@@ -2013,6 +2019,12 @@ spec:
                     type: string
                   commit:
                     description: Commit is the run's own commit.
+                    type: string
+                  releaseRevision:
+                    description: |-
+                      ReleaseRevision is a commit after the run's own that the operator
+                      accepted with --accept-git-head. The Release phase checks Git against
+                      it instead of the run's commit. It contains the run's commit.
                     type: string
                 type: object
               held:

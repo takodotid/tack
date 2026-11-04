@@ -121,7 +121,13 @@ func (e *Env) checkLatest(ctx context.Context, sf *failoverv1.SiteFailover) erro
 
 func (e *Env) resume(ctx context.Context, sf *failoverv1.SiteFailover, opts Options) error {
 	if opts.AcceptGitHead != "" {
-		sf.Status.Git.AcceptedRevision = opts.AcceptGitHead
+		// Before the run's commit, the accepted head is the commit's base.
+		// After it, the Release phase checks Git against it.
+		if sf.Status.Git.Commit == "" {
+			sf.Status.Git.AcceptedRevision = opts.AcceptGitHead
+		} else {
+			sf.Status.Git.ReleaseRevision = opts.AcceptGitHead
+		}
 	}
 	sf.Status.State, sf.Status.Reason, sf.Status.Message = failoverv1.RunRunning, "", ""
 	if err := e.write(ctx, sf); err != nil {

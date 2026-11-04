@@ -487,11 +487,40 @@ func TestGitChangedDuringRun(t *testing.T) {
 	if code != exitStopped || !strings.Contains(out, "GitChanged") {
 		t.Fatalf("resume exit %d, want %d with GitChanged", code, exitStopped)
 	}
-	tackOK(t, "resume", run, "-f", workload, "--yes", "--accept-git-head", other)
+	// Issue #29: the process dies once the run's commit is pushed, and a
+	// commit lands on top of it before Flux applies it.
+	_, code = tack(t, []string{"TACK_FAULT=reconcile-git-a:before"}, "resume", run, "-f", workload, "--yes", "--accept-git-head", other)
+	if code != exitFault {
+		t.Fatalf("resume exit %d, want the fault exit %d", code, exitFault)
+	}
+	commit := gitPull(t)
+	if err := os.WriteFile(filepath.Join(gitDir, "NOTES.md"), []byte("A commit made after the run's commit.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, gitDir, "commit", "-q", "-am", "docs: a change after the run's commit")
+	gitCmd(t, gitDir, "push", "-q", "origin", "HEAD:main")
+	later := gitCmd(t, gitDir, "rev-parse", "HEAD")
+	out, code = tack(t, nil, "resume", run, "-f", workload, "--yes")
+	if code != exitStopped || !strings.Contains(out, "GitChanged") || !strings.Contains(out, "--accept-git-head "+later) {
+		t.Fatalf("resume after a push on top of the run's commit: exit %d, want %d with GitChanged before the release", code, exitStopped)
+	}
+	if got := stepState(latestRun(t, "b"), "verify-git-a"); got != "Failed" {
+		t.Errorf("verify-git-a is %q, want Failed", got)
+	}
+	tackOK(t, "resume", run, "-f", workload, "--yes", "--accept-git-head", later)
 	assertPrimary(t, "b", "a")
 	head := assertGitMatches(t, "b", "a", "b")
-	if parent := gitCmd(t, gitDir, "rev-parse", head+"^"); parent != other {
+	if head != later {
+		t.Errorf("Git head %s, want %s", head, later)
+	}
+	if parent := gitCmd(t, gitDir, "rev-parse", later+"^"); parent != commit {
+		t.Errorf("the later commit is on %s, want the run's %s", parent, commit)
+	}
+	if parent := gitCmd(t, gitDir, "rev-parse", commit+"^"); parent != other {
 		t.Errorf("the run's commit is on %s, want the accepted %s", parent, other)
+	}
+	if got := stepState(latestRun(t, "b"), "verify-noop-a"); got != "Succeeded" {
+		t.Errorf("verify-noop-a is %q", got)
 	}
 }
 

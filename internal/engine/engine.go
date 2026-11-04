@@ -69,6 +69,12 @@ type Git interface {
 	// Checkout returns a directory holding the repository at revision.
 	Checkout(ctx context.Context, w *failoverv1.WorkloadSpec, revision string) (string, error)
 
+	// BranchHead fetches the branch and returns the commit at its head.
+	BranchHead(ctx context.Context, w *failoverv1.WorkloadSpec) (string, error)
+
+	// Contains reports whether rev is commit or a descendant of it.
+	Contains(ctx context.Context, w *failoverv1.WorkloadSpec, commit, rev string) (bool, error)
+
 	// Close removes local copies.
 	Close() error
 }

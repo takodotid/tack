@@ -82,18 +82,19 @@ PromoteToGitOps
   16. reconcile-git-a  site a
       wait for Flux at site a to apply the run's commit (held objects stay as they are)
         request a reconcile of Kustomizations flux-system/a and their GitRepository; wait up to 5m0s
-        until Flux has applied $(git.commit)
+        until Flux has applied the branch head, which must contain the run's commit $(git.commit)
   17. reconcile-git-b  site b
       wait for Flux at site b to apply the run's commit (held objects stay as they are)
         request a reconcile of Kustomizations flux-system/b and their GitRepository; wait up to 5m0s
-        until Flux has applied $(git.commit)
+        until Flux has applied the branch head, which must contain the run's commit $(git.commit)
   18. reconcile-git-c  site c (waits for the site if unreachable)
       wait for Flux at site c to apply the run's commit (held objects stay as they are)
         request a reconcile of the Kustomizations of the held objects (found when the step runs) and their GitRepository; wait up to 5m0s
-        until Flux has applied $(git.commit)
+        until Flux has applied the branch head, which must contain the run's commit $(git.commit)
 Release
   19. verify-git-a  site a
       check at site a that Git, as Flux renders it, equals live
+        stop if the branch moved past the run's commit
         render the run's commit as Flux would and diff it against 1 live objects; stop if they differ
   20. release-a-cluster-pg-a  site a
       release Cluster db/pg-a at site a: Flux applies it again
@@ -101,12 +102,13 @@ Release
   21. reconcile-release-a  site a
       reconcile Flux at site a with the released objects
         request a reconcile of Kustomizations flux-system/a and their GitRepository; wait up to 5m0s
-        until Flux has applied $(git.commit)
+        until Flux has applied the branch head, which must contain the run's commit $(git.commit)
   22. verify-noop-a  site a
       check at site a that Flux changed nothing
         check that the generation of 1 released objects did not change
   23. verify-git-b  site b
       check at site b that Git, as Flux renders it, equals live
+        stop if the branch moved past the run's commit
         render the run's commit as Flux would and diff it against 1 live objects; stop if they differ
   24. release-b-cluster-pg-b  site b
       release Cluster db/pg-b at site b: Flux applies it again
@@ -114,12 +116,13 @@ Release
   25. reconcile-release-b  site b
       reconcile Flux at site b with the released objects
         request a reconcile of Kustomizations flux-system/b and their GitRepository; wait up to 5m0s
-        until Flux has applied $(git.commit)
+        until Flux has applied the branch head, which must contain the run's commit $(git.commit)
   26. verify-noop-b  site b
       check at site b that Flux changed nothing
         check that the generation of 1 released objects did not change
   27. verify-git-c  site c (waits for the site if unreachable)
       check at site c that Git, as Flux renders it, equals live
+        stop if the branch moved past the run's commit
         render the run's commit as Flux would and diff it against 1 live objects; stop if they differ
   28. release-c-cluster-pg-c  site c (waits for the site if unreachable)
       release Cluster db/pg-c at site c: Flux applies it again
@@ -127,7 +130,7 @@ Release
   29. reconcile-release-c  site c (waits for the site if unreachable)
       reconcile Flux at site c with the released objects
         request a reconcile of the Kustomizations of the held objects (found when the step runs) and their GitRepository; wait up to 5m0s
-        until Flux has applied $(git.commit)
+        until Flux has applied the branch head, which must contain the run's commit $(git.commit)
   30. verify-noop-c  site c (waits for the site if unreachable)
       check at site c that Flux changed nothing
         check that the generation of 1 released objects did not change

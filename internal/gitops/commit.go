@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -227,6 +228,83 @@ func (r *Repo) ranBy(ctx context.Context, c *clone, commit, base, run string) bo
 	return err == nil && parent == base
 }
 
+// find returns the full id of revision, a commit id, fetching the branch
+// when the clone lacks it.
+func (r *Repo) find(ctx context.Context, c *clone, revision string) (string, error) {
+	commit, err := r.commitID(ctx, c.dir, revision)
+	if err == nil {
+		return commit, nil
+	}
+	_, err = r.fetch(ctx, c)
+	switch {
+	case errors.Is(err, ErrUnreachable):
+		return "", stop.Wait(failoverv1.ReasonGitUnreachable, "%v", err)
+	case err != nil:
+		return "", err
+	}
+	if commit, err = r.commitID(ctx, c.dir, revision); err != nil && (len(revision) == 40 || len(revision) == 64) {
+		// Some servers send a commit that is no longer on the branch.
+		if _, ferr := r.git(ctx, c.dir, nil, "", "fetch", "--quiet", "--no-tags", "origin", revision); ferr == nil {
+			commit, err = r.commitID(ctx, c.dir, revision)
+		}
+	}
+	if err != nil {
+		return "", fmt.Errorf("commit %s is not in branch %s of %s", revision, c.branch, Redact(c.url))
+	}
+	return commit, nil
+}
+
+// BranchHead implements engine.Git. It fetches the branch.
+func (r *Repo) BranchHead(ctx context.Context, w *failoverv1.WorkloadSpec) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, err := r.clone(ctx, &w.Git)
+	if err != nil {
+		return "", err
+	}
+	head, err := r.fetch(ctx, c)
+	switch {
+	case errors.Is(err, ErrUnreachable):
+		return "", stop.Wait(failoverv1.ReasonGitUnreachable, "%v", err)
+	case errors.Is(err, errNoBranch):
+		return "", stop.Ask(failoverv1.ReasonGitChanged, "%v", err)
+	}
+	return head, err
+}
+
+// Contains implements engine.Git: git merge-base --is-ancestor.
+func (r *Repo) Contains(ctx context.Context, w *failoverv1.WorkloadSpec, commit, rev string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, id := range []string{commit, rev} {
+		if !commitRE.MatchString(id) {
+			return false, fmt.Errorf("revision %q is not a commit id", id)
+		}
+	}
+	c, err := r.clone(ctx, &w.Git)
+	if err != nil {
+		return false, err
+	}
+	a, err := r.find(ctx, c, commit)
+	if err != nil {
+		return false, err
+	}
+	b, err := r.find(ctx, c, rev)
+	if err != nil {
+		return false, err
+	}
+	_, err = r.git(ctx, c.dir, nil, "", "merge-base", "--is-ancestor", a, b)
+	var ge *gitError
+	var ee *exec.ExitError
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.As(err, &ge) && errors.As(ge.err, &ee) && ee.ExitCode() == 1:
+		return false, nil
+	}
+	return false, err
+}
+
 // Checkout returns a directory that holds the repository's files at
 // revision, a commit id. It fetches the branch when the clone lacks the
 // commit. The directory stays until Close.
@@ -240,24 +318,9 @@ func (r *Repo) Checkout(ctx context.Context, w *failoverv1.WorkloadSpec, revisio
 	if err != nil {
 		return "", err
 	}
-	commit, err := r.commitID(ctx, c.dir, revision)
+	commit, err := r.find(ctx, c, revision)
 	if err != nil {
-		_, err := r.fetch(ctx, c)
-		switch {
-		case errors.Is(err, ErrUnreachable):
-			return "", stop.Wait(failoverv1.ReasonGitUnreachable, "%v", err)
-		case err != nil:
-			return "", err
-		}
-		if commit, err = r.commitID(ctx, c.dir, revision); err != nil && (len(revision) == 40 || len(revision) == 64) {
-			// Some servers send a commit that is no longer on the branch.
-			if _, ferr := r.git(ctx, c.dir, nil, "", "fetch", "--quiet", "--no-tags", "origin", revision); ferr == nil {
-				commit, err = r.commitID(ctx, c.dir, revision)
-			}
-		}
-		if err != nil {
-			return "", fmt.Errorf("commit %s is not in branch %s of %s", revision, c.branch, Redact(c.url))
-		}
+		return "", err
 	}
 	if dir, ok := c.trees[commit]; ok {
 		return dir, nil

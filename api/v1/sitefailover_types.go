@@ -501,6 +501,12 @@ type GitStatus struct {
 	// Commit is the run's own commit.
 	// +optional
 	Commit string `json:"commit,omitempty"`
+
+	// ReleaseRevision is a commit after the run's own that the operator
+	// accepted with --accept-git-head. The Release phase checks Git against
+	// it instead of the run's commit. It contains the run's commit.
+	// +optional
+	ReleaseRevision string `json:"releaseRevision,omitempty"`
 }
 
 // FollowUp is an action left for the operator.

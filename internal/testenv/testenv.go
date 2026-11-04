@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -323,11 +324,16 @@ func (f *Flux) VerifyNoop(_ context.Context, site string, _ []failoverv1.HeldObj
 }
 
 // Git is a fake engine.Git. It maps each field to clusters/<site>/<kind>.yaml.
+// The branch's history is the commits Commit made, in order; a Head set by
+// a test on top of them is a commit pushed after them.
 type Git struct {
 	mu          sync.Mutex
 	Unreachable bool
 	Head        string
 	Commits     []engine.CommitRequest
+	// Checkouts are the revisions Checkout was asked for.
+	Checkouts []string
+	made      []string
 }
 
 // Resolve implements engine.Git.
@@ -359,12 +365,42 @@ func (g *Git) Commit(_ context.Context, _ *failoverv1.WorkloadSpec, req engine.C
 	}
 	g.Commits = append(g.Commits, req)
 	g.Head = fmt.Sprintf("c%039d", len(g.Commits))
+	g.made = append(g.made, g.Head)
 	return g.Head, nil
 }
 
 // Checkout implements engine.Git.
-func (g *Git) Checkout(context.Context, *failoverv1.WorkloadSpec, string) (string, error) {
+func (g *Git) Checkout(_ context.Context, _ *failoverv1.WorkloadSpec, rev string) (string, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.Checkouts = append(g.Checkouts, rev)
 	return "/nonexistent", nil
+}
+
+// BranchHead implements engine.Git.
+func (g *Git) BranchHead(context.Context, *failoverv1.WorkloadSpec) (string, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.Unreachable {
+		return "", stop.Wait(failoverv1.ReasonGitUnreachable, "remote unreachable")
+	}
+	return g.Head, nil
+}
+
+// Contains implements engine.Git. Head, when Commit did not make it, comes
+// after every commit Commit made.
+func (g *Git) Contains(_ context.Context, _ *failoverv1.WorkloadSpec, commit, rev string) (bool, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if commit == rev {
+		return true, nil
+	}
+	order := g.made
+	if g.Head != "" && !slices.Contains(order, g.Head) {
+		order = append(slices.Clone(order), g.Head)
+	}
+	i, j := slices.Index(order, commit), slices.Index(order, rev)
+	return i >= 0 && j >= 0 && i <= j, nil
 }
 
 // Close implements engine.Git.

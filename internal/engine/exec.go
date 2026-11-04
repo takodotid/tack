@@ -95,8 +95,15 @@ func (r *runner) reconcile(ctx context.Context, s *failoverv1.Step) (string, err
 			}
 		}
 	}
-	rev := ""
-	if s.Reconcile.Revision != "" {
+	rev, moved := "", ""
+	switch s.Reconcile.Revision {
+	case "":
+	case GitCommitRef:
+		var err error
+		if rev, moved, err = r.awaited(ctx); err != nil {
+			return "", err
+		}
+	default:
 		var err error
 		if rev, err = r.subst(s.Reconcile.Revision); err != nil {
 			return "", err
@@ -110,6 +117,9 @@ func (r *runner) reconcile(ctx context.Context, s *failoverv1.Step) (string, err
 	msg := "Flux applied " + applied
 	if applied == "" {
 		msg = "nothing to reconcile"
+	}
+	if moved != "" {
+		msg += "; " + moved
 	}
 	if !fetch {
 		notes = append([]string{"Git not fetched: a site-loss run holds without Git"}, notes...)
@@ -162,11 +172,84 @@ func (r *runner) git(ctx context.Context, s *failoverv1.Step) (string, error) {
 	return "committed " + commit, nil
 }
 
+// releaseTarget is the commit the Release phase checks Git against: the
+// head the operator accepted after the run's commit, or that commit.
+func (r *runner) releaseTarget() string {
+	if g := r.sf.Status.Git; g.ReleaseRevision != "" {
+		return g.ReleaseRevision
+	}
+	return r.sf.Status.Git.Commit
+}
+
+// awaited returns the commit that a Reconcile after the run's commit waits
+// for: the branch head, which is what Flux fetches, when it contains the
+// release target. A push on top of the run's commit then does not leave the
+// wait stuck, and the check before release still sees it. moved says so
+// when the head is past the target.
+func (r *runner) awaited(ctx context.Context) (rev, moved string, err error) {
+	want := r.releaseTarget()
+	if want == "" {
+		return "", "", fmt.Errorf("the run has no commit yet")
+	}
+	w := &r.sf.Spec.Workload.Spec
+	head, err := r.Git.BranchHead(ctx, w)
+	if err != nil {
+		return "", "", err
+	}
+	if sameCommit(head, want) {
+		return head, "", nil
+	}
+	ok, err := r.Git.Contains(ctx, w, want, head)
+	switch {
+	case err != nil:
+		return "", "", err
+	case !ok:
+		return "", "", stop.Ask(failoverv1.ReasonGitChanged,
+			"branch %s of %s is at %s, which does not contain %s: Git was rewritten during the run. Review it, then resume with --accept-git-head on a commit that contains the switch",
+			w.Git.Branch, Redact(w.Git.URL), head, want)
+	}
+	return head, fmt.Sprintf("the branch moved past %s to %s", want, head), nil
+}
+
+// verifyGit checks Git against live at the release target, and stops when
+// the branch moved past it: once released, the objects get whatever Flux
+// applies.
 func (r *runner) verifyGit(ctx context.Context, s *failoverv1.Step) (string, error) {
-	if r.sf.Status.Git.Commit == "" {
+	g := r.sf.Status.Git
+	if g.Commit == "" {
 		return "", fmt.Errorf("the run has no commit yet")
 	}
-	dir, err := r.Git.Checkout(ctx, &r.sf.Spec.Workload.Spec, r.sf.Status.Git.Commit)
+	w := &r.sf.Spec.Workload.Spec
+	want := r.releaseTarget()
+	if g.ReleaseRevision != "" {
+		ok, err := r.Git.Contains(ctx, w, g.Commit, g.ReleaseRevision)
+		if err != nil {
+			return "", err
+		}
+		if !ok {
+			return "", stop.Ask(failoverv1.ReasonGitChanged,
+				"the accepted head %s does not contain the run's commit %s: accept a head that does", g.ReleaseRevision, g.Commit)
+		}
+	}
+	head, err := r.Git.BranchHead(ctx, w)
+	if err != nil {
+		return "", err
+	}
+	if !sameCommit(head, want) {
+		ok, err := r.Git.Contains(ctx, w, want, head)
+		if err != nil {
+			return "", err
+		}
+		if !ok {
+			return "", stop.Ask(failoverv1.ReasonGitChanged,
+				"branch %s of %s is at %s, which does not contain %s: Git was rewritten before the release at site %s. Review it, then resume with --accept-git-head on a commit that contains the switch",
+				w.Git.Branch, Redact(w.Git.URL), head, want, s.Site)
+		}
+		return "", stop.Ask(failoverv1.ReasonGitChanged,
+			"branch %s of %s moved past %s to %s before the release at site %s: Flux applies it once the objects are released. Review the commits (git log %s..%s), then resume with --accept-git-head %s",
+			w.Git.Branch, Redact(w.Git.URL), want, head, s.Site, want, head, head)
+	}
+	dir, err := r.Git.Checkout(ctx, w, want)
 	if err != nil {
 		return "", err
 	}
@@ -175,7 +258,19 @@ func (r *runner) verifyGit(ctx context.Context, s *failoverv1.Step) (string, err
 
 // strict is false once the operator accepted a Git commit made during the
 // run: that commit may change the held objects in other fields.
-func (r *runner) strict() bool { return r.sf.Status.Git.AcceptedRevision == "" }
+func (r *runner) strict() bool {
+	g := r.sf.Status.Git
+	return g.AcceptedRevision == "" && g.ReleaseRevision == ""
+}
+
+// sameCommit compares two commit ids, either of which may be abbreviated.
+func sameCommit(a, b string) bool {
+	a, b = RevisionSHA(a), RevisionSHA(b)
+	if len(a) < 4 || len(b) < 4 {
+		return a == b
+	}
+	return strings.HasPrefix(a, b) || strings.HasPrefix(b, a)
+}
 
 func (r *runner) held(site string, obj failoverv1.ObjectRef) *failoverv1.HeldObject {
 	for i := range r.sf.Status.Held {
