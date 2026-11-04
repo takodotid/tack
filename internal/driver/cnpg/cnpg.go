@@ -169,20 +169,11 @@ func read(st *driver.SiteState, u *unstructured.Unstructured, byCluster map[stri
 	f[factPhase] = phase
 	inProgress, _, _ := unstructured.NestedBool(u.Object, "status", "switchReplicaClusterStatus", "inProgress")
 	f[factInProgress] = fmt.Sprint(inProgress)
-	// The instances report their own timeline; status.timelineID is stale
-	// on a demoted Cluster.
-	isPrimary, timeline := false, int64(0)
+	isPrimary := false
 	states, _, _ := unstructured.NestedMap(u.Object, "status", "instancesReportedState")
 	for _, v := range states {
-		m, ok := v.(map[string]any)
-		if !ok {
-			continue
-		}
-		if m["isPrimary"] == true {
+		if m, ok := v.(map[string]any); ok && m["isPrimary"] == true {
 			isPrimary = true
-		}
-		if tl, ok := m["timeLineID"].(int64); ok && tl > timeline {
-			timeline = tl
 		}
 	}
 	f[factIsPrimary] = fmt.Sprint(isPrimary)
@@ -202,8 +193,8 @@ func read(st *driver.SiteState, u *unstructured.Unstructured, byCluster map[stri
 		st.DeclaredPrimary = "unknown Cluster " + primary
 	}
 	st.Healthy = phase == PhaseHealthy && !inProgress
-	st.Summary = fmt.Sprintf("Cluster %s/%s: phase %q, declares %s primary, pod %s, timeline %d",
-		u.GetNamespace(), u.GetName(), phase, orNone(primary), orNone(current), timeline)
+	st.Summary = fmt.Sprintf("Cluster %s/%s: phase %q, declares %s primary, pod %s",
+		u.GetNamespace(), u.GetName(), phase, orNone(primary), orNone(current))
 	if inProgress {
 		st.Summary += ", demotion in progress"
 	}

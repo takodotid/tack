@@ -20,12 +20,13 @@ import (
 // its revision.
 const ReasonSucceeded = "ReconciliationSucceeded"
 
-// Reconcile implements engine.Flux. It requests each source GitRepository,
-// waits until each handled the request or half the timeout passed, then
-// requests each Kustomization and waits until each is done. A source that
-// fails to fetch does not stop the wait: the Kustomization runs on the
-// artifact it has, which is enough when no revision is expected.
-func (f *Flux) Reconcile(ctx context.Context, site string, ks []failoverv1.ObjectKey, revision string, timeout time.Duration) (string, []string, error) {
+// Reconcile implements engine.Flux. When fetchGit is set, it requests each
+// source GitRepository and waits until each handled the request or half
+// the timeout passed. Then it requests each Kustomization and waits until
+// each is done. A source that fails to fetch does not stop the wait: the
+// Kustomization runs on the artifact it has, which is enough when no
+// revision is expected. Without fetchGit, no source is requested.
+func (f *Flux) Reconcile(ctx context.Context, site string, ks []failoverv1.ObjectKey, revision string, fetchGit bool, timeout time.Duration) (string, []string, error) {
 	var notes []string
 	note := func(format string, a ...any) {
 		n := fmt.Sprintf(format, a...)
@@ -55,6 +56,9 @@ func (f *Flux) Reconcile(ctx context.Context, site string, ks []failoverv1.Objec
 			continue
 		}
 		active = append(active, k)
+		if !fetchGit {
+			continue
+		}
 		if kind, src := sourceRef(u); kind == GitRepositoryGVK.Kind && !seenSource[src] {
 			seenSource[src] = true
 			sources = append(sources, src)

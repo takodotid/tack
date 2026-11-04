@@ -3,7 +3,7 @@ Ledger: SiteFailover tack-system/pg-main-20261027-101500 at site b
 
 Sites:
   a  unreachable  site a is unreachable: connection refused
-  b  Replica      declares a  healthy  Cluster db/pg-b: phase "Cluster in healthy state", declares pg-a primary, pod pg-b-1, timeline 1; Pooler pg-b-pooler-rw has 0 instances
+  b  Replica      declares a  healthy  Cluster db/pg-b: phase "Cluster in healthy state", declares pg-a primary, pod pg-b-1; Pooler pg-b-pooler-rw has 0 instances
 
 Hold
    1. hold-a-cluster-pg-a  site a (waits for the site if unreachable)
@@ -16,7 +16,7 @@ Hold
         applied by the Flux Kustomization on the object's labels (read when the step runs)
    3. reconcile-hold-a  site a (waits for the site if unreachable)
       reconcile Flux at site a, so no apply started before the hold is still in flight
-        request a reconcile of the Kustomizations of the held objects (found when the step runs) and their GitRepository; wait up to 5m0s
+        request a reconcile of the Kustomizations of the held objects (found when the step runs) on the artifact Flux has, without a Git fetch; wait up to 5m0s
    4. hold-b-cluster-pg-b  site b
       hold Cluster db/pg-b at site b: Flux stops applying it
         annotate Cluster db/pg-b: kustomize.toolkit.fluxcd.io/reconcile=disabled, failover.tako.id/held-by=pg-main-20261027-101500
@@ -27,7 +27,7 @@ Hold
         applied by Flux Kustomization flux-system/b
    6. reconcile-hold-b  site b
       reconcile Flux at site b, so no apply started before the hold is still in flight
-        request a reconcile of Kustomizations flux-system/b and their GitRepository; wait up to 5m0s
+        request a reconcile of Kustomizations flux-system/b on the artifact Flux has, without a Git fetch; wait up to 5m0s
 Failover
    7. fence-a  site a (waits for the site if unreachable)
       fence Cluster pg-a: declare pg-b primary, so it never runs as primary again

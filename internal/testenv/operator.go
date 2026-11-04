@@ -32,7 +32,8 @@ func (o *Operator) Run(ctx context.Context) {
 }
 
 func (o *Operator) reconcile(ctx context.Context, site string) {
-	if o.Clients.Reachable(ctx, site) != nil {
+	// The operator runs in the site: only a lost site stops it.
+	if o.Clients.IsDown(site) {
 		return
 	}
 	c, err := o.Clients.Client(site)

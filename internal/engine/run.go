@@ -69,7 +69,7 @@ func (e *Env) Resume(ctx context.Context, sf *failoverv1.SiteFailover, opts Opti
 	if err := e.write(ctx, sf); err != nil {
 		return err
 	}
-	r := &runner{Env: e, sf: sf, opts: opts, reachable: map[string]error{}, gated: map[string]bool{}}
+	r := &runner{Env: e, sf: sf, opts: opts, reachable: map[string]error{}, retried: map[string]string{}, gated: map[string]bool{}}
 	return r.run(ctx)
 }
 
@@ -78,7 +78,10 @@ type runner struct {
 	sf        *failoverv1.SiteFailover
 	opts      Options
 	reachable map[string]error
-	gated     map[string]bool
+	// retried notes, per site, a check that failed before the site
+	// answered. The site's next step records it in its message.
+	retried map[string]string
+	gated   map[string]bool
 }
 
 func (r *runner) run(ctx context.Context) error {
@@ -89,12 +92,15 @@ func (r *runner) run(ctx context.Context) error {
 			continue
 		}
 		if step.Site != "" {
-			if err := r.siteReachable(ctx, step.Site); err != nil {
+			if err := r.siteReachable(ctx, step); err != nil {
+				if ctx.Err() != nil {
+					return r.end(ctx, step, ctx.Err())
+				}
 				if !step.Deferrable {
 					return r.end(ctx, step, stop.Ask(failoverv1.ReasonStepFailed, "site %s is unreachable: %v", step.Site, err))
 				}
 				if st.State != failoverv1.StepDeferred {
-					st.State, st.Message = failoverv1.StepDeferred, fmt.Sprintf("site %s unreachable", step.Site)
+					st.State, st.Message = failoverv1.StepDeferred, fmt.Sprintf("site %s unreachable: %v", step.Site, err)
 					if err := r.write(ctx, r.sf); err != nil {
 						return err
 					}
@@ -104,7 +110,17 @@ func (r *runner) run(ctx context.Context) error {
 			}
 			if st.State == failoverv1.StepDeferred {
 				if err := r.gate(ctx, step.Site); err != nil {
-					return r.end(ctx, step, err)
+					if !errors.Is(err, errUnread) {
+						return r.end(ctx, step, err)
+					}
+					// The site stays unreachable for this process.
+					r.reachable[step.Site] = err
+					st.Message = fmt.Sprintf("site %s unreachable: %v", step.Site, err)
+					if err := r.write(ctx, r.sf); err != nil {
+						return err
+					}
+					r.printf("  deferred  %s (site %s did not answer the read before its deferred steps)\n", step.ID, step.Site)
+					continue
 				}
 			}
 		}
@@ -115,8 +131,13 @@ func (r *runner) run(ctx context.Context) error {
 	return r.finish(ctx)
 }
 
+// errUnread is returned by gate when the site did not answer its read.
+var errUnread = errors.New("the site did not answer the read before its deferred steps")
+
 // gate stops the run when a site whose steps were deferred comes back
-// answering as primary, unless the operator approved fencing it.
+// answering as primary, unless the operator approved fencing it. A site
+// that does not answer the read is not known to be fenced: gate returns
+// errUnread, and its steps stay deferred.
 func (r *runner) gate(ctx context.Context, site string) error {
 	if r.gated[site] {
 		return nil
@@ -128,6 +149,9 @@ func (r *runner) gate(ctx context.Context, site string) error {
 	s, ok := topo.Site(site)
 	if !ok {
 		return fmt.Errorf("site %s is not in the topology", site)
+	}
+	if !s.Reachable {
+		return fmt.Errorf("%w: %s", errUnread, s.Error)
 	}
 	if s.Role == driver.RolePrimary && site != r.sf.Spec.To && !slices.Contains(r.opts.Fence, site) {
 		return stop.Ask(failoverv1.ReasonFencedSiteIsPrimary,
@@ -158,6 +182,13 @@ func (r *runner) runStep(ctx context.Context, step *failoverv1.Step) error {
 	if err != nil {
 		return r.end(ctx, step, err)
 	}
+	if note := r.retried[step.Site]; note != "" {
+		delete(r.retried, step.Site)
+		if msg != "" {
+			msg += "; "
+		}
+		msg += note
+	}
 	done := metav1.NewTime(r.now())
 	st = r.stepStatus(step.ID)
 	st.State, st.FinishedAt, st.Message = failoverv1.StepSucceeded, &done, msg
@@ -181,6 +212,10 @@ func (r *runner) end(ctx context.Context, step *failoverv1.Step, err error) erro
 	}
 	st := r.stepStatus(step.ID)
 	st.Message = se.Message
+	if note := r.retried[step.Site]; note != "" {
+		delete(r.retried, step.Site)
+		st.Message += "; " + note
+	}
 	ret := ErrStopped
 	if se.Wait {
 		st.State = failoverv1.StepPending
@@ -223,11 +258,54 @@ func (r *runner) finish(ctx context.Context) error {
 	return nil
 }
 
-func (r *runner) siteReachable(ctx context.Context, site string) error {
+// DefaultReachWaits are the pauses between the checks of a site's API.
+// With the 5 s timeout of each check, 3 checks take at most 30 s.
+var DefaultReachWaits = []time.Duration{5 * time.Second, 10 * time.Second}
+
+// siteReachable checks the step's site once per process. The site counts
+// as unreachable only when every check fails, so a short network blip
+// neither stops nor defers a step. A deferrable step of a SiteLoss run has
+// one check: the run does not wait for a site it can do without.
+func (r *runner) siteReachable(ctx context.Context, step *failoverv1.Step) error {
+	site := step.Site
 	if err, ok := r.reachable[site]; ok {
 		return err
 	}
-	err := r.Clients.Reachable(ctx, site)
+	waits := r.ReachWaits
+	if waits == nil {
+		waits = DefaultReachWaits
+	}
+	if step.Deferrable && r.sf.Spec.Mode == failoverv1.ModeSiteLoss {
+		waits = nil
+	}
+	checks := len(waits) + 1
+	start := r.now()
+	var err error
+	for i := 0; ; i++ {
+		err = r.Clients.Reachable(ctx, site)
+		if err == nil {
+			if i > 0 {
+				r.retried[site] = fmt.Sprintf("site %s answered on check %d of %d", site, i+1, checks)
+				r.printf("  answered  site %s on check %d of %d\n", site, i+1, checks)
+			}
+			break
+		}
+		if ctx.Err() != nil {
+			return err
+		}
+		if i == len(waits) {
+			if checks > 1 {
+				err = fmt.Errorf("no answer to %d checks over %s: %w", checks, r.now().Sub(start).Round(time.Second), err)
+			}
+			break
+		}
+		r.printf("  retry     site %s did not answer check %d of %d (%v); next check in %s\n", site, i+1, checks, err, waits[i])
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(waits[i]):
+		}
+	}
 	r.reachable[site] = err
 	return err
 }

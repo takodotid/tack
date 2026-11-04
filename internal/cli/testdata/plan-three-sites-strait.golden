@@ -2,9 +2,9 @@ Plan for workload pg-main: Planned, site a to site b
 Ledger: SiteFailover tack-system/pg-main-20261027-101500 at site b
 
 Sites:
-  a  Primary  declares a  healthy  Cluster db/pg-a: phase "Cluster in healthy state", declares pg-a primary, pod pg-a-1, timeline 1
-  b  Replica  declares a  healthy  Cluster db/pg-b: phase "Cluster in healthy state", declares pg-a primary, pod pg-b-1, timeline 1
-  c  Replica  declares a  healthy  Cluster db/pg-c: phase "Cluster in healthy state", declares pg-a primary, pod pg-c-1, timeline 1
+  a  Primary  declares a  healthy  Cluster db/pg-a: phase "Cluster in healthy state", declares pg-a primary, pod pg-a-1
+  b  Replica  declares a  healthy  Cluster db/pg-b: phase "Cluster in healthy state", declares pg-a primary, pod pg-b-1
+  c  Replica  declares a  healthy  Cluster db/pg-c: phase "Cluster in healthy state", declares pg-a primary, pod pg-c-1
 
 Hold
    1. hold-a-cluster-pg-a  site a

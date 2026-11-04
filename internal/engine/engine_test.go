@@ -67,24 +67,34 @@ func (f *fixture) env(ledgerSite string) *engine.Env {
 		Clients: f.clients, Driver: cnpg.Driver{}, Flux: f.flux, Git: f.git,
 		Ledger: &ledger.Store{Client: cl, Namespace: "tack-system"},
 		Out:    io.Discard, Poll: time.Millisecond,
+		ReachWaits: []time.Duration{time.Millisecond, time.Millisecond},
 	}
 }
 
-func (f *fixture) start(to string, mode failoverv1.Mode, opts engine.Options) (*failoverv1.SiteFailover, error) {
+func (f *fixture) plan(to string, mode failoverv1.Mode) *failoverv1.SiteFailover {
 	f.t.Helper()
-	env := f.env(to)
 	from := "a"
 	if to == "a" {
 		from = "b"
 	}
-	p, err := env.MakePlan(context.Background(), engine.Request{
+	p, err := f.env(to).MakePlan(context.Background(), engine.Request{
 		Run: "run-1", Workload: f.w.Name, Spec: &f.w.Spec,
 		Request: driver.Request{From: from, To: to, Mode: mode},
 	})
 	if err != nil {
 		f.t.Fatalf("plan: %v", err)
 	}
-	err = env.Start(context.Background(), p.SiteFailover, opts)
+	return p.SiteFailover
+}
+
+func (f *fixture) start(to string, mode failoverv1.Mode, opts engine.Options) (*failoverv1.SiteFailover, error) {
+	f.t.Helper()
+	return f.run(to, f.plan(to, mode), opts)
+}
+
+func (f *fixture) run(to string, sf *failoverv1.SiteFailover, opts engine.Options) (*failoverv1.SiteFailover, error) {
+	f.t.Helper()
+	err := f.env(to).Start(context.Background(), sf, opts)
 	return f.ledger(to), err
 }
 
@@ -180,6 +190,11 @@ func TestPlannedRun(t *testing.T) {
 	}
 	if len(f.flux.Held) != 0 {
 		t.Errorf("objects still held: %v", f.flux.Held)
+	}
+	for _, c := range calls(f.flux, "Reconcile") {
+		if !strings.Contains(c, " fetch ") {
+			t.Errorf("a planned run reconciled without a Git fetch: %q", c)
+		}
 	}
 	if f.clients.Writes == 0 {
 		t.Error("the fake clients counted no write")
@@ -316,18 +331,158 @@ func TestSiteLossBreakGlassAndReturn(t *testing.T) {
 	}
 }
 
+// A site loss with Git cut: a GitRepository asked to fetch hangs. Hold
+// must not ask it, so the run promotes without waiting on Git.
+func TestSiteLossHoldsWithoutGit(t *testing.T) {
+	f := newFixture(t)
+	f.clients.SetDown("a", true)
+	f.git.Unreachable = true
+	f.flux.GitDown = true // a fetch hangs for 2.5s, half the Flux timeout
+	start := time.Now()
+	sf, err := f.start("b", failoverv1.ModeSiteLoss, engine.Options{})
+	if !errors.Is(err, engine.ErrWaiting) || sf.Status.Reason != failoverv1.ReasonGitUnreachable {
+		t.Fatalf("err %v, state %s %s", err, sf.Status.State, sf.Status.Reason)
+	}
+	if took := time.Since(start); took >= 2500*time.Millisecond {
+		t.Errorf("the run took %s to reach the Git step: it waited on a Git fetch", took)
+	}
+	if field(f.cluster("b"), "status", "instancesReportedState", "pg-b-1", "isPrimary") != true {
+		t.Fatal("site b was not promoted")
+	}
+	if got := calls(f.flux, "Reconcile"); strings.Join(got, ",") != "Reconcile b no-fetch " {
+		t.Errorf("Reconcile calls %q, want one at b without a Git fetch", got)
+	}
+	if msg := stepMessage(sf, "reconcile-hold-b"); !strings.Contains(msg, "Git not fetched") {
+		t.Errorf("reconcile-hold-b message %q", msg)
+	}
+
+	// Git is back: the Git step and the later reconciles fetch it.
+	f.git.Unreachable, f.flux.GitDown = false, false
+	sf, err = f.resume("b", engine.Options{})
+	if err != nil || sf.Status.State != failoverv1.RunSucceeded {
+		t.Fatalf("resume: %v %s %s", err, sf.Status.State, sf.Status.Message)
+	}
+	got := calls(f.flux, "Reconcile")
+	if len(got) != 3 || !strings.HasPrefix(got[1], "Reconcile b fetch c") || !strings.HasPrefix(got[2], "Reconcile b fetch c") {
+		t.Errorf("Reconcile calls %q: the Git and Release phases must fetch the run's commit", got)
+	}
+}
+
+// A short network cut between the operator's host and a site fails a
+// check or two of the site's API. The run must neither stop nor defer.
+func TestSiteCheckRetried(t *testing.T) {
+	f := newFixture(t)
+	plan := f.plan("b", failoverv1.ModePlanned)
+	f.clients.Blip("a", 2)
+	before := f.clients.Checks["a"]
+	sf, err := f.run("b", plan, engine.Options{})
+	if err != nil || sf.Status.State != failoverv1.RunSucceeded {
+		t.Fatalf("run: %v %s %s", err, sf.Status.State, sf.Status.Message)
+	}
+	if n := f.clients.Checks["a"] - before; n != 3 {
+		t.Errorf("site a checked %d times, want 3", n)
+	}
+	if msg := stepMessage(sf, "hold-a-cluster-pg-a"); !strings.Contains(msg, "site a answered on check 3 of 3") {
+		t.Errorf("hold-a-cluster-pg-a message %q", msg)
+	}
+}
+
+// A site that answers only on a later check, then fails its first step:
+// the step's message still says how many checks ran.
+func TestSiteCheckRetriedThenStepFails(t *testing.T) {
+	f := newFixture(t)
+	plan := f.plan("b", failoverv1.ModePlanned)
+	f.clients.Blip("a", 1)
+	f.flux.Fail["Hold"] = errors.New("hold failed")
+	sf, err := f.run("b", plan, engine.Options{})
+	if !errors.Is(err, engine.ErrStopped) {
+		t.Fatalf("err %v, want stopped", err)
+	}
+	if msg := stepMessage(sf, "hold-a-cluster-pg-a"); !strings.Contains(msg, "hold failed") || !strings.Contains(msg, "site a answered on check 2 of 3") {
+		t.Errorf("hold-a-cluster-pg-a message %q", msg)
+	}
+}
+
+// A site that stays down counts as unreachable after a bounded number of
+// checks. The to site then stops the run.
+func TestSiteCheckBounded(t *testing.T) {
+	f := newFixture(t)
+	plan := f.plan("b", failoverv1.ModePlanned)
+	f.clients.SetDown("b", true)
+	before := f.clients.Checks["b"]
+	sf, err := f.run("b", plan, engine.Options{})
+	if !errors.Is(err, engine.ErrStopped) || sf.Status.Reason != failoverv1.ReasonStepFailed {
+		t.Fatalf("err %v, state %s %s", err, sf.Status.State, sf.Status.Reason)
+	}
+	if n := f.clients.Checks["b"] - before; n != 3 {
+		t.Errorf("site b checked %d times, want 3", n)
+	}
+	if st := stepState(sf, "hold-b-cluster-pg-b"); st != failoverv1.StepFailed {
+		t.Errorf("hold-b-cluster-pg-b is %s", st)
+	}
+	if !strings.Contains(sf.Status.Message, "no answer to 3 checks") {
+		t.Errorf("message %q", sf.Status.Message)
+	}
+}
+
 func TestSiteLossSiteStaysDown(t *testing.T) {
 	f := newFixture(t)
 	f.clients.SetDown("a", true)
-	sf, err := f.start("b", failoverv1.ModeSiteLoss, engine.Options{})
+	plan := f.plan("b", failoverv1.ModeSiteLoss)
+	before := f.clients.Checks["a"]
+	sf, err := f.run("b", plan, engine.Options{})
 	if err != nil || sf.Status.State != failoverv1.RunSucceeded {
 		t.Fatalf("run: %v %s", err, sf.Status.Message)
+	}
+	// The run does not wait for a site it can do without.
+	if n := f.clients.Checks["a"] - before; n != 1 {
+		t.Errorf("lost site a checked %d times, want 1", n)
+	}
+	if msg := stepMessage(sf, "fence-a"); !strings.Contains(msg, "site a unreachable: ") {
+		t.Errorf("fence-a message %q", msg)
 	}
 	if !strings.Contains(sf.Status.Message, "wait for their site") {
 		t.Errorf("message %q", sf.Status.Message)
 	}
 	if v, _ := change(f.git.Commits[0], "a", cnpg.FieldPrimary); v != `"pg-b"` {
 		t.Errorf("Git does not demote site a: %s", v)
+	}
+}
+
+// A lost site answers the check before its deferred steps, then fails the
+// read of the fence check. Its steps must stay deferred: an unread site
+// is not known to be fenced.
+func TestFenceCheckCannotRead(t *testing.T) {
+	f := newFixture(t)
+	f.clients.SetDown("a", true)
+	sf, err := f.start("b", failoverv1.ModeSiteLoss, engine.Options{})
+	if err != nil || sf.Status.State != failoverv1.RunSucceeded {
+		t.Fatalf("run: %v %s", err, sf.Status.Message)
+	}
+
+	// Site a comes back, still primary, and flaps.
+	f.clients.SetDown("a", false)
+	f.clients.Flap("a", true, false)
+	sf, err = f.resume("b", engine.Options{})
+	if err != nil || sf.Status.State != failoverv1.RunSucceeded {
+		t.Fatalf("resume: %v %s %s", err, sf.Status.State, sf.Status.Message)
+	}
+	if field(f.cluster("a"), "spec", "replica", "primary") != "pg-a" {
+		t.Fatal("site a was fenced although the fence check could not read it")
+	}
+	for _, id := range []string{"hold-a-cluster-pg-a", "fence-a"} {
+		if st := stepState(sf, id); st != failoverv1.StepDeferred {
+			t.Errorf("%s is %s, want Deferred", id, st)
+		}
+	}
+	if msg := stepMessage(sf, "hold-a-cluster-pg-a"); !strings.Contains(msg, "did not answer the read") {
+		t.Errorf("hold-a-cluster-pg-a message %q", msg)
+	}
+
+	// Read, it answers as primary: the run stops for the operator.
+	sf, err = f.resume("b", engine.Options{})
+	if !errors.Is(err, engine.ErrStopped) || sf.Status.Reason != failoverv1.ReasonFencedSiteIsPrimary {
+		t.Fatalf("err %v, reason %s", err, sf.Status.Reason)
 	}
 }
 
@@ -341,6 +496,25 @@ func TestHeldByAnotherRun(t *testing.T) {
 	if field(f.cluster("a"), "spec", "replica", "primary") != "pg-a" {
 		t.Fatal("the run changed live objects without holding them")
 	}
+}
+
+func calls(f *testenv.Flux, name string) []string {
+	var out []string
+	for _, c := range f.Calls {
+		if strings.HasPrefix(c, name+" ") {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func stepMessage(sf *failoverv1.SiteFailover, id string) string {
+	for _, s := range sf.Status.Steps {
+		if s.ID == id {
+			return s.Message
+		}
+	}
+	return ""
 }
 
 func countCalls(f *testenv.Flux, name string) int {

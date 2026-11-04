@@ -39,12 +39,16 @@ type Clients struct {
 	Down  map[string]bool
 	// Writes counts the writes made through Client.
 	Writes int
+	// Checks counts the calls to Reachable, by site.
+	Checks map[string]int
+	// answers holds, by site, the results of the next checks: false fails.
+	answers map[string][]bool
 }
 
 // NewClients returns fake clients for the sites, seeded with objects.
 // Writes through Client are counted in Writes.
 func NewClients(objects map[string][]client.Object) *Clients {
-	c := &Clients{Sites: map[string]client.Client{}, Down: map[string]bool{}}
+	c := &Clients{Sites: map[string]client.Client{}, Down: map[string]bool{}, Checks: map[string]int{}, answers: map[string][]bool{}}
 	for site, objs := range objects {
 		c.Sites[site] = NewClient(objs...)
 	}
@@ -112,12 +116,40 @@ func (c *Clients) Client(site string) (client.Client, error) {
 	return c.counted(cl), nil
 }
 
+// IsDown tells whether a site is lost. Unlike Reachable, it is neither
+// counted nor failed by a blip.
+func (c *Clients) IsDown(site string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.Down[site]
+}
+
+// Blip makes the next n checks of a site fail, as a short network cut
+// between the operator's host and the site does.
+func (c *Clients) Blip(site string, n int) {
+	c.Flap(site, make([]bool, n)...)
+}
+
+// Flap sets the results of the next checks of a site: false fails.
+func (c *Clients) Flap(site string, answers ...bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.answers[site] = answers
+}
+
 // Reachable implements kube.Clients.
 func (c *Clients) Reachable(_ context.Context, site string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.Checks[site]++
 	if c.Down[site] {
 		return fmt.Errorf("site %s is unreachable: connection refused", site)
+	}
+	if a := c.answers[site]; len(a) > 0 {
+		c.answers[site] = a[1:]
+		if !a[0] {
+			return fmt.Errorf("site %s is unreachable: context deadline exceeded", site)
+		}
 	}
 	return nil
 }
@@ -144,6 +176,9 @@ type Flux struct {
 	Calls    []string
 	// Fail makes a method return an error, by method name.
 	Fail map[string]error
+	// GitDown makes a Git fetch hang for half the timeout, as a
+	// GitRepository does when it cannot reach Git.
+	GitDown bool
 }
 
 // NewFlux returns a fake Flux at a revision.
@@ -192,17 +227,34 @@ func (f *Flux) Release(_ context.Context, site string, obj failoverv1.ObjectRef,
 	return 1, nil
 }
 
-// Reconcile implements engine.Flux.
-func (f *Flux) Reconcile(_ context.Context, site string, _ []failoverv1.ObjectKey, revision string, _ time.Duration) (string, []string, error) {
-	if err := f.call("Reconcile", site, " ", revision); err != nil {
+// Reconcile implements engine.Flux. Calls records "fetch" or "no-fetch"
+// after the site.
+func (f *Flux) Reconcile(ctx context.Context, site string, _ []failoverv1.ObjectKey, revision string, fetchGit bool, timeout time.Duration) (string, []string, error) {
+	fetch := "no-fetch"
+	if fetchGit {
+		fetch = "fetch"
+	}
+	if err := f.call("Reconcile", site, " ", fetch, " ", revision); err != nil {
 		return "", nil, err
+	}
+	var notes []string
+	f.mu.Lock()
+	down := f.GitDown
+	f.mu.Unlock()
+	if fetchGit && down {
+		select {
+		case <-ctx.Done():
+			return "", nil, ctx.Err()
+		case <-time.After(timeout / 2):
+		}
+		notes = append(notes, "GitRepository did not handle the reconcile request in "+(timeout/2).String())
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if revision != "" {
-		return "main@sha1:" + revision, nil, nil
+		return "main@sha1:" + revision, notes, nil
 	}
-	return f.Revision, nil, nil
+	return f.Revision, notes, nil
 }
 
 // VerifyGit implements engine.Flux.

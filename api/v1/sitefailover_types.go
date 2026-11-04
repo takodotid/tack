@@ -179,7 +179,8 @@ type ObjectStep struct {
 }
 
 // ReconcileStep asks Flux to reconcile and waits until Flux has handled
-// the request. The Kustomizations' GitRepository is reconciled first.
+// the request. The Kustomizations' GitRepository is reconciled first,
+// except in the Hold phase of a SiteLoss run.
 type ReconcileStep struct {
 	// Kustomizations are the Flux Kustomizations at the step's site. Empty
 	// means every Kustomization that applies an object this run holds at
