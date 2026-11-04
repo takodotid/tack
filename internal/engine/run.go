@@ -141,11 +141,20 @@ var errUnread = errors.New("the site did not answer the read before its deferred
 // answering as primary, unless the operator approved fencing it. A site
 // that does not answer the read is not known to be fenced: gate returns
 // errUnread, and its steps stay deferred.
+//
+// The read checks the site up to 3 times, in every mode: the site has just
+// answered the check before its step, so a failed check is a blip, not a
+// lost site. The read's other sites get one check; gate does not use them.
 func (r *runner) gate(ctx context.Context, site string) error {
 	if r.gated[site] {
 		return nil
 	}
-	topo, err := r.Driver.Discover(ctx, &r.sf.Spec.Workload.Spec, r.Clients)
+	checks := r.SiteChecks(r.sf.Spec.Mode, r.sf.Spec.To)
+	checks.Once = func(s string) bool { return s != site }
+	topo, err := r.Driver.Discover(ctx, &r.sf.Spec.Workload.Spec, checks)
+	if note := checks.Note(site); note != "" {
+		r.note(site, "the read before its deferred steps: "+note)
+	}
 	if err != nil {
 		return err
 	}
