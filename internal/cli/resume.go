@@ -272,12 +272,21 @@ func newStatus(o *options) *cobra.Command {
 	return cmd
 }
 
+// redacted returns a copy of a ledger whose Git URL holds no user or
+// password. A ledger written before Tack refused them may hold one.
+func redacted(sf *failoverv1.SiteFailover) *failoverv1.SiteFailover {
+	out := sf.DeepCopy()
+	g := &out.Spec.Workload.Spec.Git
+	g.URL = engine.Redact(g.URL)
+	return out
+}
+
 func writeYAML(w io.Writer, runs []foundRun) error {
 	for i, r := range runs {
 		if i > 0 {
 			fmt.Fprintln(w, "---")
 		}
-		b, err := yaml.Marshal(r.sf)
+		b, err := yaml.Marshal(redacted(r.sf))
 		if err != nil {
 			return err
 		}

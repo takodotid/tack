@@ -99,7 +99,7 @@ func newPlan(o *options) *cobra.Command {
 			}
 			out := cmd.OutOrStdout()
 			if p.output == "yaml" {
-				b, err := yaml.Marshal(plan.SiteFailover)
+				b, err := yaml.Marshal(redacted(plan.SiteFailover))
 				if err != nil {
 					return err
 				}

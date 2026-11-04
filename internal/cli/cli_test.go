@@ -587,3 +587,23 @@ func TestRunRefusesPlanOnAnotherCluster(t *testing.T) {
 		t.Fatalf("exit %d, want %d with a refusal:\n%s", code, ExitError, out)
 	}
 }
+
+// A ledger written before Tack refused a credential in the Git URL prints
+// it redacted in YAML. Issue #31.
+func TestYAMLRedactsGitURL(t *testing.T) {
+	old := stoppedRun(t, "pg-main-earlier")
+	old.Spec.Workload.Spec.Git.URL = "https://user:FAKE-TOKEN-123@git.example.com/gitops.git"
+	f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": append(testenv.Site("b", "a", 0), old)})
+	for _, args := range [][]string{
+		{"status", "-f", "testdata/workload.yaml", "-o", "yaml"},
+		{"status", "pg-main-earlier", "-f", "testdata/workload.yaml", "-o", "yaml"},
+	} {
+		out, code := run(t, f, args...)
+		if code != ExitOK || strings.Contains(out, "FAKE-TOKEN-123") || !strings.Contains(out, "https://***@git.example.com/gitops.git") {
+			t.Errorf("%v: exit %d, the URL is not redacted:\n%s", args, code, out)
+		}
+	}
+	if out, _ := run(t, f, "status", "pg-main-earlier", "-f", "testdata/workload.yaml"); strings.Contains(out, "FAKE-TOKEN-123") {
+		t.Errorf("tack status prints the credential:\n%s", out)
+	}
+}

@@ -140,7 +140,7 @@ The merged file holds every site's credentials. Protect it like the originals.
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
-| `url` | yes | | The repository, as `git` takes it: SSH, HTTPS or a path. Never put a credential in it; access comes from the operator's `git` configuration. |
+| `url` | yes | | The repository, as `git` takes it: SSH, HTTPS or a path. Never put a credential in it; access comes from the operator's `git` configuration. Tack refuses a password, and a user in an HTTP or HTTPS URL; set the user with `git config credential.<url>.username` instead. |
 | `branch` | yes | | The branch Flux applies. |
 | `author.name`, `author.email` | no | git's own `user.name` and `user.email` | The author and committer of Tack's commit. Without `author`, git must have an identity configured; Tack never lets git guess one. |
 | `fields[]` | no | | Mappings: where a field lives in the repository. A mapping wins over `find`. |
