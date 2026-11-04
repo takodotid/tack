@@ -3,7 +3,7 @@ Ledger: SiteFailover tack-system/pg-main-20261027-101500 at site b
 
 Sites:
   a  unreachable  site a is unreachable: connection refused
-  b  Replica      declares a  healthy  Cluster db/pg-b: phase "Cluster in healthy state", declares pg-a primary, pod pg-b-1, timeline 1; Pooler pg-b-pooler-rw has 0 instances
+  b  Replica      declares a  healthy  Cluster db/pg-b: phase "Cluster in healthy state", declares pg-a primary, pod pg-b-1; Pooler pg-b-pooler-rw has 0 instances
 
 Hold
    1. hold-a-cluster-pg-a  site a (waits for the site if unreachable)
