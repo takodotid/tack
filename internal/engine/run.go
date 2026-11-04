@@ -193,7 +193,8 @@ func (e *Env) resume(ctx context.Context, sf *failoverv1.SiteFailover, opts Opti
 		return err
 	}
 	r := &runner{Env: e, sf: sf, opts: opts, checks: e.SiteChecks(sf.Spec.Mode, sf.Spec.To),
-		reachable: map[string]error{}, retried: map[string]string{}, gated: map[string]bool{}, identified: map[string]bool{}}
+		reachable: map[string]error{}, retried: map[string]string{}, gated: map[string]bool{}, identified: map[string]bool{},
+		verified: map[string]bool{}}
 	return r.run(ctx)
 }
 
@@ -209,6 +210,8 @@ type runner struct {
 	retried    map[string]string
 	gated      map[string]bool
 	identified map[string]bool
+	// verified holds the sites whose VerifyGit succeeded in this process.
+	verified map[string]bool
 }
 
 func (r *runner) run(ctx context.Context) error {
@@ -260,11 +263,31 @@ func (r *runner) run(ctx context.Context) error {
 				}
 			}
 		}
+		if step.Type == failoverv1.StepRelease && !r.verified[step.Site] {
+			// The check of Git against live ran in an earlier process,
+			// maybe hours ago: run it again before the site's first
+			// release ([RFC#0005] Requirement 8).
+			if v := r.verifyStep(step.Site); v != nil {
+				if err := r.runStep(ctx, v); err != nil {
+					return err
+				}
+			}
+		}
 		if err := r.runStep(ctx, step); err != nil {
 			return err
 		}
 	}
 	return r.finish(ctx)
+}
+
+// verifyStep returns the VerifyGit step of a site.
+func (r *runner) verifyStep(site string) *failoverv1.Step {
+	for i := range r.sf.Spec.Steps {
+		if s := &r.sf.Spec.Steps[i]; s.Type == failoverv1.StepVerifyGit && s.Site == site {
+			return s
+		}
+	}
+	return nil
 }
 
 // errUnread is returned by gate when the site did not answer its read.
@@ -366,6 +389,9 @@ func (r *runner) runStep(ctx context.Context, step *failoverv1.Step) error {
 			msg += "; "
 		}
 		msg += note
+	}
+	if step.Type == failoverv1.StepVerifyGit {
+		r.verified[step.Site] = true
 	}
 	done := metav1.NewTime(r.now())
 	st = r.stepStatus(step.ID)
