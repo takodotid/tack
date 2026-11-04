@@ -212,6 +212,10 @@ func (r *runner) end(ctx context.Context, step *failoverv1.Step, err error) erro
 	}
 	st := r.stepStatus(step.ID)
 	st.Message = se.Message
+	if note := r.retried[step.Site]; note != "" {
+		delete(r.retried, step.Site)
+		st.Message += "; " + note
+	}
 	ret := ErrStopped
 	if se.Wait {
 		st.State = failoverv1.StepPending

@@ -387,6 +387,22 @@ func TestSiteCheckRetried(t *testing.T) {
 	}
 }
 
+// A site that answers only on a later check, then fails its first step:
+// the step's message still says how many checks ran.
+func TestSiteCheckRetriedThenStepFails(t *testing.T) {
+	f := newFixture(t)
+	plan := f.plan("b", failoverv1.ModePlanned)
+	f.clients.Blip("a", 1)
+	f.flux.Fail["Hold"] = errors.New("hold failed")
+	sf, err := f.run("b", plan, engine.Options{})
+	if !errors.Is(err, engine.ErrStopped) {
+		t.Fatalf("err %v, want stopped", err)
+	}
+	if msg := stepMessage(sf, "hold-a-cluster-pg-a"); !strings.Contains(msg, "hold failed") || !strings.Contains(msg, "site a answered on check 2 of 3") {
+		t.Errorf("hold-a-cluster-pg-a message %q", msg)
+	}
+}
+
 // A site that stays down counts as unreachable after a bounded number of
 // checks. The to site then stops the run.
 func TestSiteCheckBounded(t *testing.T) {
