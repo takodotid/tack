@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -765,5 +766,58 @@ func TestBranchHeadAndContains(t *testing.T) {
 	_, err := newRepo(t).BranchHead(ctx, w)
 	if se, ok := stop.As(err); !ok || se.Reason != failoverv1.ReasonGitUnreachable || !se.Wait {
 		t.Errorf("BranchHead without the remote: %v, want to wait with GitUnreachable", err)
+	}
+}
+
+// RFC0006 Requirement 2: Tack runs no client-side hook. A hooks path in the
+// operator's global configuration names hooks that leave a mark, and a
+// prepare-commit-msg hook that drops the trailer, as one did in a probe of
+// the production-readiness review (#35, row 13): a resumed run then could
+// not adopt its own commit.
+func TestCommitRunsNoHooks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the hooks are shell scripts")
+	}
+	isolate(t)
+	rm := newRemote(t, fixture())
+	base := rm.head()
+	hooks, marks := t.TempDir(), t.TempDir()
+	for _, h := range []string{"pre-commit", "prepare-commit-msg", "commit-msg", "post-commit", "post-checkout", "pre-push", "post-rewrite"} {
+		script := "#!/bin/sh\ntouch '" + filepath.Join(marks, h) + "'\n"
+		if h == "prepare-commit-msg" {
+			script += "sed -i.bak '/^Tack-Run:/d' \"$1\"\n"
+		}
+		if err := os.WriteFile(filepath.Join(hooks, h), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	global := filepath.Join(t.TempDir(), "gitconfig")
+	if err := os.WriteFile(global, []byte("[core]\n\thooksPath = "+hooks+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", global)
+
+	w := workload(rm.url)
+	r := newRepo(t)
+	changes, err := r.Resolve(context.Background(), w, switchover())
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	commit, err := r.Commit(context.Background(), w, engine.CommitRequest{Run: "run-1", Base: base, Changes: changes, Message: "tack: switch pg to b"})
+	if err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if _, err := r.Checkout(context.Background(), w, commit); err != nil {
+		t.Fatalf("Checkout: %v", err)
+	}
+	if msg := git(t, rm.url, "log", "-1", "--format=%B", commit); !strings.HasSuffix(msg, "\n\nTack-Run: run-1") {
+		t.Errorf("message %q lacks the trailer", msg)
+	}
+	ran, err := os.ReadDir(marks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range ran {
+		t.Errorf("hook %s ran", e.Name())
 	}
 }

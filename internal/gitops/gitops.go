@@ -47,6 +47,9 @@ type Repo struct {
 	made    bool
 	created []string
 	clones  map[string]*clone
+	// hooks is an empty directory, the hooks path of every git command, so
+	// git runs no hook of the operator's configuration.
+	hooks string
 
 	// beforePush runs just before a push. Tests use it.
 	beforePush func()
@@ -85,7 +88,7 @@ func (r *Repo) Close() error {
 			errs = append(errs, err)
 		}
 	}
-	r.created, r.clones, r.ready, r.made = nil, map[string]*clone{}, false, false
+	r.created, r.clones, r.ready, r.made, r.hooks = nil, map[string]*clone{}, false, false, ""
 	return errors.Join(errs...)
 }
 
@@ -277,7 +280,18 @@ func gitEnv(extra []string) []string {
 }
 
 // git runs git in dir and returns its standard output, also on failure.
+// Its hooks path is an empty directory: a hook from the operator's
+// configuration, such as one that rewrites the commit message, never runs
+// ([RFC#0006] Requirement 2).
 func (r *Repo) git(ctx context.Context, dir string, env []string, stdin string, args ...string) (string, error) {
+	if r.hooks == "" {
+		d, err := r.mkdir("hooks-")
+		if err != nil {
+			return "", fmt.Errorf("an empty hooks directory for git: %w", err)
+		}
+		r.hooks = d
+	}
+	args = append([]string{"-c", "core.hooksPath=" + r.hooks}, args...)
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	cmd.Env = gitEnv(env)
