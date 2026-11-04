@@ -128,17 +128,40 @@ func (r *runner) reconcile(ctx context.Context, s *failoverv1.Step) (string, err
 		msg += "; " + strings.Join(notes, "; ")
 	}
 	if s.Phase == failoverv1.PhaseHold {
-		g := &r.sf.Status.Git
-		switch {
-		case applied == "":
-		case g.BaseRevision == "":
-			g.BaseRevision = applied
-		case !SameRevision(g.BaseRevision, applied) && g.AcceptedRevision == "":
-			return "", stop.Ask(failoverv1.ReasonGitChanged,
-				"Flux at site %s applied %s, but the run's base is %s: Git changed during the run", s.Site, applied, g.BaseRevision)
+		if err := r.checkBase(s.Site, applied); err != nil {
+			return "", err
 		}
 	}
 	return msg, nil
+}
+
+// checkBase checks the revision Flux applied at a site in Hold against the
+// run's base. Once the run committed, a site that comes back may have
+// applied the run's commit, or the head the operator accepted after it:
+// Flux there follows Git, which already declares the switch. Both pass
+// without reading Git, which Hold must not need ([RFC#0007] Requirement 1);
+// the Release phase checks the branch before it releases the site.
+func (r *runner) checkBase(site, applied string) error {
+	g := &r.sf.Status.Git
+	switch {
+	case applied == "":
+		return nil
+	case g.BaseRevision == "":
+		g.BaseRevision = applied
+		return nil
+	case SameRevision(g.BaseRevision, applied) || g.AcceptedRevision != "":
+		return nil
+	case g.Commit == "":
+		return stop.Ask(failoverv1.ReasonGitChanged,
+			"Flux at site %s applied %s, but the run's base is %s: Git changed during the run", site, applied, g.BaseRevision)
+	}
+	sha := RevisionSHA(applied)
+	if sameCommit(sha, g.Commit) || g.ReleaseRevision != "" && sameCommit(sha, g.ReleaseRevision) {
+		return nil
+	}
+	return stop.Ask(failoverv1.ReasonGitChanged,
+		"Flux at site %s applied %s, which is neither the run's base %s nor its commit %s: Git changed during the run. Review it; if it contains the run's commit, resume with --accept-git-head %s",
+		site, applied, g.BaseRevision, g.Commit, sha)
 }
 
 func (r *runner) git(ctx context.Context, s *failoverv1.Step) (string, error) {
