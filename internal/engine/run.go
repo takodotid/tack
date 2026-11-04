@@ -110,7 +110,17 @@ func (r *runner) run(ctx context.Context) error {
 			}
 			if st.State == failoverv1.StepDeferred {
 				if err := r.gate(ctx, step.Site); err != nil {
-					return r.end(ctx, step, err)
+					if !errors.Is(err, errUnread) {
+						return r.end(ctx, step, err)
+					}
+					// The site stays unreachable for this process.
+					r.reachable[step.Site] = err
+					st.Message = fmt.Sprintf("site %s unreachable: %v", step.Site, err)
+					if err := r.write(ctx, r.sf); err != nil {
+						return err
+					}
+					r.printf("  deferred  %s (site %s did not answer the read before its deferred steps)\n", step.ID, step.Site)
+					continue
 				}
 			}
 		}
@@ -121,8 +131,13 @@ func (r *runner) run(ctx context.Context) error {
 	return r.finish(ctx)
 }
 
+// errUnread is returned by gate when the site did not answer its read.
+var errUnread = errors.New("the site did not answer the read before its deferred steps")
+
 // gate stops the run when a site whose steps were deferred comes back
-// answering as primary, unless the operator approved fencing it.
+// answering as primary, unless the operator approved fencing it. A site
+// that does not answer the read is not known to be fenced: gate returns
+// errUnread, and its steps stay deferred.
 func (r *runner) gate(ctx context.Context, site string) error {
 	if r.gated[site] {
 		return nil
@@ -134,6 +149,9 @@ func (r *runner) gate(ctx context.Context, site string) error {
 	s, ok := topo.Site(site)
 	if !ok {
 		return fmt.Errorf("site %s is not in the topology", site)
+	}
+	if !s.Reachable {
+		return fmt.Errorf("%w: %s", errUnread, s.Error)
 	}
 	if s.Role == driver.RolePrimary && site != r.sf.Spec.To && !slices.Contains(r.opts.Fence, site) {
 		return stop.Ask(failoverv1.ReasonFencedSiteIsPrimary,

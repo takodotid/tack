@@ -433,6 +433,43 @@ func TestSiteLossSiteStaysDown(t *testing.T) {
 	}
 }
 
+// A lost site answers the check before its deferred steps, then fails the
+// read of the fence check. Its steps must stay deferred: an unread site
+// is not known to be fenced.
+func TestFenceCheckCannotRead(t *testing.T) {
+	f := newFixture(t)
+	f.clients.SetDown("a", true)
+	sf, err := f.start("b", failoverv1.ModeSiteLoss, engine.Options{})
+	if err != nil || sf.Status.State != failoverv1.RunSucceeded {
+		t.Fatalf("run: %v %s", err, sf.Status.Message)
+	}
+
+	// Site a comes back, still primary, and flaps.
+	f.clients.SetDown("a", false)
+	f.clients.Flap("a", true, false)
+	sf, err = f.resume("b", engine.Options{})
+	if err != nil || sf.Status.State != failoverv1.RunSucceeded {
+		t.Fatalf("resume: %v %s %s", err, sf.Status.State, sf.Status.Message)
+	}
+	if field(f.cluster("a"), "spec", "replica", "primary") != "pg-a" {
+		t.Fatal("site a was fenced although the fence check could not read it")
+	}
+	for _, id := range []string{"hold-a-cluster-pg-a", "fence-a"} {
+		if st := stepState(sf, id); st != failoverv1.StepDeferred {
+			t.Errorf("%s is %s, want Deferred", id, st)
+		}
+	}
+	if msg := stepMessage(sf, "hold-a-cluster-pg-a"); !strings.Contains(msg, "did not answer the read") {
+		t.Errorf("hold-a-cluster-pg-a message %q", msg)
+	}
+
+	// Read, it answers as primary: the run stops for the operator.
+	sf, err = f.resume("b", engine.Options{})
+	if !errors.Is(err, engine.ErrStopped) || sf.Status.Reason != failoverv1.ReasonFencedSiteIsPrimary {
+		t.Fatalf("err %v, reason %s", err, sf.Status.Reason)
+	}
+}
+
 func TestHeldByAnotherRun(t *testing.T) {
 	f := newFixture(t)
 	f.flux.Held["a/Cluster/pg-a"] = "run-0"
