@@ -10,7 +10,7 @@
 | `tack status RUN -f workload.yaml -o yaml` | the whole `SiteFailover` object |
 | `kubectl --context site-b -n tack-system get sfo` | the ledgers at one site, with workload, mode, from, to, state and phase |
 
-A run's state is `Running`, `Waiting`, `Stopped` or `Succeeded`; each step's state is `Pending`, `Running`, `Succeeded`, `Failed` or `Deferred` ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirements 9 and 11). A run left `Running` by a process that ended, such as a killed terminal, goes on with `tack resume`.
+A run's state is `Running`, `Waiting`, `Stopped` or `Succeeded`; each step's state is `Pending`, `Running`, `Succeeded`, `Failed` or `Deferred` ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirements 9 and 11). A run left `Running` by a process that ended, such as a killed terminal, goes on with `tack resume`. A run shown as `NotStarted` never recorded its start: its process ended between creating the ledger and its first write, so none of its steps ran. It cannot resume; plan again and start a new run with `--take-over RUN`.
 
 A run that stopped because the Git branch moved, abbreviated:
 

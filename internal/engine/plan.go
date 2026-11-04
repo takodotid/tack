@@ -177,18 +177,20 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 const FollowUpRebuild = "Rebuild"
 
 // checkRebuilt refuses a planned run to a site whose member an earlier run
-// left to rebuild, until the member was created again after that run.
+// left to rebuild, until the member was created again after that run
+// started: its startedAt, or its ledger's creation when it has none.
 // The workload's status cannot tell such a member from a healthy replica.
 func checkRebuilt(req Request, to *driver.SiteState, runs []failoverv1.SiteFailover, notes *[]string) error {
 	for _, r := range runs {
-		if r.Status.StartedAt == nil {
-			continue
+		started := r.CreationTimestamp.Time
+		if r.Status.StartedAt != nil {
+			started = r.Status.StartedAt.Time
 		}
 		for _, f := range r.Status.FollowUps {
 			if f.Site != req.To || f.Action != FollowUpRebuild {
 				continue
 			}
-			if !to.Created.IsZero() && to.Created.After(r.Status.StartedAt.Time) {
+			if !to.Created.IsZero() && to.Created.After(started) {
 				continue
 			}
 			msg := fmt.Sprintf("run %s left site %s to rebuild (%s), and its member was not created again since", r.Name, req.To, f.Reason)

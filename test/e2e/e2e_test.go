@@ -698,17 +698,34 @@ func routeTo(site, member string) string {
 		ss.Metadata.Generation, ss.Status.ObservedGeneration, r.Members, r.Reason, r.Message)
 }
 
-// TestTakeOver: a run that dies at its first step is resumed with a
-// kubeconfig whose context for site a reaches cluster b, and stops before
-// it acts there (issue #32). A new run then takes it over and records it;
-// the old run cannot resume (issue #27).
+// TestTakeOver: a run dies right after it created its ledger; it cannot
+// resume (issue #28). A second run takes it over and dies at its first
+// step. Resumed with a kubeconfig whose context for site a reaches cluster
+// b, it stops before it acts there (issue #32). A third run takes it over
+// and records it; the second run cannot resume (issue #27).
 func TestTakeOver(t *testing.T) {
-	_, code := tack(t, []string{"TACK_FAULT=hold-a-cluster-pg-a:before"}, "run", "-f", workload, "--to", "b", "--yes")
+	_, code := tack(t, []string{"TACK_FAULT=create-ledger:after"}, "run", "-f", workload, "--to", "b", "--yes")
+	if code != exitFault {
+		t.Fatalf("exit %d, want the fault exit %d", code, exitFault)
+	}
+	never := latestRun(t, "b")
+	if state, _ := runStatus(never); state != "" {
+		t.Fatalf("the ledger has state %q; the API server should have dropped its status on create", state)
+	}
+	out, code := tack(t, nil, "resume", runName(never), "-f", workload, "--yes")
+	if code != 1 || !strings.Contains(out, "never recorded its start") {
+		t.Fatalf("resume of a ledger without a start: exit %d, want 1 with a refusal", code)
+	}
+
+	// A run's name holds its start to the second: start the next one in a
+	// later second.
+	time.Sleep(time.Second)
+	_, code = tack(t, []string{"TACK_FAULT=hold-a-cluster-pg-a:before"}, "run", "-f", workload, "--to", "b", "--take-over", runName(never), "--yes")
 	if code != exitFault {
 		t.Fatalf("exit %d, want the fault exit %d", code, exitFault)
 	}
 	old := runName(latestRun(t, "b"))
-	out, code := tack(t, nil, "run", "-f", workload, "--to", "b", "--yes")
+	out, code = tack(t, nil, "run", "-f", workload, "--to", "b", "--yes")
 	if code != 1 || !strings.Contains(out, "--take-over "+old) {
 		t.Fatalf("a run without --take-over: exit %d, want 1 naming %s", code, old)
 	}

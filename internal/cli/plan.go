@@ -239,6 +239,10 @@ func checkNoActiveRun(ctx context.Context, env *engine.Env, sf *failoverv1.SiteF
 		if r.sf.Status.State == failoverv1.RunSucceeded || superseded(runs, r.sf) {
 			continue
 		}
+		if r.sf.Status.State == "" {
+			return nil, fmt.Errorf("run %s at site %s never recorded its start, so none of its steps ran: take it over (--take-over %s)",
+				r.sf.Name, r.site, r.sf.Name)
+		}
 		return nil, fmt.Errorf("run %s at site %s is %s: resume it (tack resume %s) or take it over (--take-over %s)",
 			r.sf.Name, r.site, orPendingRun(r.sf.Status.State), r.sf.Name, r.sf.Name)
 	}

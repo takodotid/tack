@@ -53,10 +53,12 @@ func (e *Env) Start(ctx context.Context, sf *failoverv1.SiteFailover, opts Optio
 	if err := e.Ledger.Create(ctx, sf); err != nil {
 		return fmt.Errorf("create the ledger: %w", err)
 	}
-	// The status subresource ignores status on create.
+	fault.Point("create-ledger", "after")
+	// The status subresource ignores status on create. The first write
+	// outlives a cancelled run: without it the ledger has no follow-ups.
 	sf.Status = *status
-	if err := e.Ledger.UpdateStatus(ctx, sf); err != nil {
-		return fmt.Errorf("write the ledger: %w", err)
+	if err := e.write(ctx, sf); err != nil {
+		return err
 	}
 	e.printf("ledger %s/%s created\n", sf.Namespace, sf.Name)
 	if sf.Spec.TakeOver != "" && e.Supersede != nil {
@@ -67,10 +69,15 @@ func (e *Env) Start(ctx context.Context, sf *failoverv1.SiteFailover, opts Optio
 	return e.resume(ctx, sf, opts)
 }
 
-// Resume runs the remaining steps of a ledger. It refuses a run that
-// another run took over, and a run older than another run of the workload:
-// its plan may no longer match the sites ([RFC#0003] Requirement 18).
+// Resume runs the remaining steps of a ledger. It refuses a ledger that
+// never recorded its start ([RFC#0003] Requirement 20), a run that another
+// run took over, and a run older than another run of the workload: its
+// plan may no longer match the sites ([RFC#0003] Requirement 18).
 func (e *Env) Resume(ctx context.Context, sf *failoverv1.SiteFailover, opts Options) error {
+	if sf.Status.State == "" {
+		return fmt.Errorf("%w: run %s never recorded its start, so none of its steps ran and its follow-ups are not in its ledger. Plan again, and start a new run with --take-over %s",
+			ErrCannotResume, sf.Name, sf.Name)
+	}
 	if sf.Status.State == failoverv1.RunSucceeded && !hasRunnableDeferred(sf) {
 		e.printf("run %s already succeeded\n", sf.Name)
 		return nil
@@ -81,16 +88,16 @@ func (e *Env) Resume(ctx context.Context, sf *failoverv1.SiteFailover, opts Opti
 	return e.resume(ctx, sf, opts)
 }
 
-// ErrSuperseded is returned when a run cannot resume because another run
-// took it over or started after it.
-var ErrSuperseded = errors.New("the run cannot resume")
+// ErrCannotResume is returned when a run cannot resume: it never recorded
+// its start, or another run took it over or started after it.
+var ErrCannotResume = errors.New("the run cannot resume")
 
 // checkLatest refuses a run that another run took over or started after.
 // It reads the runs at every site of the run's Workload snapshot that
 // answers.
 func (e *Env) checkLatest(ctx context.Context, sf *failoverv1.SiteFailover) error {
 	if by := sf.Status.SupersededBy; by != "" {
-		return fmt.Errorf("%w: run %s was taken over by run %s; see tack status %s", ErrSuperseded, sf.Name, by, by)
+		return fmt.Errorf("%w: run %s was taken over by run %s; see tack status %s", ErrCannotResume, sf.Name, by, by)
 	}
 	if e.Runs == nil {
 		return nil
@@ -103,10 +110,10 @@ func (e *Env) checkLatest(ctx context.Context, sf *failoverv1.SiteFailover) erro
 		switch {
 		case r.Name == sf.Name:
 		case r.Spec.TakeOver == sf.Name:
-			return fmt.Errorf("%w: run %s was taken over by run %s; see tack status %s", ErrSuperseded, sf.Name, r.Name, r.Name)
+			return fmt.Errorf("%w: run %s was taken over by run %s; see tack status %s", ErrCannotResume, sf.Name, r.Name, r.Name)
 		case r.CreationTimestamp.After(sf.CreationTimestamp.Time):
 			return fmt.Errorf("%w: run %s started after run %s, so the plan of %s may no longer match the sites; see tack status %s",
-				ErrSuperseded, r.Name, sf.Name, sf.Name, r.Name)
+				ErrCannotResume, r.Name, sf.Name, sf.Name, r.Name)
 		}
 	}
 	return nil

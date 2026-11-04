@@ -440,3 +440,38 @@ func TestTakeOverIsRecorded(t *testing.T) {
 		t.Errorf("the refused commands changed something: %v", f.flux.Calls[calls:])
 	}
 }
+
+// A run that never recorded its start still counts for the check of a
+// member left to rebuild: its ledger's creation stands in for its start.
+// Issue #28.
+func TestPlanRebuildCheckWithoutStart(t *testing.T) {
+	earlier := siteLossRun("a", fixedNow.Add(-time.Hour))
+	earlier.CreationTimestamp, earlier.Status.StartedAt = metav1.NewTime(fixedNow.Add(-time.Hour)), nil
+	f := newFactory(map[string][]client.Object{
+		"a": {created(testenv.Cluster("a", "b", false, nil), fixedNow.Add(-2*time.Hour)), testenv.Pooler("a", 0)},
+		"b": {testenv.Cluster("b", "b", true, nil), testenv.Pooler("b", 2), earlier},
+	})
+	out, code := run(t, f, "plan", "-f", "testdata/workload.yaml", "--to", "a")
+	if code != ExitError || !strings.Contains(out, "rebuild it before a planned switchover") {
+		t.Fatalf("exit %d, want %d with the rebuild refusal:\n%s", code, ExitError, out)
+	}
+}
+
+// A ledger that never recorded its start cannot resume, and a new run is
+// told to take it over. Issue #28.
+func TestRunNeverStarted(t *testing.T) {
+	never := stoppedRun(t, "pg-main-earlier")
+	never.Status = failoverv1.SiteFailoverStatus{}
+	f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": append(testenv.Site("b", "a", 0), never)})
+	out, code := run(t, f, "resume", "pg-main-earlier", "-f", "testdata/workload.yaml", "--yes")
+	if code != ExitError || !strings.Contains(out, "never recorded its start") || !strings.Contains(out, "--take-over pg-main-earlier") {
+		t.Fatalf("resume: exit %d, want %d with a refusal:\n%s", code, ExitError, out)
+	}
+	out, code = run(t, f, "run", "-f", "testdata/workload.yaml", "--to", "b", "--yes")
+	if code != ExitError || !strings.Contains(out, "run pg-main-earlier at site b never recorded its start") {
+		t.Fatalf("run: exit %d, want %d naming the run:\n%s", code, ExitError, out)
+	}
+	if len(f.flux.Calls) > 0 {
+		t.Errorf("something changed: %v", f.flux.Calls)
+	}
+}

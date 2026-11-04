@@ -232,7 +232,7 @@ func TestResumeRefusesOlderRun(t *testing.T) {
 		return out, nil
 	}
 	err := env.Resume(ctx, f.ledger("b"), engine.Options{})
-	if !errors.Is(err, engine.ErrSuperseded) || !strings.Contains(err.Error(), "run run-9 started after run run-1") {
+	if !errors.Is(err, engine.ErrCannotResume) || !strings.Contains(err.Error(), "run run-9 started after run run-1") {
 		t.Fatalf("err %v, want a refusal naming run-9", err)
 	}
 	if stepState(f.ledger("b"), "verify-git-a") != failoverv1.StepFailed {
@@ -245,7 +245,7 @@ func TestResumeRefusesOlderRun(t *testing.T) {
 	if err := env.Ledger.UpdateStatus(ctx, sf); err != nil {
 		t.Fatal(err)
 	}
-	if err := env.Resume(ctx, f.ledger("b"), engine.Options{}); !errors.Is(err, engine.ErrSuperseded) || !strings.Contains(err.Error(), "taken over by run run-9") {
+	if err := env.Resume(ctx, f.ledger("b"), engine.Options{}); !errors.Is(err, engine.ErrCannotResume) || !strings.Contains(err.Error(), "taken over by run run-9") {
 		t.Fatalf("err %v, want a refusal from status.supersededBy", err)
 	}
 }
