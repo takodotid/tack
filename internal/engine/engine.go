@@ -125,6 +125,9 @@ type Env struct {
 	Now func() time.Time
 	// Poll is the interval between checks of a wait.
 	Poll time.Duration
+	// ReachWaits are the pauses between the checks of a site's API before
+	// it counts as unreachable. Nil uses DefaultReachWaits.
+	ReachWaits []time.Duration
 }
 
 func (e *Env) now() time.Time {

@@ -67,24 +67,34 @@ func (f *fixture) env(ledgerSite string) *engine.Env {
 		Clients: f.clients, Driver: cnpg.Driver{}, Flux: f.flux, Git: f.git,
 		Ledger: &ledger.Store{Client: cl, Namespace: "tack-system"},
 		Out:    io.Discard, Poll: time.Millisecond,
+		ReachWaits: []time.Duration{time.Millisecond, time.Millisecond},
 	}
 }
 
-func (f *fixture) start(to string, mode failoverv1.Mode, opts engine.Options) (*failoverv1.SiteFailover, error) {
+func (f *fixture) plan(to string, mode failoverv1.Mode) *failoverv1.SiteFailover {
 	f.t.Helper()
-	env := f.env(to)
 	from := "a"
 	if to == "a" {
 		from = "b"
 	}
-	p, err := env.MakePlan(context.Background(), engine.Request{
+	p, err := f.env(to).MakePlan(context.Background(), engine.Request{
 		Run: "run-1", Workload: f.w.Name, Spec: &f.w.Spec,
 		Request: driver.Request{From: from, To: to, Mode: mode},
 	})
 	if err != nil {
 		f.t.Fatalf("plan: %v", err)
 	}
-	err = env.Start(context.Background(), p.SiteFailover, opts)
+	return p.SiteFailover
+}
+
+func (f *fixture) start(to string, mode failoverv1.Mode, opts engine.Options) (*failoverv1.SiteFailover, error) {
+	f.t.Helper()
+	return f.run(to, f.plan(to, mode), opts)
+}
+
+func (f *fixture) run(to string, sf *failoverv1.SiteFailover, opts engine.Options) (*failoverv1.SiteFailover, error) {
+	f.t.Helper()
+	err := f.env(to).Start(context.Background(), sf, opts)
 	return f.ledger(to), err
 }
 
@@ -358,12 +368,62 @@ func TestSiteLossHoldsWithoutGit(t *testing.T) {
 	}
 }
 
+// A short network cut between the operator's host and a site fails a
+// check or two of the site's API. The run must neither stop nor defer.
+func TestSiteCheckRetried(t *testing.T) {
+	f := newFixture(t)
+	plan := f.plan("b", failoverv1.ModePlanned)
+	f.clients.Blip("a", 2)
+	before := f.clients.Checks["a"]
+	sf, err := f.run("b", plan, engine.Options{})
+	if err != nil || sf.Status.State != failoverv1.RunSucceeded {
+		t.Fatalf("run: %v %s %s", err, sf.Status.State, sf.Status.Message)
+	}
+	if n := f.clients.Checks["a"] - before; n != 3 {
+		t.Errorf("site a checked %d times, want 3", n)
+	}
+	if msg := stepMessage(sf, "hold-a-cluster-pg-a"); !strings.Contains(msg, "site a answered on check 3 of 3") {
+		t.Errorf("hold-a-cluster-pg-a message %q", msg)
+	}
+}
+
+// A site that stays down counts as unreachable after a bounded number of
+// checks. The to site then stops the run.
+func TestSiteCheckBounded(t *testing.T) {
+	f := newFixture(t)
+	plan := f.plan("b", failoverv1.ModePlanned)
+	f.clients.SetDown("b", true)
+	before := f.clients.Checks["b"]
+	sf, err := f.run("b", plan, engine.Options{})
+	if !errors.Is(err, engine.ErrStopped) || sf.Status.Reason != failoverv1.ReasonStepFailed {
+		t.Fatalf("err %v, state %s %s", err, sf.Status.State, sf.Status.Reason)
+	}
+	if n := f.clients.Checks["b"] - before; n != 3 {
+		t.Errorf("site b checked %d times, want 3", n)
+	}
+	if st := stepState(sf, "hold-b-cluster-pg-b"); st != failoverv1.StepFailed {
+		t.Errorf("hold-b-cluster-pg-b is %s", st)
+	}
+	if !strings.Contains(sf.Status.Message, "no answer to 3 checks") {
+		t.Errorf("message %q", sf.Status.Message)
+	}
+}
+
 func TestSiteLossSiteStaysDown(t *testing.T) {
 	f := newFixture(t)
 	f.clients.SetDown("a", true)
-	sf, err := f.start("b", failoverv1.ModeSiteLoss, engine.Options{})
+	plan := f.plan("b", failoverv1.ModeSiteLoss)
+	before := f.clients.Checks["a"]
+	sf, err := f.run("b", plan, engine.Options{})
 	if err != nil || sf.Status.State != failoverv1.RunSucceeded {
 		t.Fatalf("run: %v %s", err, sf.Status.Message)
+	}
+	// The run does not wait for a site it can do without.
+	if n := f.clients.Checks["a"] - before; n != 1 {
+		t.Errorf("lost site a checked %d times, want 1", n)
+	}
+	if msg := stepMessage(sf, "fence-a"); !strings.Contains(msg, "site a unreachable: ") {
+		t.Errorf("fence-a message %q", msg)
 	}
 	if !strings.Contains(sf.Status.Message, "wait for their site") {
 		t.Errorf("message %q", sf.Status.Message)

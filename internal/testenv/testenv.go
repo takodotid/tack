@@ -39,12 +39,16 @@ type Clients struct {
 	Down  map[string]bool
 	// Writes counts the writes made through Client.
 	Writes int
+	// Checks counts the calls to Reachable, by site.
+	Checks map[string]int
+	// blips holds, by site, how many of the next checks fail.
+	blips map[string]int
 }
 
 // NewClients returns fake clients for the sites, seeded with objects.
 // Writes through Client are counted in Writes.
 func NewClients(objects map[string][]client.Object) *Clients {
-	c := &Clients{Sites: map[string]client.Client{}, Down: map[string]bool{}}
+	c := &Clients{Sites: map[string]client.Client{}, Down: map[string]bool{}, Checks: map[string]int{}, blips: map[string]int{}}
 	for site, objs := range objects {
 		c.Sites[site] = NewClient(objs...)
 	}
@@ -112,12 +116,33 @@ func (c *Clients) Client(site string) (client.Client, error) {
 	return c.counted(cl), nil
 }
 
+// IsDown tells whether a site is lost. Unlike Reachable, it is neither
+// counted nor failed by a blip.
+func (c *Clients) IsDown(site string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.Down[site]
+}
+
+// Blip makes the next n checks of a site fail, as a short network cut
+// between the operator's host and the site does.
+func (c *Clients) Blip(site string, n int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.blips[site] = n
+}
+
 // Reachable implements kube.Clients.
 func (c *Clients) Reachable(_ context.Context, site string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.Checks[site]++
 	if c.Down[site] {
 		return fmt.Errorf("site %s is unreachable: connection refused", site)
+	}
+	if c.blips[site] > 0 {
+		c.blips[site]--
+		return fmt.Errorf("site %s is unreachable: context deadline exceeded", site)
 	}
 	return nil
 }
