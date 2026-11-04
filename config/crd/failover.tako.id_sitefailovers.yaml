@@ -265,7 +265,8 @@ spec:
                     reconcile:
                       description: |-
                         ReconcileStep asks Flux to reconcile and waits until Flux has handled
-                        the request. The Kustomizations' GitRepository is reconciled first.
+                        the request. The Kustomizations' GitRepository is reconciled first,
+                        except in the Hold phase of a SiteLoss run.
                       properties:
                         kustomizations:
                           description: |-
@@ -1286,7 +1287,8 @@ spec:
                     reconcile:
                       description: |-
                         ReconcileStep asks Flux to reconcile and waits until Flux has handled
-                        the request. The Kustomizations' GitRepository is reconciled first.
+                        the request. The Kustomizations' GitRepository is reconciled first,
+                        except in the Hold phase of a SiteLoss run.
                       properties:
                         kustomizations:
                           description: |-

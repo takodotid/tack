@@ -181,6 +181,11 @@ func TestPlannedRun(t *testing.T) {
 	if len(f.flux.Held) != 0 {
 		t.Errorf("objects still held: %v", f.flux.Held)
 	}
+	for _, c := range calls(f.flux, "Reconcile") {
+		if !strings.Contains(c, " fetch ") {
+			t.Errorf("a planned run reconciled without a Git fetch: %q", c)
+		}
+	}
 	if f.clients.Writes == 0 {
 		t.Error("the fake clients counted no write")
 	}
@@ -316,6 +321,43 @@ func TestSiteLossBreakGlassAndReturn(t *testing.T) {
 	}
 }
 
+// A site loss with Git cut: a GitRepository asked to fetch hangs. Hold
+// must not ask it, so the run promotes without waiting on Git.
+func TestSiteLossHoldsWithoutGit(t *testing.T) {
+	f := newFixture(t)
+	f.clients.SetDown("a", true)
+	f.git.Unreachable = true
+	f.flux.GitDown = true // a fetch hangs for 2.5s, half the Flux timeout
+	start := time.Now()
+	sf, err := f.start("b", failoverv1.ModeSiteLoss, engine.Options{})
+	if !errors.Is(err, engine.ErrWaiting) || sf.Status.Reason != failoverv1.ReasonGitUnreachable {
+		t.Fatalf("err %v, state %s %s", err, sf.Status.State, sf.Status.Reason)
+	}
+	if took := time.Since(start); took >= 2500*time.Millisecond {
+		t.Errorf("the run took %s to reach the Git step: it waited on a Git fetch", took)
+	}
+	if field(f.cluster("b"), "status", "instancesReportedState", "pg-b-1", "isPrimary") != true {
+		t.Fatal("site b was not promoted")
+	}
+	if got := calls(f.flux, "Reconcile"); strings.Join(got, ",") != "Reconcile b no-fetch " {
+		t.Errorf("Reconcile calls %q, want one at b without a Git fetch", got)
+	}
+	if msg := stepMessage(sf, "reconcile-hold-b"); !strings.Contains(msg, "Git not fetched") {
+		t.Errorf("reconcile-hold-b message %q", msg)
+	}
+
+	// Git is back: the Git step and the later reconciles fetch it.
+	f.git.Unreachable, f.flux.GitDown = false, false
+	sf, err = f.resume("b", engine.Options{})
+	if err != nil || sf.Status.State != failoverv1.RunSucceeded {
+		t.Fatalf("resume: %v %s %s", err, sf.Status.State, sf.Status.Message)
+	}
+	got := calls(f.flux, "Reconcile")
+	if len(got) != 3 || !strings.HasPrefix(got[1], "Reconcile b fetch c") || !strings.HasPrefix(got[2], "Reconcile b fetch c") {
+		t.Errorf("Reconcile calls %q: the Git and Release phases must fetch the run's commit", got)
+	}
+}
+
 func TestSiteLossSiteStaysDown(t *testing.T) {
 	f := newFixture(t)
 	f.clients.SetDown("a", true)
@@ -341,6 +383,25 @@ func TestHeldByAnotherRun(t *testing.T) {
 	if field(f.cluster("a"), "spec", "replica", "primary") != "pg-a" {
 		t.Fatal("the run changed live objects without holding them")
 	}
+}
+
+func calls(f *testenv.Flux, name string) []string {
+	var out []string
+	for _, c := range f.Calls {
+		if strings.HasPrefix(c, name+" ") {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func stepMessage(sf *failoverv1.SiteFailover, id string) string {
+	for _, s := range sf.Status.Steps {
+		if s.ID == id {
+			return s.Message
+		}
+	}
+	return ""
 }
 
 func countCalls(f *testenv.Flux, name string) int {

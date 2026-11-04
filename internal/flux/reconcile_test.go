@@ -125,7 +125,7 @@ func TestReconcile(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		sim := &fluxSim{react: succeed(always(newRev))}
 		c := newClient(sim.funcs(), kustomization(ksKey, false), gitRepository())
-		rev, _, err := testFlux(c, nil).Reconcile(ctx, "a", []failoverv1.ObjectKey{ksKey, ksKey}, "", time.Second)
+		rev, _, err := testFlux(c, nil).Reconcile(ctx, "a", []failoverv1.ObjectKey{ksKey, ksKey}, "", true, time.Second)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -140,7 +140,7 @@ func TestReconcile(t *testing.T) {
 	t.Run("expected revision", func(t *testing.T) {
 		sim := &fluxSim{react: succeed(always(newRev))}
 		c := newClient(sim.funcs(), kustomization(ksKey, false), gitRepository())
-		rev, _, err := testFlux(c, nil).Reconcile(ctx, "a", []failoverv1.ObjectKey{ksKey}, "2222222222222222222222222222222222222222", time.Second)
+		rev, _, err := testFlux(c, nil).Reconcile(ctx, "a", []failoverv1.ObjectKey{ksKey}, "2222222222222222222222222222222222222222", true, time.Second)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -152,7 +152,7 @@ func TestReconcile(t *testing.T) {
 		sim := &fluxSim{react: succeed(always(newRev))}
 		c := newClient(sim.funcs(), kustomization(ksKey, true), gitRepository())
 		var out bytes.Buffer
-		rev, notes, err := testFlux(c, &out).Reconcile(ctx, "a", []failoverv1.ObjectKey{ksKey}, "", time.Second)
+		rev, notes, err := testFlux(c, &out).Reconcile(ctx, "a", []failoverv1.ObjectKey{ksKey}, "", true, time.Second)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -169,7 +169,7 @@ func TestReconcile(t *testing.T) {
 	t.Run("wrong revision", func(t *testing.T) {
 		sim := &fluxSim{react: succeed(always(newRev))}
 		c := newClient(sim.funcs(), kustomization(ksKey, false), gitRepository())
-		_, _, err := testFlux(c, nil).Reconcile(ctx, "a", []failoverv1.ObjectKey{ksKey}, "3333333333333333333333333333333333333333", 30*time.Millisecond)
+		_, _, err := testFlux(c, nil).Reconcile(ctx, "a", []failoverv1.ObjectKey{ksKey}, "3333333333333333333333333333333333333333", true, 30*time.Millisecond)
 		if err == nil || !strings.Contains(err.Error(), "timed out") || !strings.Contains(err.Error(), "applied "+newRev) ||
 			!strings.Contains(err.Error(), ReasonSucceeded) {
 			t.Fatalf("got %v", err)
@@ -183,7 +183,7 @@ func TestReconcile(t *testing.T) {
 			}
 		}}
 		c := newClient(sim.funcs(), kustomization(ksKey, false), gitRepository())
-		_, _, err := testFlux(c, nil).Reconcile(ctx, "a", []failoverv1.ObjectKey{ksKey}, "", 30*time.Millisecond)
+		_, _, err := testFlux(c, nil).Reconcile(ctx, "a", []failoverv1.ObjectKey{ksKey}, "", true, 30*time.Millisecond)
 		if err == nil || !strings.Contains(err.Error(), "ReconciliationFailed: apply failed: boom") {
 			t.Fatalf("got %v", err)
 		}
@@ -196,7 +196,7 @@ func TestReconcile(t *testing.T) {
 			}
 		}}
 		c := newClient(sim.funcs(), kustomization(ksKey, false), gitRepository())
-		_, _, err := testFlux(c, nil).Reconcile(ctx, "a", []failoverv1.ObjectKey{ksKey}, "", 30*time.Millisecond)
+		_, _, err := testFlux(c, nil).Reconcile(ctx, "a", []failoverv1.ObjectKey{ksKey}, "", true, 30*time.Millisecond)
 		if err == nil || !strings.Contains(err.Error(), "observed generation 1, want 2") {
 			t.Fatalf("got %v", err)
 		}
@@ -204,7 +204,7 @@ func TestReconcile(t *testing.T) {
 	t.Run("timeout", func(t *testing.T) {
 		c := newClient((&fluxSim{}).funcs(), kustomization(ksKey, false), gitRepository())
 		var out bytes.Buffer
-		_, _, err := testFlux(c, &out).Reconcile(ctx, "a", []failoverv1.ObjectKey{ksKey}, "", 30*time.Millisecond)
+		_, _, err := testFlux(c, &out).Reconcile(ctx, "a", []failoverv1.ObjectKey{ksKey}, "", true, 30*time.Millisecond)
 		if err == nil || !strings.Contains(err.Error(), "has not handled the reconcile request") {
 			t.Fatalf("got %v", err)
 		}
@@ -223,7 +223,7 @@ func TestReconcile(t *testing.T) {
 		}}
 		c := newClient(sim.funcs(), kustomization(ksKey, false), gitRepository())
 		var out bytes.Buffer
-		rev, _, err := testFlux(c, &out).Reconcile(ctx, "a", []failoverv1.ObjectKey{ksKey}, "", time.Second)
+		rev, _, err := testFlux(c, &out).Reconcile(ctx, "a", []failoverv1.ObjectKey{ksKey}, "", true, time.Second)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -232,6 +232,33 @@ func TestReconcile(t *testing.T) {
 		}
 		if !strings.Contains(out.String(), "did not fetch (GitOperationFailed") {
 			t.Errorf("no note: %q", out.String())
+		}
+	})
+	t.Run("no Git fetch", func(t *testing.T) {
+		// The source never handles a request, as when it cannot reach Git.
+		sim := &fluxSim{react: func(u *unstructured.Unstructured, tok string) {
+			if u.GetKind() == "Kustomization" {
+				succeed(always(oldRev))(u, tok)
+			}
+		}}
+		c := newClient(sim.funcs(), kustomization(ksKey, false), gitRepository())
+		timeout := 10 * time.Second
+		start := time.Now()
+		rev, notes, err := testFlux(c, nil).Reconcile(ctx, "a", []failoverv1.ObjectKey{ksKey}, "", false, timeout)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if took := time.Since(start); took >= timeout/10 {
+			t.Errorf("took %s: it waited for the source", took)
+		}
+		if rev != oldRev {
+			t.Errorf("revision %q, want %q", rev, oldRev)
+		}
+		if want := []string{"Kustomization flux-system/db"}; strings.Join(sim.requests, ",") != strings.Join(want, ",") {
+			t.Errorf("requests %v, want %v", sim.requests, want)
+		}
+		if len(notes) != 0 {
+			t.Errorf("notes %q", notes)
 		}
 	})
 	t.Run("Kustomizations disagree", func(t *testing.T) {
@@ -243,12 +270,12 @@ func TestReconcile(t *testing.T) {
 			return newRev
 		})}
 		c := newClient(sim.funcs(), kustomization(ksKey, false), kustomization(other, false), gitRepository())
-		_, _, err := testFlux(c, nil).Reconcile(ctx, "a", []failoverv1.ObjectKey{ksKey, other}, "", time.Second)
+		_, _, err := testFlux(c, nil).Reconcile(ctx, "a", []failoverv1.ObjectKey{ksKey, other}, "", true, time.Second)
 		wantStop(t, err, failoverv1.ReasonGitChanged, oldRev, newRev)
 	})
 	t.Run("missing Kustomization", func(t *testing.T) {
 		c := newClient(nil, gitRepository())
-		if _, _, err := testFlux(c, nil).Reconcile(ctx, "a", []failoverv1.ObjectKey{ksKey}, "", time.Second); err == nil {
+		if _, _, err := testFlux(c, nil).Reconcile(ctx, "a", []failoverv1.ObjectKey{ksKey}, "", true, time.Second); err == nil {
 			t.Fatal("want an error")
 		}
 	})

@@ -98,13 +98,17 @@ func (r *runner) reconcile(ctx context.Context, s *failoverv1.Step) (string, err
 			return "", err
 		}
 	}
-	applied, notes, err := r.Flux.Reconcile(ctx, s.Site, ks, rev, s.Reconcile.Timeout.Duration)
+	fetch := FetchesGit(r.sf.Spec.Mode, s.Phase)
+	applied, notes, err := r.Flux.Reconcile(ctx, s.Site, ks, rev, fetch, s.Reconcile.Timeout.Duration)
 	if err != nil {
 		return "", err
 	}
 	msg := "Flux applied " + applied
 	if applied == "" {
 		msg = "nothing to reconcile"
+	}
+	if !fetch {
+		notes = append([]string{"Git not fetched: a site-loss run holds without Git"}, notes...)
 	}
 	if len(notes) > 0 {
 		msg += "; " + strings.Join(notes, "; ")

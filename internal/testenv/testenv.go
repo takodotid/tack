@@ -144,6 +144,9 @@ type Flux struct {
 	Calls    []string
 	// Fail makes a method return an error, by method name.
 	Fail map[string]error
+	// GitDown makes a Git fetch hang for half the timeout, as a
+	// GitRepository does when it cannot reach Git.
+	GitDown bool
 }
 
 // NewFlux returns a fake Flux at a revision.
@@ -192,17 +195,34 @@ func (f *Flux) Release(_ context.Context, site string, obj failoverv1.ObjectRef,
 	return 1, nil
 }
 
-// Reconcile implements engine.Flux.
-func (f *Flux) Reconcile(_ context.Context, site string, _ []failoverv1.ObjectKey, revision string, _ time.Duration) (string, []string, error) {
-	if err := f.call("Reconcile", site, " ", revision); err != nil {
+// Reconcile implements engine.Flux. Calls records "fetch" or "no-fetch"
+// after the site.
+func (f *Flux) Reconcile(ctx context.Context, site string, _ []failoverv1.ObjectKey, revision string, fetchGit bool, timeout time.Duration) (string, []string, error) {
+	fetch := "no-fetch"
+	if fetchGit {
+		fetch = "fetch"
+	}
+	if err := f.call("Reconcile", site, " ", fetch, " ", revision); err != nil {
 		return "", nil, err
+	}
+	var notes []string
+	f.mu.Lock()
+	down := f.GitDown
+	f.mu.Unlock()
+	if fetchGit && down {
+		select {
+		case <-ctx.Done():
+			return "", nil, ctx.Err()
+		case <-time.After(timeout / 2):
+		}
+		notes = append(notes, "GitRepository did not handle the reconcile request in "+(timeout/2).String())
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if revision != "" {
-		return "main@sha1:" + revision, nil, nil
+		return "main@sha1:" + revision, notes, nil
 	}
-	return f.Revision, nil, nil
+	return f.Revision, notes, nil
 }
 
 // VerifyGit implements engine.Flux.

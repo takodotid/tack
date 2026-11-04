@@ -36,11 +36,13 @@ type Flux interface {
 	// the object's generation.
 	Release(ctx context.Context, site string, obj failoverv1.ObjectRef, run string) (int64, error)
 
-	// Reconcile asks Flux to fetch Git and reconcile the Kustomizations,
-	// and waits until each has handled the request. When revision is set,
-	// each must have applied it. It returns the revision Flux applied, and
-	// notes for the ledger, such as a GitRepository that could not fetch.
-	Reconcile(ctx context.Context, site string, ks []failoverv1.ObjectKey, revision string, timeout time.Duration) (string, []string, error)
+	// Reconcile asks Flux to reconcile the Kustomizations, and waits until
+	// each has handled the request. When fetchGit is set, it first asks
+	// their GitRepository to fetch Git. When revision is set, each
+	// Kustomization must have applied it. It returns the revision Flux
+	// applied, and notes for the ledger, such as a GitRepository that could
+	// not fetch.
+	Reconcile(ctx context.Context, site string, ks []failoverv1.ObjectKey, revision string, fetchGit bool, timeout time.Duration) (string, []string, error)
 
 	// VerifyGit renders the objects from the repository checked out at dir,
 	// as Flux would, and checks that applying them changes nothing live.
@@ -81,6 +83,14 @@ type CommitRequest struct {
 	Changes []failoverv1.GitChange
 	// Message is the commit message.
 	Message string
+}
+
+// FetchesGit tells whether a Reconcile step asks Flux to fetch Git before
+// it reconciles. The Hold phase of a SiteLoss run does not: Git may be lost
+// with the site, and Hold must not wait on it ([RFC#0007] Requirement 1).
+// Flux then applies the artifact it has.
+func FetchesGit(mode failoverv1.Mode, phase failoverv1.Phase) bool {
+	return !(mode == failoverv1.ModeSiteLoss && phase == failoverv1.PhaseHold)
 }
 
 // Routing confirms that routing followed the switch.

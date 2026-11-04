@@ -88,7 +88,7 @@ func printSteps(w io.Writer, sf *failoverv1.SiteFailover, withState bool) {
 				fmt.Fprintf(w, "  %2d. %s  %s%s\n", n, s.ID, site, mark)
 			}
 			fmt.Fprintf(w, "      %s\n", s.Description)
-			for _, line := range stepDetail(&s, sf.Name) {
+			for _, line := range stepDetail(&s, sf.Name, sf.Spec.Mode) {
 				fmt.Fprintf(w, "        %s\n", line)
 			}
 			if withState {
@@ -101,7 +101,7 @@ func printSteps(w io.Writer, sf *failoverv1.SiteFailover, withState bool) {
 }
 
 // stepDetail lists exactly what a step changes or waits for.
-func stepDetail(s *failoverv1.Step, run string) []string {
+func stepDetail(s *failoverv1.Step, run string, mode failoverv1.Mode) []string {
 	switch s.Type {
 	case failoverv1.StepHold:
 		return []string{
@@ -122,6 +122,9 @@ func stepDetail(s *failoverv1.Step, run string) []string {
 			target = "the Kustomizations of the held objects (found when the step runs)"
 		}
 		line := fmt.Sprintf("request a reconcile of %s and their GitRepository; wait up to %s", target, s.Reconcile.Timeout.Duration)
+		if !engine.FetchesGit(mode, s.Phase) {
+			line = fmt.Sprintf("request a reconcile of %s on the artifact Flux has, without a Git fetch; wait up to %s", target, s.Reconcile.Timeout.Duration)
+		}
 		out := []string{line}
 		if s.Reconcile.Revision != "" {
 			out = append(out, "until Flux has applied "+s.Reconcile.Revision)
