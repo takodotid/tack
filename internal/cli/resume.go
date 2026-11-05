@@ -218,9 +218,19 @@ func newResume(o *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if _, err := engine.AcceptedHead(sf, opts.AcceptGitHead); err != nil {
+			head, err := engine.AcceptedHead(sf, opts.AcceptGitHead)
+			if err != nil {
 				return usageError{err}
 			}
+			if head == engine.AcceptHEAD {
+				// The stop named no commit: the operator accepts the
+				// branch head, and sees which commit before confirming.
+				if head, err = env.AcceptHead(ctx, sf, head); err != nil {
+					return err
+				}
+				fmt.Fprintf(out, "--accept-git-head HEAD is commit %s, the head of branch %s\n", head, spec.Git.Branch)
+			}
+			opts.AcceptGitHead = head
 			if err := o.confirm(out, yes, sf.Spec.Workload.Name); err != nil {
 				return err
 			}

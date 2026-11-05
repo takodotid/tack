@@ -296,6 +296,27 @@ func AcceptedHead(sf *failoverv1.SiteFailover, head string) (string, error) {
 		head, changed, changed)
 }
 
+// AcceptHead returns the commit that --accept-git-head head accepts for
+// the run: AcceptedHead's, and for HEAD when the run's stop named no
+// commit, the branch head, read now. The ledger records a commit, never
+// HEAD, which names none (PR #49). It fails, changing nothing, when Git
+// cannot be read for HEAD.
+func (e *Env) AcceptHead(ctx context.Context, sf *failoverv1.SiteFailover, head string) (string, error) {
+	h, err := AcceptedHead(sf, head)
+	if err != nil || h != AcceptHEAD {
+		return h, err
+	}
+	w := &sf.Spec.Workload.Spec
+	commit, err := e.Git.BranchHead(ctx, w)
+	if err == nil && commit == "" {
+		err = errors.New("the branch has no head")
+	}
+	if err != nil {
+		return "", fmt.Errorf("--accept-git-head HEAD stands for the head of branch %s, and Git cannot be read (%v). Nothing was changed: resume once Git answers, or name the commit", w.Git.Branch, err)
+	}
+	return commit, nil
+}
+
 // ErrCannotResume is returned when a run cannot resume: it never recorded
 // its start, or another run took it over or started after it.
 var ErrCannotResume = errors.New("the run cannot resume")
@@ -345,7 +366,7 @@ func (e *Env) checkLatest(ctx context.Context, sf *failoverv1.SiteFailover, chec
 const ClockSkew = 10 * time.Second
 
 func (e *Env) resume(ctx context.Context, sf *failoverv1.SiteFailover, opts Options) error {
-	head, err := AcceptedHead(sf, opts.AcceptGitHead)
+	head, err := e.AcceptHead(ctx, sf, opts.AcceptGitHead)
 	if err != nil {
 		return err
 	}

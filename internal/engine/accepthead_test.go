@@ -125,3 +125,24 @@ func TestAcceptGitHeadWithoutChangedRevision(t *testing.T) {
 	}
 	noFailoverStep(t, f, sf)
 }
+
+// PR #49's finding. After a stop that names no commit, such as FluxChanged,
+// the runbook's way on is --accept-git-head HEAD, and the ledger stored
+// "HEAD" as the release revision. The check before the next release then
+// stopped with GitChanged: "HEAD" names no commit. HEAD now stands for
+// the branch head, read when the resume starts ([RFC#0006] Requirement 10).
+func TestAcceptGitHeadHEADWithoutNamedCommit(t *testing.T) {
+	f := releaseThenDie(t)
+	sf, err := f.resume("b", engine.Options{})
+	if !errors.Is(err, engine.ErrStopped) || sf.Status.Reason != failoverv1.ReasonFluxChanged || sf.Status.Git.ChangedRevision != "" {
+		t.Fatalf("err %v, %s, changed %q: %s", err, sf.Status.Reason, sf.Status.Git.ChangedRevision, sf.Status.Message)
+	}
+	head := f.git.Head
+	sf, err = f.resume("b", engine.Options{AcceptGitHead: engine.AcceptHEAD})
+	if err != nil || sf.Status.State != failoverv1.RunSucceeded {
+		t.Fatalf("err %v, %s %s: %s", err, sf.Status.State, sf.Status.Reason, sf.Status.Message)
+	}
+	if got := sf.Status.Git.ReleaseRevision; got != head {
+		t.Errorf("release revision %q, want the branch head %s", got, head)
+	}
+}

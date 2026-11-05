@@ -185,3 +185,33 @@ func TestOutputRedactsOlderLedgers(t *testing.T) {
 		})
 	}
 }
+
+// PR #49's finding. After a stop that names no commit, --accept-git-head
+// HEAD is the branch head: tack resume shows which commit before it asks,
+// and refuses, writing nothing, when Git cannot be read.
+func TestResumeShowsTheCommitOfHEAD(t *testing.T) {
+	head := "5555555555555555555555555555555555555555"
+	for _, tt := range []struct {
+		name    string
+		gitDown bool
+		code    int
+		want    string
+	}{
+		{name: "Git answers", code: ExitUsage, want: "--accept-git-head HEAD is commit " + head + ", the head of branch main"},
+		{name: "Git down", gitDown: true, code: ExitError, want: "--accept-git-head HEAD stands for the head of branch main, and Git cannot be read"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			sf := stoppedRun(t, "pg-main-earlier")
+			sf.Status.Reason = failoverv1.ReasonFluxChanged
+			f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": append(testenv.Site("b", "a", 0), sf)})
+			f.git.Head, f.git.Unreachable = head, tt.gitDown
+			out, code := run(t, f, "resume", "pg-main-earlier", "-f", "testdata/workload.yaml", "--accept-git-head", "HEAD")
+			if code != tt.code || !strings.Contains(out, tt.want) {
+				t.Fatalf("exit %d, want %d with %q:\n%s", code, tt.code, tt.want, out)
+			}
+			if f.clients.Writes != 0 || len(f.flux.Calls) != 0 {
+				t.Errorf("%d cluster writes, Flux %v", f.clients.Writes, f.flux.Calls)
+			}
+		})
+	}
+}
