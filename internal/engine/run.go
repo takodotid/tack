@@ -261,9 +261,15 @@ func (e *Env) resume(ctx context.Context, sf *failoverv1.SiteFailover, opts Opti
 		}
 	}
 	sf.Status.Git.ChangedRevision = ""
-	sf.Status.State, sf.Status.Reason, sf.Status.Message = failoverv1.RunRunning, "", ""
-	if err := e.write(ctx, sf); err != nil {
-		return err
+	// A run that succeeded stays Succeeded until one of its deferred steps
+	// starts: a process that dies before then, such as on a site that is
+	// still down, must not leave a finished run Running, which blocks
+	// every new run (#35 row 31).
+	if sf.Status.State != failoverv1.RunSucceeded {
+		sf.Status.State, sf.Status.Reason, sf.Status.Message = failoverv1.RunRunning, "", ""
+		if err := e.write(ctx, sf); err != nil {
+			return err
+		}
 	}
 	r := &runner{Env: e, sf: sf, opts: opts, checks: e.SiteChecks(sf.Spec.Mode, sf.Spec.To),
 		reachable: map[string]error{}, retried: map[string]string{}, gated: map[string]bool{}, identified: map[string]bool{},
@@ -571,6 +577,9 @@ func (r *runner) runStep(ctx context.Context, step *failoverv1.Step) error {
 	st.FinishedAt = nil
 	st.Attempts++
 	st.Message = ""
+	if r.sf.Status.State == failoverv1.RunSucceeded {
+		r.sf.Status.State, r.sf.Status.Reason, r.sf.Status.Message = failoverv1.RunRunning, "", ""
+	}
 	if err := r.write(ctx, r.sf); err != nil {
 		return err
 	}
