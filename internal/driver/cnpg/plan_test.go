@@ -328,3 +328,30 @@ func TestVerify(t *testing.T) {
 		}
 	}
 }
+
+// RFC0004 Requirement 1: each site needs a Cluster with its own name.
+func TestValidate(t *testing.T) {
+	if err := (Driver{}).Validate(spec3()); err != nil {
+		t.Fatalf("three Clusters: %v", err)
+	}
+	for _, tt := range []struct {
+		name string
+		edit func(w *failoverv1.WorkloadSpec)
+		want string
+	}{
+		{name: "two sites name one Cluster", edit: func(w *failoverv1.WorkloadSpec) { w.Sites[2].CNPG.Cluster.Name = "pg-a" },
+			want: `sites a and c name the same Cluster "pg-a"`},
+		{name: "no cnpg", edit: func(w *failoverv1.WorkloadSpec) { w.Sites[1].CNPG = nil },
+			want: "site b: spec.sites[].cnpg.cluster needs namespace and name"},
+		{name: "a Cluster without namespace", edit: func(w *failoverv1.WorkloadSpec) { w.Sites[1].CNPG.Cluster.Namespace = "" },
+			want: "site b: spec.sites[].cnpg.cluster needs namespace and name"},
+		{name: "a Pooler without name", edit: func(w *failoverv1.WorkloadSpec) { w.Sites[0].CNPG.Pooler.Name = "" },
+			want: "site a: spec.sites[].cnpg.pooler needs namespace and name"},
+	} {
+		w := spec3()
+		tt.edit(w)
+		if err := (Driver{}).Validate(w); err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Errorf("%s: %v, want %q", tt.name, err, tt.want)
+		}
+	}
+}
