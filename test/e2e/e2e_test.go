@@ -460,10 +460,45 @@ func TestPlanDuringBlip(t *testing.T) {
 	})
 }
 
+// A run dies as it starts promote-a; the operator promotes b again by hand
+// (docs/runbooks/no-primary-after-demotion.md, option 2), and leaves the
+// holds. A resume stops before promote-a while b is primary (issue #45).
+// The next run takes the stale run over, dies right after promoting site
+// a, and resumes from its ledger.
 func TestInterruptedRunResumes(t *testing.T) {
+	_, code := tack(t, []string{"TACK_FAULT=promote-a:before"}, "run", "-f", workload, "--to", "a", "--yes")
+	if code != exitFault {
+		t.Fatalf("exit %d, want the fault exit %d", code, exitFault)
+	}
+	stale := runName(latestRun(t, "a"))
+	kubectl(t, "b", "-n", ns, "patch", "cluster", clusterName("b"), "--type", "merge", "-p", `{"spec":{"replica":{"primary":"pg-b"}}}`)
+	eventually(t, 5*time.Minute, "site b is a healthy primary again", func() string {
+		p := jsonpath(t, "b", "cluster", clusterName("b"), "{.status.phase}")
+		ip := jsonpath(t, "b", "cluster", clusterName("b"), "{.status.instancesReportedState.*.isPrimary}")
+		if p != "Cluster in healthy state" || !strings.Contains(ip, "true") {
+			return fmt.Sprintf("phase %q, isPrimary %q", p, ip)
+		}
+		return ""
+	})
+	kubectl(t, "b", "-n", ns, "patch", "pooler", poolerName("b"), "--type", "merge", "-p", `{"spec":{"instances":1}}`)
+	before := jsonpath(t, "a", "cluster", clusterName("a"), "{.metadata.generation}")
+	out, code := tack(t, nil, "resume", stale, "-f", workload, "--yes")
+	if code != exitStopped || !strings.Contains(out, "FencedSiteIsPrimary") || !strings.Contains(out, "promote-a: site b answers as primary") {
+		t.Fatalf("resume of %s: exit %d, want %d with FencedSiteIsPrimary before promote-a", stale, code, exitStopped)
+	}
+	if after := jsonpath(t, "a", "cluster", clusterName("a"), "{.metadata.generation}"); after != before {
+		t.Errorf("Cluster pg-a changed: generation %s, then %s", before, after)
+	}
+	if ip := jsonpath(t, "a", "cluster", clusterName("a"), "{.status.instancesReportedState.*.isPrimary}"); strings.Contains(ip, "true") {
+		t.Fatal("site a was promoted while site b is primary")
+	}
+	if got := stepState(latestRun(t, "a"), "promote-a"); got != "Running" {
+		t.Errorf("promote-a is %q, want Running as the process left it", got)
+	}
+
 	// The process dies right after promoting site a, before the ledger
 	// records it.
-	_, code := tack(t, []string{"TACK_FAULT=promote-a:after"}, "run", "-f", workload, "--to", "a", "--yes")
+	_, code = tack(t, []string{"TACK_FAULT=promote-a:after"}, "run", "-f", workload, "--to", "a", "--yes", "--take-over", stale)
 	if code != exitFault {
 		t.Fatalf("exit %d, want the fault exit %d", code, exitFault)
 	}
@@ -476,6 +511,9 @@ func TestInterruptedRunResumes(t *testing.T) {
 	assertGitMatches(t, "a", "a", "b")
 	if got := psql(t, "a", "select count(*) from marks"); got != "2" {
 		t.Errorf("site a has %s marks, want 2", got)
+	}
+	if out, code := tack(t, nil, "resume", stale, "-f", workload, "--yes"); code != 1 || !strings.Contains(out, "was taken over by run "+runName(sf)) {
+		t.Errorf("resume of the stale run %s: exit %d, want 1, taken over by %s", stale, code, runName(sf))
 	}
 }
 
