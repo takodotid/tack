@@ -16,6 +16,9 @@ type Error struct {
 	// Wait is true when the run waits for something outside it, false
 	// when it stops for the operator.
 	Wait bool
+	// Head is the one commit a GitChanged stop names for the operator to
+	// review and accept, or "" when it names none.
+	Head string
 }
 
 func (e *Error) Error() string { return e.Reason + ": " + e.Message }
@@ -23,6 +26,12 @@ func (e *Error) Error() string { return e.Reason + ": " + e.Message }
 // Ask stops the run for the operator.
 func Ask(reason, format string, a ...any) error {
 	return &Error{Reason: reason, Message: fmt.Sprintf(format, a...)}
+}
+
+// AskHead stops the run for the operator, naming the one commit the
+// operator may accept with --accept-git-head.
+func AskHead(reason, head, format string, a ...any) error {
+	return &Error{Reason: reason, Message: fmt.Sprintf(format, a...), Head: head}
 }
 
 // Wait pauses the run until something outside it changes.

@@ -1,7 +1,9 @@
 package engine
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -56,6 +58,9 @@ func (e *Env) Start(ctx context.Context, sf *failoverv1.SiteFailover, opts Optio
 		return fmt.Errorf("create the ledger: %w", err)
 	}
 	fault.Point("create-ledger", "after")
+	if err := e.checkStarted(ctx, sf); err != nil {
+		return err
+	}
 	// The status subresource ignores status on create. The first write
 	// outlives a cancelled run: without it the ledger has no follow-ups.
 	sf.Status = *status
@@ -69,6 +74,59 @@ func (e *Env) Start(ctx context.Context, sf *failoverv1.SiteFailover, opts Optio
 		}
 	}
 	return e.resume(ctx, sf, opts)
+}
+
+// Ended tells whether run r no longer blocks a new run of its workload
+// ([RFC#0003] Requirement 8): it succeeded, it was abandoned, or another
+// run took it over, as its status or the spec of a run in runs says.
+func Ended(r *failoverv1.SiteFailover, runs []failoverv1.SiteFailover) bool {
+	if r.Status.State == failoverv1.RunSucceeded || r.Status.SupersededBy != "" || r.Status.Abandoned != nil {
+		return true
+	}
+	for _, o := range runs {
+		if o.Name != r.Name && o.Spec.TakeOver == r.Name {
+			return true
+		}
+	}
+	return false
+}
+
+// checkStarted searches the workload's runs again once the ledger exists,
+// before the first status write, any step, and the mark on the run it takes
+// over. The search before Start and the create are not one operation: two
+// tack processes can both find no active run, then both create a ledger
+// (#35 row 35). Each searches after its create, so at most one goes on.
+// A run that finds another active run, or cannot search, is abandoned: it
+// changed nothing, and blocks no later run.
+func (e *Env) checkStarted(ctx context.Context, sf *failoverv1.SiteFailover) error {
+	if e.Runs == nil {
+		return nil
+	}
+	checks := e.StartChecks
+	if checks == nil {
+		checks = e.SiteChecks(sf.Spec.Mode, sf.Spec.To)
+	}
+	runs, err := e.Runs(ctx, checks)
+	reason := ""
+	if err != nil {
+		reason = fmt.Sprintf("the search for other runs after the ledger's creation failed: %v", err)
+	}
+	for i := range runs {
+		r := &runs[i]
+		if reason != "" || r.Name == sf.Name || r.Name == sf.Spec.TakeOver || Ended(r, runs) {
+			continue
+		}
+		reason = fmt.Sprintf("run %s of the workload (%s) was created at the same time", r.Name, orPending(r.Status.State))
+	}
+	if reason == "" {
+		return nil
+	}
+	sf.Status = failoverv1.SiteFailoverStatus{Abandoned: &failoverv1.Abandonment{At: metav1.NewTime(e.now()), Reason: reason}}
+	if werr := e.write(ctx, sf); werr != nil {
+		return fmt.Errorf("%s. Run %s ran no step and changed nothing, but its ledger could not be marked abandoned (%v): take it over with --take-over %s",
+			reason, sf.Name, werr, sf.Name)
+	}
+	return fmt.Errorf("%s. Run %s ran no step, changed nothing, and is abandoned: see tack status, then plan again", reason, sf.Name)
 }
 
 // MaxRunNames is how many names Start tries for a run: the plan's name,
@@ -94,7 +152,7 @@ func (e *Env) create(ctx context.Context, sf *failoverv1.SiteFailover, takeOver 
 			return fmt.Errorf("the name %s is taken, and its ledger cannot be read: %w", sf.Name, gerr)
 		}
 		switch {
-		case other.Status.State == failoverv1.RunSucceeded, other.Status.SupersededBy != "", other.Name == takeOver:
+		case other.Status.State == failoverv1.RunSucceeded, other.Status.SupersededBy != "", other.Status.Abandoned != nil, other.Name == takeOver:
 		case other.Status.State == "":
 			return fmt.Errorf("the name %s is taken by a run that has not recorded its start: another tack process may be starting it. Nothing was changed; check tack status %s, then plan again",
 				sf.Name, sf.Name)
@@ -154,6 +212,9 @@ type Resumption struct {
 // may no longer match the sites (Requirement 18). tack resume calls it
 // before it asks the operator, then Resumption.Resume after.
 func (e *Env) CheckResume(ctx context.Context, sf *failoverv1.SiteFailover) (*Resumption, error) {
+	if a := sf.Status.Abandoned; a != nil {
+		return nil, fmt.Errorf("%w: run %s was abandoned at %s: %s", ErrCannotResume, sf.Name, a.At.UTC().Format(time.RFC3339), a.Reason)
+	}
 	if sf.Status.State == "" {
 		return nil, fmt.Errorf("%w: run %s never recorded its start, so none of its steps ran and its follow-ups are not in its ledger. Plan again, and start a new run with --take-over %s",
 			ErrCannotResume, sf.Name, sf.Name)
@@ -193,6 +254,28 @@ func (r *Resumption) run(ctx context.Context, opts Options) error {
 	return r.env.resume(ctx, r.sf, opts)
 }
 
+// AcceptHEAD is the value of --accept-git-head that names the head the
+// run's GitChanged stop named.
+const AcceptHEAD = "HEAD"
+
+// AcceptedHead returns the commit that --accept-git-head head accepts
+// for the run. When the run's GitChanged stop named one commit
+// (status.git.changedRevision), head must name it, or be HEAD, which
+// stands for it: the operator reviewed that commit, not whatever the
+// branch holds later (#35 row 37). A stop that named none, and a ledger
+// of an older Tack, accept head as given.
+func AcceptedHead(sf *failoverv1.SiteFailover, head string) (string, error) {
+	changed := sf.Status.Git.ChangedRevision
+	switch {
+	case head == "" || changed == "":
+		return head, nil
+	case head == AcceptHEAD || sameCommit(head, changed):
+		return changed, nil
+	}
+	return "", fmt.Errorf("--accept-git-head %s is not the commit the run stopped on: the stop named %s. Review that commit, then resume with --accept-git-head %s. Nothing was changed",
+		head, changed, changed)
+}
+
 // ErrCannotResume is returned when a run cannot resume: it never recorded
 // its start, or another run took it over or started after it.
 var ErrCannotResume = errors.New("the run cannot resume")
@@ -214,6 +297,8 @@ func (e *Env) checkLatest(ctx context.Context, sf *failoverv1.SiteFailover, chec
 	for _, r := range runs {
 		switch {
 		case r.Name == sf.Name:
+		case r.Status.State == "" && r.Status.Abandoned != nil:
+			// It ran no step, so the sites are as this run's plan read them.
 		case r.Spec.TakeOver == sf.Name:
 			return fmt.Errorf("%w: run %s was taken over by run %s; see tack status %s", ErrCannotResume, sf.Name, r.Name, r.Name)
 		case r.CreationTimestamp.After(sf.CreationTimestamp.Time):
@@ -225,18 +310,29 @@ func (e *Env) checkLatest(ctx context.Context, sf *failoverv1.SiteFailover, chec
 }
 
 func (e *Env) resume(ctx context.Context, sf *failoverv1.SiteFailover, opts Options) error {
-	if opts.AcceptGitHead != "" {
+	head, err := AcceptedHead(sf, opts.AcceptGitHead)
+	if err != nil {
+		return err
+	}
+	if head != "" {
 		// Before the run's commit, the accepted head is the commit's base.
 		// After it, the Release phase checks Git against it.
 		if sf.Status.Git.Commit == "" {
-			sf.Status.Git.AcceptedRevision = opts.AcceptGitHead
+			sf.Status.Git.AcceptedRevision = head
 		} else {
-			sf.Status.Git.ReleaseRevision = opts.AcceptGitHead
+			sf.Status.Git.ReleaseRevision = head
 		}
 	}
-	sf.Status.State, sf.Status.Reason, sf.Status.Message = failoverv1.RunRunning, "", ""
-	if err := e.write(ctx, sf); err != nil {
-		return err
+	sf.Status.Git.ChangedRevision = ""
+	// A run that succeeded stays Succeeded until one of its deferred steps
+	// starts: a process that dies before then, such as on a site that is
+	// still down, must not leave a finished run Running, which blocks
+	// every new run (#35 row 31).
+	if sf.Status.State != failoverv1.RunSucceeded {
+		sf.Status.State, sf.Status.Reason, sf.Status.Message = failoverv1.RunRunning, "", ""
+		if err := e.write(ctx, sf); err != nil {
+			return err
+		}
 	}
 	r := &runner{Env: e, sf: sf, opts: opts, checks: e.SiteChecks(sf.Spec.Mode, sf.Spec.To),
 		reachable: map[string]error{}, retried: map[string]string{}, gated: map[string]bool{}, identified: map[string]bool{},
@@ -294,6 +390,12 @@ func (r *runner) run(ctx context.Context) error {
 			}
 			if step.Deferrable {
 				if err := r.gate(ctx, step.Site); err != nil {
+					if ctx.Err() != nil {
+						// An interrupt during the read is no answer from
+						// the site: the run stops before the step, which
+						// keeps its state (#35 row 34).
+						return r.stopBefore(ctx, step, ctx.Err())
+					}
 					if !errors.Is(err, errUnread) {
 						return r.stopBefore(ctx, step, err)
 					}
@@ -357,7 +459,8 @@ var errUnread = errors.New("the site did not answer the read before its steps")
 // that runs in this process, whatever that step's state: an approval to
 // fence lasts one process, and the ledger does not tell a site that came
 // back from one that never left. It stops the run when the site answers as
-// primary, unless the operator approved fencing it. A site that does not
+// primary, or declares itself primary, unless the operator approved
+// fencing it. A site that does not
 // answer the read is not known to be fenced: gate returns errUnread, and
 // its steps are deferred.
 //
@@ -384,12 +487,27 @@ func (r *runner) gate(ctx context.Context, site string) error {
 	if !s.Reachable {
 		return fmt.Errorf("%w: %s", errUnread, s.Error)
 	}
-	if s.Role == driver.RolePrimary && site != r.sf.Spec.To && !slices.Contains(r.opts.Fence, site) {
+	if what := asPrimary(*s); what != "" && site != r.sf.Spec.To && !slices.Contains(r.opts.Fence, site) {
 		return stop.Ask(failoverv1.ReasonFencedSiteIsPrimary,
-			"site %s answers as primary (%s); it should be fenced. Check it, then resume with --fence %s", site, s.Summary, site)
+			"site %s %s (%s); it should be fenced. Check it, then resume with --fence %s", site, what, s.Summary, site)
 	}
 	r.gated[site] = true
 	return nil
+}
+
+// asPrimary says how a site that answered shows itself primary: it
+// answers as primary, or it declares itself primary, which CloudNativePG
+// promotes at once, before an instance reports it ([RFC#0004] Motivation).
+// It returns "" for any other site. The read before a site's steps and the
+// read before the promotion both use it.
+func asPrimary(s driver.SiteState) string {
+	switch {
+	case s.Role == driver.RolePrimary:
+		return "answers as primary"
+	case s.DeclaredPrimary == s.Name:
+		return "declares itself primary"
+	}
+	return ""
 }
 
 // promotion returns the ID of the step that promotes to: the run's first
@@ -443,12 +561,8 @@ func (r *runner) beforePromotion(ctx context.Context) error {
 		if s.Name == to || !s.Reachable {
 			continue
 		}
-		what := "answers as primary"
-		switch {
-		case s.Role == driver.RolePrimary:
-		case s.DeclaredPrimary == s.Name:
-			what = "declares itself primary"
-		default:
+		what := asPrimary(s)
+		if what == "" {
 			continue
 		}
 		if !r.fencesAfter(s.Name) {
@@ -532,6 +646,9 @@ func (r *runner) runStep(ctx context.Context, step *failoverv1.Step) error {
 	st.FinishedAt = nil
 	st.Attempts++
 	st.Message = ""
+	if r.sf.Status.State == failoverv1.RunSucceeded {
+		r.sf.Status.State, r.sf.Status.Reason, r.sf.Status.Message = failoverv1.RunRunning, "", ""
+	}
 	if err := r.write(ctx, r.sf); err != nil {
 		return err
 	}
@@ -584,7 +701,7 @@ func (r *runner) halt(ctx context.Context, step *failoverv1.Step, err error, set
 	if !ok {
 		se = &stop.Error{Reason: failoverv1.ReasonStepFailed, Message: err.Error()}
 	}
-	se = &stop.Error{Reason: se.Reason, Message: r.hideCaptured(se.Message), Wait: se.Wait}
+	se = &stop.Error{Reason: se.Reason, Message: r.hideCaptured(se.Message), Wait: se.Wait, Head: se.Head}
 	st := r.stepStatus(step.ID)
 	st.Message = se.Message
 	if note := r.retried[step.Site]; note != "" {
@@ -609,6 +726,10 @@ func (r *runner) halt(ctx context.Context, step *failoverv1.Step, err error, set
 	}
 	r.sf.Status.Reason = se.Reason
 	r.sf.Status.Message = fmt.Sprintf("step %s: %s", step.ID, se.Message)
+	r.sf.Status.Git.ChangedRevision = ""
+	if se.Reason == failoverv1.ReasonGitChanged {
+		r.sf.Status.Git.ChangedRevision = se.Head
+	}
 	if werr := r.write(ctx, r.sf); werr != nil {
 		return errors.Join(werr, errors.New(r.sf.Status.Message))
 	}
@@ -711,15 +832,58 @@ func (r *runner) endPhase(p failoverv1.Phase, now metav1.Time) {
 	}
 }
 
+// writeTimeout bounds a ledger write, its repeats included.
+const writeTimeout = 30 * time.Second
+
 // write records the status. It outlives a cancelled run, so an interrupt
-// is still recorded.
+// is still recorded. A write that got no answer, or an answer that the API
+// server cannot serve it now, is repeated with the same resourceVersion
+// until writeTimeout ([RFC#0003] Requirement 5). A repeat that conflicts
+// may follow a write that landed without its answer: the ledger is read,
+// and a status equal to the one sent is that write. Any other failure ends
+// the process, with a message by its kind (#35 row 32).
 func (e *Env) write(ctx context.Context, sf *failoverv1.SiteFailover) error {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
 	defer cancel()
-	if err := e.Ledger.UpdateStatus(ctx, sf); err != nil {
-		return fmt.Errorf("write the ledger (another tack process may be running this run): %w", err)
+	sent := sf.DeepCopy()
+	start := e.now()
+	for attempt := 1; ; attempt++ {
+		err := e.Ledger.UpdateStatus(ctx, sf)
+		switch {
+		case err == nil:
+			return nil
+		case apierrors.IsConflict(err) && attempt > 1:
+			if stored, gerr := e.Ledger.Get(ctx, sent.Name); gerr == nil && sameStatus(&stored.Status, &sent.Status) {
+				// An earlier attempt landed; its answer was lost.
+				*sf = *stored
+				return nil
+			}
+			return fmt.Errorf("write the ledger (another tack process may be running this run): %w", err)
+		case apierrors.IsConflict(err):
+			return fmt.Errorf("write the ledger (another tack process may be running this run): %w", err)
+		case apierrors.IsForbidden(err):
+			return fmt.Errorf("write the ledger: the operator may not update sitefailovers/status in namespace %s at the ledger's site: %w", sent.Namespace, err)
+		case apierrors.IsNotFound(err):
+			return fmt.Errorf("write the ledger: run %s is no longer in namespace %s at the ledger's site: %w", sent.Name, sent.Namespace, err)
+		case !kube.Transient(err) || ctx.Err() != nil:
+			return fmt.Errorf("write the ledger: %w", err)
+		}
+		e.printf("  retry     the ledger write got no answer (%v); next in %s\n", err, e.poll())
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("write the ledger: no answer to %d attempts over %s: %w", attempt, e.now().Sub(start).Round(time.Second), err)
+		case <-time.After(e.poll()):
+		}
+		*sf = *sent.DeepCopy()
 	}
-	return nil
+}
+
+// sameStatus compares two statuses as the API server stores them: times
+// in whole seconds.
+func sameStatus(a, b *failoverv1.SiteFailoverStatus) bool {
+	ja, aerr := json.Marshal(a)
+	jb, berr := json.Marshal(b)
+	return aerr == nil && berr == nil && bytes.Equal(ja, jb)
 }
 
 func (e *Env) printf(format string, a ...any) {

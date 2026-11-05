@@ -36,9 +36,11 @@ type Flux interface {
 	// held by a run.
 	HeldBy(ctx context.Context, site string, obj failoverv1.ObjectRef) (string, error)
 
-	// Release lets Flux apply the object again, if run holds it. It returns
-	// the object's generation.
-	Release(ctx context.Context, site string, obj failoverv1.ObjectRef, run string) (int64, error)
+	// Release lets Flux apply the object again, if run holds it. Before it
+	// removes the hold, it calls record with the object's generation, and
+	// keeps the hold when record fails. It returns the object's generation;
+	// record was not called when the object was no longer held by run.
+	Release(ctx context.Context, site string, obj failoverv1.ObjectRef, run string, record func(generation int64) error) (int64, error)
 
 	// Reconcile asks Flux to reconcile the Kustomizations, and waits until
 	// each has handled the request. When fetchGit is set, it first asks
@@ -62,6 +64,11 @@ type Git interface {
 	// Resolve finds the file and path of each field. When Git cannot be
 	// read, it returns the changes unresolved with an error that says so.
 	Resolve(ctx context.Context, w *failoverv1.WorkloadSpec, changes []driver.FieldChange) ([]failoverv1.GitChange, error)
+
+	// HasMapping reports, without reading Git, whether a change has a
+	// spec.git.fields entry, or spec.git.find covers it. Resolve fails
+	// with ErrNoMapping on a change without.
+	HasMapping(w *failoverv1.WorkloadSpec, c driver.FieldChange) bool
 
 	// Commit writes one commit on top of base, or adopts the run's commit
 	// when it is already there.
@@ -133,6 +140,10 @@ type Env struct {
 	// Supersede records in the ledger of run that the run by took it over.
 	// Nil does nothing.
 	Supersede func(ctx context.Context, run, by string) error
+	// StartChecks are the site checks of the search for active runs before
+	// Start. Start searches again with them once its ledger exists, so it
+	// adds no check of a site. Nil makes new checks.
+	StartChecks *SiteChecks
 	// Out receives progress lines.
 	Out io.Writer
 	// Now returns the time. Tests replace it.

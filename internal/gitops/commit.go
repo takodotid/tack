@@ -57,7 +57,7 @@ func (r *Repo) Commit(ctx context.Context, w *failoverv1.WorkloadSpec, req engin
 		if r.ranBy(ctx, c, head, base, req.Run) {
 			return head, nil
 		}
-		return "", stop.Ask(failoverv1.ReasonGitChanged,
+		return "", stop.AskHead(failoverv1.ReasonGitChanged, head,
 			"branch %s of %s is at %s, but the run's base is %s: Git changed during the run", c.branch, Redact(c.url), head, req.Base)
 	}
 

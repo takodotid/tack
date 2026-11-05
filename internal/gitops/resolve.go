@@ -111,6 +111,14 @@ func (r *Repo) Resolve(ctx context.Context, w *failoverv1.WorkloadSpec, changes 
 	return out, nil
 }
 
+// HasMapping implements engine.Git. It reads no Git: a change has a
+// mapping when a spec.git.fields entry matches it, or spec.git.find is
+// set. An error in the entries counts as a mapping, so Resolve reports it.
+func (r *Repo) HasMapping(w *failoverv1.WorkloadSpec, c driver.FieldChange) bool {
+	m, err := mapping(w.Git.Fields, c)
+	return err != nil || m != nil || w.Git.Find != nil
+}
+
 // mapping returns the spec.git.fields entry of a change, or nil. The entry
 // matches on site, kind, name, field, and namespace when it sets one.
 func mapping(fields []failoverv1.FieldMapping, c driver.FieldChange) (*failoverv1.FieldMapping, error) {

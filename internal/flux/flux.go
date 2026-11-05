@@ -201,8 +201,11 @@ func (f *Flux) HeldBy(ctx context.Context, site string, obj failoverv1.ObjectRef
 	return u.GetAnnotations()[AnnotationHeldBy], nil
 }
 
-// Release implements engine.Flux. It removes the hold only when run set it.
-func (f *Flux) Release(ctx context.Context, site string, obj failoverv1.ObjectRef, run string) (int64, error) {
+// Release implements engine.Flux. It removes the hold only when run set it,
+// and calls record with the generation it read, before the update that
+// removes the hold. The update carries the resourceVersion of that read, so
+// the generation recorded is the one at release.
+func (f *Flux) Release(ctx context.Context, site string, obj failoverv1.ObjectRef, run string, record func(generation int64) error) (int64, error) {
 	if run == "" {
 		return 0, fmt.Errorf("release %s: no run name", refString(obj))
 	}
@@ -232,6 +235,11 @@ func (f *Flux) Release(ctx context.Context, site string, obj failoverv1.ObjectRe
 				refString(obj), site, AnnotationReconcile, ann[AnnotationReconcile], AnnotationHeldBy)
 		default:
 			return u.GetGeneration(), nil
+		}
+		if record != nil {
+			if err := record(u.GetGeneration()); err != nil {
+				return 0, err
+			}
 		}
 		delete(ann, AnnotationHeldBy)
 		delete(ann, AnnotationReconcile)

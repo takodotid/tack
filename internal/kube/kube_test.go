@@ -2,14 +2,21 @@ package kube
 
 import (
 	"context"
+	"crypto/x509"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 // kubeconfig writes a kubeconfig whose context site-a points at server
@@ -118,5 +125,29 @@ func TestReachableKinds(t *testing.T) {
 				t.Errorf("Retryable = %v, want %v: %v", got, tt.retryable, err)
 			}
 		})
+	}
+}
+
+// #35 row 32. Transient tells a ledger write to repeat: no answer, 5xx or
+// 429. A refusal, a conflict or a certificate Tack does not trust is final.
+func TestTransient(t *testing.T) {
+	gr := schema.GroupResource{Group: "failover.tako.id", Resource: "sitefailovers"}
+	for _, tt := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"connection reset", &url.Error{Op: "Put", URL: "https://x", Err: syscall.ECONNRESET}, true},
+		{"timeout", context.DeadlineExceeded, true},
+		{"503", apierrors.NewServiceUnavailable("down"), true},
+		{"500", apierrors.NewInternalError(errors.New("boom")), true},
+		{"429", apierrors.NewTooManyRequests("slow down", 1), true},
+		{"403", apierrors.NewForbidden(gr, "run-1", errors.New("no")), false},
+		{"409", apierrors.NewConflict(gr, "run-1", errors.New("modified")), false},
+		{"unknown authority", &url.Error{Op: "Put", URL: "https://x", Err: x509.UnknownAuthorityError{}}, false},
+	} {
+		if got := Transient(tt.err); got != tt.want {
+			t.Errorf("%s: Transient %v, want %v", tt.name, got, tt.want)
+		}
 	}
 }

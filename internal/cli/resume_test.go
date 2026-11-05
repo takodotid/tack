@@ -132,3 +132,29 @@ func TestResumeSearchChecksSitesOnce(t *testing.T) {
 		t.Errorf("site a checked %d times, want 7", n)
 	}
 }
+
+// #35 row 37. tack resume refuses an --accept-git-head that is not the
+// commit the run's GitChanged stop named, before it asks, with the usage
+// exit code, and writes nothing.
+func TestResumeRefusesAnotherHeadBeforeAsking(t *testing.T) {
+	t.Cleanup(func() { isTerminal, stdin = stdinIsTerminal, os.Stdin })
+	named := "2222222222222222222222222222222222222222"
+	sf := stoppedRun(t, "pg-main-earlier")
+	sf.Status.Reason, sf.Status.Git.ChangedRevision = failoverv1.ReasonGitChanged, named
+	f := newFactory(map[string][]client.Object{
+		"a": testenv.Site("a", "a", 2),
+		"b": append(testenv.Site("b", "a", 0), sf),
+	})
+	isTerminal = func() bool { return true }
+	stdin = strings.NewReader("pg-main\n")
+	out, code := run(t, f, "resume", "pg-main-earlier", "-f", "testdata/workload.yaml", "--accept-git-head", "4444444")
+	if code != ExitUsage || !strings.Contains(out, "--accept-git-head 4444444 is not the commit the run stopped on: the stop named "+named) {
+		t.Fatalf("exit %d, want %d:\n%s", code, ExitUsage, out)
+	}
+	if strings.Contains(out, confirmQuestion) {
+		t.Errorf("tack resume asked before it refused:\n%s", out)
+	}
+	if f.clients.Writes != 0 || len(f.flux.Calls) != 0 {
+		t.Errorf("%d cluster writes, Flux %v", f.clients.Writes, f.flux.Calls)
+	}
+}

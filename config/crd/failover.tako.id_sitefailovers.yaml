@@ -868,6 +868,23 @@ spec:
           status:
             description: SiteFailoverStatus records what the run did.
             properties:
+              abandoned:
+                description: |-
+                  Abandoned marks a run that never goes on: tack resume refuses it,
+                  and it does not block a new run. Unset for most runs.
+                properties:
+                  at:
+                    description: At is when the run was abandoned.
+                    format: date-time
+                    type: string
+                  reason:
+                    description: Reason says why, such as another run that started
+                      at the same time.
+                    type: string
+                required:
+                - at
+                - reason
+                type: object
               captured:
                 additionalProperties:
                   type: string
@@ -931,6 +948,12 @@ spec:
                   baseRevision:
                     description: BaseRevision is the commit live matched when the
                       run started.
+                    type: string
+                  changedRevision:
+                    description: |-
+                      ChangedRevision is the one commit that the run's GitChanged stop
+                      named. While it is set, --accept-git-head must name it. Unset when
+                      the stop named none, and once the run goes on.
                     type: string
                   commit:
                     description: Commit is the run's own commit.
@@ -1953,6 +1976,23 @@ spec:
           status:
             description: SiteFailoverStatus records what the run did.
             properties:
+              abandoned:
+                description: |-
+                  Abandoned marks a run that never goes on: tack resume refuses it,
+                  and it does not block a new run. Unset for most runs.
+                properties:
+                  at:
+                    description: At is when the run was abandoned.
+                    format: date-time
+                    type: string
+                  reason:
+                    description: Reason says why, such as another run that started
+                      at the same time.
+                    type: string
+                required:
+                - at
+                - reason
+                type: object
               captured:
                 additionalProperties:
                   type: string
@@ -2016,6 +2056,12 @@ spec:
                   baseRevision:
                     description: BaseRevision is the commit live matched when the
                       run started.
+                    type: string
+                  changedRevision:
+                    description: |-
+                      ChangedRevision is the one commit that the run's GitChanged stop
+                      named. While it is set, --accept-git-head must name it. Unset when
+                      the stop named none, and once the run goes on.
                     type: string
                   commit:
                     description: Commit is the run's own commit.

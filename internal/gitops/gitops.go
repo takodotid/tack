@@ -50,6 +50,13 @@ type Repo struct {
 	// hooks is an empty directory, the hooks path of every git command, so
 	// git runs no hook of the operator's configuration.
 	hooks string
+	// sshCommand is the GIT_SSH_COMMAND of every git command: ssh with
+	// Tack's timeouts, or "" when the operator chose the ssh command.
+	sshCommand string
+	sshChecked bool
+
+	// Timeout bounds each git command. Zero uses CommandTimeout.
+	Timeout time.Duration
 
 	// beforePush runs just before a push. Tests use it.
 	beforePush func()
@@ -63,6 +70,20 @@ type clone struct {
 	// trees maps a commit to the directory Checkout made for it.
 	trees map[string]string
 }
+
+// CommandTimeout bounds each git command. A remote that stops answering
+// then counts as unreachable ([RFC#0006] Requirement 3), as a site's API
+// does after its checks: the Git step waits instead of hanging.
+const CommandTimeout = 2 * time.Minute
+
+// Options of every git command. An HTTP transfer that moves less than 1
+// byte a second for 30 s ends before the deadline. SSH gives up on a
+// connection after 15 s, and on a link that stops answering after 3
+// keepalives 15 s apart.
+var (
+	lowSpeed   = []string{"-c", "http.lowSpeedLimit=1", "-c", "http.lowSpeedTime=30"}
+	sshOptions = "ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3"
+)
 
 // New returns a Repo that works in workDir, a scratch directory. An empty
 // workDir means the system's temporary directory.
@@ -282,7 +303,9 @@ func gitEnv(extra []string) []string {
 // git runs git in dir and returns its standard output, also on failure.
 // Its hooks path is an empty directory: a hook from the operator's
 // configuration, such as one that rewrites the commit message, never runs
-// ([RFC#0006] Requirement 2).
+// ([RFC#0006] Requirement 2). It ends after the Repo's timeout, with a
+// gitError that names it, so a fetch or push that gets no answer counts
+// as unreachable; a cancel of ctx, such as Ctrl-C, stays a cancel.
 func (r *Repo) git(ctx context.Context, dir string, env []string, stdin string, args ...string) (string, error) {
 	if r.hooks == "" {
 		d, err := r.mkdir("hooks-")
@@ -291,26 +314,59 @@ func (r *Repo) git(ctx context.Context, dir string, env []string, stdin string, 
 		}
 		r.hooks = d
 	}
-	args = append([]string{"-c", "core.hooksPath=" + r.hooks}, args...)
-	cmd := exec.CommandContext(ctx, "git", args...)
+	timeout := r.Timeout
+	if timeout <= 0 {
+		timeout = CommandTimeout
+	}
+	cctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	args = append(append([]string{"-c", "core.hooksPath=" + r.hooks}, lowSpeed...), args...)
+	cmd := exec.CommandContext(cctx, "git", args...)
 	cmd.Dir = dir
-	cmd.Env = gitEnv(env)
+	cmd.Env = gitEnv(append(r.sshEnv(ctx), env...))
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	cmd.WaitDelay = 10 * time.Second
+	// After git ends, or is killed, a helper it started, such as
+	// git-remote-https, may still hold its output open. Its output is
+	// complete by then: wait no longer than this for it.
+	cmd.WaitDelay = 2 * time.Second
 	err := cmd.Run()
 	switch {
 	case err == nil:
 		return stdout.String(), nil
 	case ctx.Err() != nil:
 		return stdout.String(), fmt.Errorf("git %s: %w", subcommand(args), ctx.Err())
+	case cctx.Err() != nil:
+		return stdout.String(), &gitError{args: args, stderr: fmt.Sprintf("no answer within %s", timeout), err: cctx.Err()}
 	case errors.Is(err, exec.ErrNotFound):
 		return "", errors.New("the git binary was not found in PATH")
 	}
 	return stdout.String(), &gitError{args: args, stderr: stderr.String(), err: err}
+}
+
+// sshEnv returns GIT_SSH_COMMAND with Tack's ssh options, unless the
+// operator chose the ssh command: GIT_SSH_COMMAND, GIT_SSH or
+// core.sshCommand. Their command, such as plink, may not take ssh's
+// options; the timeout of each git command still bounds it.
+func (r *Repo) sshEnv(ctx context.Context) []string {
+	if !r.sshChecked {
+		r.sshChecked = true
+		if os.Getenv("GIT_SSH_COMMAND") == "" && os.Getenv("GIT_SSH") == "" {
+			cmd := exec.CommandContext(ctx, "git", "config", "--get", "core.sshCommand")
+			cmd.Dir = os.TempDir()
+			cmd.Env = gitEnv(nil)
+			if out, err := cmd.Output(); err != nil && strings.TrimSpace(string(out)) == "" {
+				r.sshCommand = sshOptions
+			}
+		}
+	}
+	if r.sshCommand == "" {
+		return nil
+	}
+	return []string{"GIT_SSH_COMMAND=" + r.sshCommand}
 }
 
 var userinfo = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/\s]+@`)

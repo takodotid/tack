@@ -69,20 +69,44 @@ func (r *runner) hold(ctx context.Context, s *failoverv1.Step) (string, error) {
 		r.sf.Status.Held = append(r.sf.Status.Held, failoverv1.HeldObject{Site: s.Site, Object: s.Hold.Object})
 		h = &r.sf.Status.Held[len(r.sf.Status.Held)-1]
 	}
-	h.Kustomization, h.HeldAt, h.ReleasedAt = ks, &now, nil
+	h.Kustomization, h.HeldAt, h.ReleasedAt, h.Generation = ks, &now, nil, 0
 	return fmt.Sprintf("held; applied by Kustomization %s/%s", ks.Namespace, ks.Name), nil
 }
 
+// release removes the run's hold on an object. The ledger records the
+// object's generation before the hold is removed, while Flux cannot change
+// the object ([RFC#0005] Requirement 9). A process that dies after the
+// removal, before it records the release, leaves that generation: the
+// next process finds no hold, and keeps it, so the check after release
+// sees what Flux changed in between (#35 row 36).
 func (r *runner) release(ctx context.Context, s *failoverv1.Step) (string, error) {
-	gen, err := r.Flux.Release(ctx, s.Site, s.Release.Object, r.sf.Name)
+	recorded := false
+	gen, err := r.Flux.Release(ctx, s.Site, s.Release.Object, r.sf.Name, func(gen int64) error {
+		h := r.held(s.Site, s.Release.Object)
+		if h == nil {
+			return nil
+		}
+		h.Generation, recorded = gen, true
+		return r.write(ctx, r.sf)
+	})
 	if err != nil {
 		return "", err
 	}
-	if h := r.held(s.Site, s.Release.Object); h != nil {
-		now := metav1.NewTime(r.now())
-		h.ReleasedAt, h.Generation = &now, gen
+	msg := fmt.Sprintf("released at generation %d", gen)
+	h := r.held(s.Site, s.Release.Object)
+	if h == nil {
+		return msg, nil
 	}
-	return fmt.Sprintf("released at generation %d", gen), nil
+	if !recorded {
+		msg += " (the hold was already gone)"
+		if h.Generation != 0 && h.Generation != gen {
+			msg = fmt.Sprintf("the hold was already gone: generation %d when the run removed it, %d now", h.Generation, gen)
+			gen = h.Generation
+		}
+	}
+	now := metav1.NewTime(r.now())
+	h.ReleasedAt, h.Generation = &now, gen
+	return msg, nil
 }
 
 func (r *runner) reconcile(ctx context.Context, s *failoverv1.Step) (string, error) {
@@ -150,17 +174,24 @@ func (r *runner) checkBase(site, applied string) error {
 	case g.BaseRevision == "":
 		g.BaseRevision = applied
 		return nil
-	case SameRevision(g.BaseRevision, applied) || g.AcceptedRevision != "":
+	case SameRevision(g.BaseRevision, applied):
 		return nil
-	case g.Commit == "":
-		return stop.Ask(failoverv1.ReasonGitChanged,
-			"Flux at site %s applied %s, but the run's base is %s: Git changed during the run", site, applied, g.BaseRevision)
 	}
 	sha := RevisionSHA(applied)
-	if sameCommit(sha, g.Commit) || g.ReleaseRevision != "" && sameCommit(sha, g.ReleaseRevision) {
+	switch {
+	case g.AcceptedRevision != "" && sameCommit(sha, g.AcceptedRevision):
+		return nil
+	case g.Commit == "" && g.AcceptedRevision != "":
+		return stop.AskHead(failoverv1.ReasonGitChanged, sha,
+			"Flux at site %s applied %s, which is neither the run's base %s nor the head %s the operator accepted: Git changed during the run. Review it, then resume with --accept-git-head %s",
+			site, applied, g.BaseRevision, g.AcceptedRevision, sha)
+	case g.Commit == "":
+		return stop.AskHead(failoverv1.ReasonGitChanged, sha,
+			"Flux at site %s applied %s, but the run's base is %s: Git changed during the run. Review it, then resume with --accept-git-head %s", site, applied, g.BaseRevision, sha)
+	case sameCommit(sha, g.Commit) || g.ReleaseRevision != "" && sameCommit(sha, g.ReleaseRevision):
 		return nil
 	}
-	return stop.Ask(failoverv1.ReasonGitChanged,
+	return stop.AskHead(failoverv1.ReasonGitChanged, sha,
 		"Flux at site %s applied %s, which is neither the run's base %s nor its commit %s: Git changed during the run. Review it; if it contains the run's commit, resume with --accept-git-head %s",
 		site, applied, g.BaseRevision, g.Commit, sha)
 }
@@ -269,7 +300,7 @@ func (r *runner) verifyGit(ctx context.Context, s *failoverv1.Step) (string, err
 				"branch %s of %s is at %s, which does not contain %s: Git was rewritten before the release at site %s. Review it, then resume with --accept-git-head on a commit that contains the switch",
 				w.Git.Branch, Redact(w.Git.URL), head, want, s.Site)
 		}
-		return "", stop.Ask(failoverv1.ReasonGitChanged,
+		return "", stop.AskHead(failoverv1.ReasonGitChanged, head,
 			"branch %s of %s moved past %s to %s before the release at site %s: Flux applies it once the objects are released. Review the commits (git log %s..%s), then resume with --accept-git-head %s",
 			w.Git.Branch, Redact(w.Git.URL), want, head, s.Site, want, head, head)
 	}

@@ -126,6 +126,12 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 		if note := checks.Note(s.Name); note != "" {
 			notes = append(notes, note)
 		}
+		if what := asPrimary(s); what != "" && deferrable(req.Request, s.Name) {
+			// The driver did not refuse it; the read before its steps
+			// stops the run there ([RFC#0007] Requirement 6).
+			notes = append(notes, fmt.Sprintf("site %s %s (%s): the run stops before its first step there, and changes nothing at it, until the operator checks it and resumes the run with --fence %s",
+				s.Name, what, s.Summary, s.Name))
+		}
 		fp, err := e.fingerprint(ctx, s.Name)
 		if err != nil {
 			return nil, fmt.Errorf("site %s: %w", s.Name, err)
@@ -155,13 +161,10 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
+	// One Resolve, so the plan fetches Git once (#35 row 12).
 	var required []driver.FieldChange
 	for _, c := range changes {
-		if !c.Optional {
-			required = append(required, c)
-			continue
-		}
-		if _, err := e.Git.Resolve(ctx, req.Spec, []driver.FieldChange{c}); errors.Is(err, ErrNoMapping) {
+		if c.Optional && !e.Git.HasMapping(req.Spec, c) {
 			notes = append(notes, fmt.Sprintf("Git: no mapping for %s of %s at site %s: Tack leaves it as Git has it; the check before release stops the run if Git sets it",
 				c.Field, refString(c.Object), c.Site))
 			continue
@@ -349,15 +352,9 @@ func checkRequest(req Request) error {
 func Compose(in Inputs) (*failoverv1.SiteFailover, error) {
 	spec := in.Spec
 	fluxTimeout := spec.Timeouts.Flux.DeepCopy()
-	deferrable := func(site string) bool {
-		if site == "" || site == in.To {
-			return false
-		}
-		return !(in.Mode == failoverv1.ModePlanned && site == in.From)
-	}
 	var steps []failoverv1.Step
 	add := func(s failoverv1.Step) {
-		s.Deferrable = deferrable(s.Site)
+		s.Deferrable = deferrable(in.Request.Request, s.Site)
 		steps = append(steps, s)
 	}
 	sites := in.Topology.Sites
@@ -500,6 +497,15 @@ func Compose(in Inputs) (*failoverv1.SiteFailover, error) {
 		Status: failoverv1.SiteFailoverStatus{FollowUps: in.FollowUps},
 	}
 	return sf, nil
+}
+
+// deferrable tells whether the steps of a site can wait for it ([RFC#0002]):
+// every site but to, and but from in a Planned run.
+func deferrable(req driver.Request, site string) bool {
+	if site == "" || site == req.To {
+		return false
+	}
+	return !(req.Mode == failoverv1.ModePlanned && site == req.From)
 }
 
 // commitMessage is the message of the run's commit. It names the run, so a

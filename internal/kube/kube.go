@@ -85,6 +85,21 @@ func Retryable(err error) bool {
 	return false
 }
 
+// Transient reports whether a failed request is worth repeating: it got
+// no answer, or the API server answered that it cannot serve it now (5xx,
+// 429).
+func Transient(err error) bool {
+	if noAnswer(err) {
+		return true
+	}
+	var st apierrors.APIStatus
+	if errors.As(err, &st) {
+		code := st.Status().Code
+		return code >= 500 || code == 429
+	}
+	return false
+}
+
 // noAnswer reports whether a failed request got no answer from the server.
 // An unknown error counts as an answer: only a known transport failure may
 // make a site count as lost.
