@@ -5,6 +5,8 @@ import (
 	"io"
 	"sync"
 	"time"
+
+	"github.com/takodotid/tack/internal/engine"
 )
 
 // stamped writes progress lines: it starts each line with the time, in
@@ -17,6 +19,8 @@ type stamped struct {
 	mid bool
 }
 
+var _ engine.StampWriter = (*stamped)(nil)
+
 // progress returns the writer of the progress lines that go to w: the
 // engine's, the site checks' and Flux's. The plan, the status and the
 // prompts go to w as they are.
@@ -25,13 +29,27 @@ func (o *options) progress(w io.Writer) io.Writer {
 }
 
 func (s *stamped) Write(p []byte) (int, error) {
+	return s.write(p, time.Time{})
+}
+
+// WriteStamped implements engine.StampWriter: it starts each line of p with
+// at, the time a site's check printed it, instead of the time it goes out.
+func (s *stamped) WriteStamped(p []byte, at time.Time) (int, error) {
+	return s.write(p, at)
+}
+
+// write starts each line with at, or with the time now when at is zero.
+func (s *stamped) write(p []byte, at time.Time) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if at.IsZero() {
+		at = s.now()
+	}
 	n := len(p)
 	var b []byte
 	for len(p) > 0 {
 		if !s.mid {
-			b = s.now().UTC().AppendFormat(b, time.RFC3339)
+			b = at.UTC().AppendFormat(b, time.RFC3339)
 			b = append(b, ' ')
 		}
 		i := bytes.IndexByte(p, '\n')

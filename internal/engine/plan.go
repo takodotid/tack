@@ -80,7 +80,7 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 		return nil, err
 	}
 	checks := e.SiteChecks(req.Mode, req.To)
-	topo, err := e.Driver.Discover(ctx, req.Spec, checks)
+	topo, err := e.discover(ctx, req.Spec, checks)
 	if err != nil {
 		if req.Mode == failoverv1.ModeSiteLoss && kube.Retryable(err) && !kube.IsUnreachable(err) {
 			// An answer 5xx or 429 is an answer, also from a load balancer
@@ -196,6 +196,14 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 	return &Plan{SiteFailover: sf, Topology: topo, Notes: notes, checks: checks, runs: seen}, nil
 }
 
+// discover reads every site of spec through c, as the driver's Discover
+// does, once CheckAhead started the check of every site at once
+// ([RFC#0007] Requirement 10).
+func (e *Env) discover(ctx context.Context, spec *failoverv1.WorkloadSpec, c kube.Clients) (*driver.Topology, error) {
+	defer CheckAhead(ctx, c, spec)()
+	return e.Driver.Discover(ctx, spec, c)
+}
+
 // ErrStalePlan is returned by Recheck when the sites changed since the
 // plan was made.
 var ErrStalePlan = errors.New("the plan is stale")
@@ -215,7 +223,7 @@ func (e *Env) Recheck(ctx context.Context, p *Plan) error {
 	if checks == nil {
 		checks = e.SiteChecks(sf.Spec.Mode, sf.Spec.To)
 	}
-	topo, err := e.Driver.Discover(ctx, spec, checks)
+	topo, err := e.discover(ctx, spec, checks)
 	if err != nil {
 		return stale("the sites could not be read again: %v", err)
 	}
