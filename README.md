@@ -303,7 +303,7 @@ make e2e
 |---|---|
 | Planned switchover | the token moves, no write is lost, Git equals live, Flux changes nothing after release |
 | A blip during a plan | with one site's node paused for 10 s, the plan checks the site again, succeeds and notes the retry |
-| Interrupted run | a run killed mid-step resumes from its ledger |
+| Interrupted run | a run killed before its promotion, whose old primary was then promoted again by hand, stops before the promotion; the next run takes it over, is killed mid-step, and resumes from its ledger |
 | Git changed during a run | the run stops; it goes on once the operator accepts the new head |
 | Site loss with Git down | Tack switches live and waits for Git (break-glass) |
 | A site coming back | a lost site that answers as primary stops the run until the operator fences it |

@@ -251,7 +251,8 @@ func TestResumeRefusesOlderRun(t *testing.T) {
 }
 
 // Before a patch, the run checks that it still holds the object. A run
-// whose hold another run took over stops and changes nothing.
+// whose hold another run took over stops and changes nothing; so does a
+// run whose hold is gone.
 func TestPatchNeedsTheRunsHold(t *testing.T) {
 	f := newFixture(t)
 	f.flux.Fail["Reconcile"] = errors.New("stop after the holds")
@@ -273,6 +274,12 @@ func TestPatchNeedsTheRunsHold(t *testing.T) {
 	sf, err = f.resume("b", engine.Options{})
 	if !errors.Is(err, engine.ErrStopped) || sf.Status.Reason != failoverv1.ReasonStepFailed || !strings.Contains(sf.Status.Message, "no longer held by this run") {
 		t.Fatalf("err %v, reason %s: %s", err, sf.Status.Reason, sf.Status.Message)
+	}
+	// Issue #45: holding the object again resumes a plan that a recovery by
+	// hand may have made stale. The message says so before it says how.
+	stale, again := strings.Index(sf.Status.Message, "the run's plan may be stale"), strings.Index(sf.Status.Message, "annotate it again")
+	if stale < 0 || again < stale || !strings.Contains(sf.Status.Message, "docs/runbooks/abandon-run.md") {
+		t.Errorf("message %q: it must say that the plan may be stale, and name docs/runbooks/abandon-run.md, before it says to hold the object again", sf.Status.Message)
 	}
 	if after := f.versions("a"); after != before {
 		t.Errorf("site a changed: %s, then %s", before, after)

@@ -76,11 +76,18 @@ tack resume RUN -f workload.yaml
 
 ## FencedSiteIsPrimary
 
-| | |
+A site answers as primary, or declares itself primary, where going on would leave two primaries. The run stops before the step, which keeps its state; the stop changes nothing. Each `tack resume` reads the site again, and stops again while it is primary.
+
+| The message | When | Way on |
+|---|---|---|
+| `step S: site SITE answers as primary (...); it should be fenced. Check it, then resume with --fence SITE` | The read before the site's steps: a site whose steps can wait for it, such as a lost site back after a site-loss run. | `tack resume RUN -f workload.yaml --fence SITE`: Tack holds the site's objects, then declares the new primary there. Then [rebuild-old-primary.md](rebuild-old-primary.md). |
+| `step promote-T: site SITE ... Promoting T now gives two primaries, and no step of this run is left to fence SITE, so --fence cannot help` | The read before the promotion. The site's steps before the promotion are done, and it was made primary again outside the run, such as F promoted again by hand after the run demoted or fenced it ([no-primary-after-demotion.md](no-primary-after-demotion.md), option 2). | The run's plan no longer fits the sites: abandon it ([abandon-run.md](abandon-run.md)), then plan a new run if the switch is still needed. In a planned run, never demote F again by hand and resume: the read then passes, and T promotes with the token the run captured from F's first demotion, not F's latest. |
+| `step promote-T: site SITE ..., and this run fences it only after it promotes T` | The read before the promotion. A third site is primary, and the run declares T primary there only after the promotion. | Find why SITE is primary. To go on anyway: `tack resume RUN -f workload.yaml --fence SITE`. SITE and T are then both primary until the run declares T there; writes SITE takes meanwhile are lost to T, and SITE needs a rebuild ([rebuild-old-primary.md](rebuild-old-primary.md)), which the ledger does not record. Else abandon the run ([abandon-run.md](abandon-run.md)). |
+
+| Check | How |
 |---|---|
-| When | A site whose steps can wait for it, such as a lost site back after a site-loss run, answers as primary in the read before its steps. Nothing changed at that site. |
-| Check | The site may take writes from clients that still reach it. With Strait: `kubectl --context SITE_CTX -n NS get siteservice NAME -o jsonpath='{.status.route.members}'`. Writes it took since the loss are lost to the new primary; the rebuild drops them. |
-| Way on | `tack resume RUN -f workload.yaml --fence SITE`: Tack holds the site's objects, then declares the new primary there. Each `tack resume` without `--fence` stops again. Then [rebuild-old-primary.md](rebuild-old-primary.md). |
+| Which sites take writes | At each site, `kubectl --context SITE_CTX -n NS get cluster CLUSTER -o jsonpath='{.spec.replica.primary} {.status.instancesReportedState.*.isPrimary}{"\n"}'`. With Strait: `kubectl --context SITE_CTX -n NS get siteservice NAME -o jsonpath='{.status.route.members}'`. |
+| Writes at risk | A site that was primary on its own, such as a lost site, may hold writes the new primary lacks; the rebuild drops them. |
 
 ## HeldByAnotherRun
 
@@ -117,4 +124,4 @@ Any other error. Fix the cause the message names, then `tack resume RUN -f workl
 | A `Wait` that timed out, such as `wait-demoted-F`, `wait-promoted-T` or `wait-pooler-T` | The workload did not reach the state in time. When `wait-demoted-F` times out, F may never publish a token: CloudNativePG skips it when F's shutdown outlasts `switchoverDelay` ([RFC#0004](../../rfcs/RFC0004.md#limitations), Limitations). | Check the object the step names. Once it gets there, resume: the wait passes. Without a token from F: [no-primary-after-demotion.md](no-primary-after-demotion.md). |
 | `verify-noop-SITE`, with a Kustomization not `Ready` | Flux did not end a reconcile with `ReconciliationSucceeded` within `timeouts.flux`. | Fix the Kustomization, then resume. |
 | `routing-SITE` | Strait did not route to T's member alone within `timeouts.routing`. Every release is done. | Check the `SiteService` at that site, then resume. |
-| `... is no longer held by this run, so Flux may apply Git over the change` | Someone removed a hold during the run. | Find who. When nothing else changed, hold it again as the message says, then resume. Never after promoting F again by hand, or once the run is abandoned: [abandon-run.md](abandon-run.md). |
+| `... is no longer held by this run, so Flux may apply Git over the change` | Someone removed a hold during the run. | Find who, and why. When the workload was changed by hand too, such as F promoted again, the plan may be stale: abandon the run ([abandon-run.md](abandon-run.md)). Only when nothing else changed, hold it again as the message says, then resume. A resume after F was promoted again stops before `promote-T` with `FencedSiteIsPrimary` instead. |
