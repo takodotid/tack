@@ -401,7 +401,9 @@ func (r *runner) run(ctx context.Context) error {
 		if step.Site != "" {
 			if err := r.siteReachable(ctx, step); err != nil {
 				if ctx.Err() != nil {
-					return r.end(ctx, step, ctx.Err())
+					// An interrupt during the check is no answer from the
+					// site: the step did not start, and keeps its state.
+					return r.stopBefore(ctx, step, ctx.Err())
 				}
 				if !kube.IsUnreachable(err) {
 					// The site answered, or could not be checked: it is not

@@ -61,3 +61,29 @@ func TestInterruptDuringReadBeforeStepsKeepsStep(t *testing.T) {
 		t.Error("site a was held")
 	}
 }
+
+// PR #49's finding. Ctrl-C during the check before a site's first step
+// recorded that step Failed with "context canceled", though it never
+// started. The run now stops before the step, which keeps its state
+// ([RFC#0007] Requirement 5).
+func TestInterruptDuringCheckBeforeStepKeepsStep(t *testing.T) {
+	f := newFixture(t)
+	plan := f.plan("b", failoverv1.ModePlanned)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	env := f.env("b")
+	env.Clients = &cancelOnRead{Clients: f.clients, site: "a", n: 1, cancel: cancel}
+	err := env.Start(ctx, plan, engine.Options{})
+	sf := f.ledger("b")
+	if !errors.Is(err, engine.ErrStopped) || sf.Status.Reason != failoverv1.ReasonStepFailed || !strings.HasPrefix(sf.Status.Message, "step hold-a-cluster-pg-a: context canceled") {
+		t.Fatalf("err %v, %s %s: %s", err, sf.Status.State, sf.Status.Reason, sf.Status.Message)
+	}
+	for _, st := range sf.Status.Steps {
+		if st.State != failoverv1.StepPending || st.Attempts != 0 || st.FinishedAt != nil {
+			t.Errorf("%s is %s, %d attempts, finished %v; want Pending, never started", st.ID, st.State, st.Attempts, st.FinishedAt)
+		}
+	}
+	if holdsAt(f.flux, "a") != 0 {
+		t.Error("site a was held")
+	}
+}
