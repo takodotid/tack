@@ -449,6 +449,26 @@ func TestVerifyNoopNeedsReady(t *testing.T) {
 	}
 }
 
+// PR #42's finding (RFC0005 Requirement 10). A suspended Kustomization
+// keeps the Ready condition of its last reconcile, and applies nothing:
+// the check after release passed on it. It now fails at once, naming
+// spec.suspend, without waiting out the timeout.
+func TestVerifyNoopRefusesSuspendedKustomization(t *testing.T) {
+	ctx := context.Background()
+	released := metav1.Now()
+	held := []failoverv1.HeldObject{{Site: "a", Object: clusterRef, Kustomization: ksKey, ReleasedAt: &released, Generation: 4}}
+	f := New(fakeClients{newClient(nil, kustomization(ksKey, true), liveCluster(nil))})
+	f.Poll = time.Millisecond
+	start := time.Now()
+	msg, err := f.VerifyNoop(ctx, "a", held, []failoverv1.ObjectField{primaryField}, true, time.Minute)
+	if err == nil || !strings.Contains(err.Error(), "Kustomization flux-system/db at site a is suspended (spec.suspend)") {
+		t.Fatalf("%q, %v; want a failure naming spec.suspend", msg, err)
+	}
+	if d := time.Since(start); d > 10*time.Second {
+		t.Errorf("the check waited %s", d)
+	}
+}
+
 // The check waits for a reconcile in flight, and reads the objects only
 // once it ended: an apply that ends with it is seen.
 func TestVerifyNoopWaitsForReady(t *testing.T) {
