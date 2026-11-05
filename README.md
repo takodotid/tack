@@ -112,7 +112,7 @@ The latest release is v1.2.1. The API is `failover.tako.id/v1`, for both the `Si
 
 ## Install
 
-Each release on the [releases page](https://github.com/takodotid/tack/releases) has an archive per platform, `SHA256SUMS`, the CRD, and a Helm chart of the CRD. Each archive holds `tack`, its man pages and the CRD. The chart is also published at `oci://ghcr.io/takodotid/charts/tack`.
+Each release on the [releases page](https://github.com/takodotid/tack/releases) has an archive per platform, `SHA256SUMS`, the CRD, and a Helm chart of the CRD. Each archive holds `tack`, its man pages and the CRD. The chart is also published at `oci://ghcr.io/takodotid/charts/tack`. From v1.3.0, a release also has an SBOM per archive, and signatures and attestations for every asset: see [Verify a release](#verify-a-release).
 
 ```sh
 VERSION=v1.2.1
@@ -122,6 +122,7 @@ NAME=tack-$VERSION-$OS-$ARCH
 curl -fsSLO https://github.com/takodotid/tack/releases/download/$VERSION/$NAME.tar.gz
 curl -fsSLO https://github.com/takodotid/tack/releases/download/$VERSION/SHA256SUMS
 grep " $NAME.tar.gz\$" SHA256SUMS | sha256sum -c -    # on macOS: shasum -a 256 -c -
+# From v1.3.0, check the signature of SHA256SUMS here: see Verify a release, below.
 tar -xzf $NAME.tar.gz
 sudo install -m 0755 $NAME/tack /usr/local/bin/tack
 sudo mkdir -p /usr/local/share/man/man1
@@ -179,6 +180,30 @@ Tack also needs:
 | A kube context per site | All in one kubeconfig (`--kubeconfig`, or the standard loading rules). To combine one file per cluster, see [docs/workload.md](docs/workload.md#every-sites-context-in-one-kubeconfig). The permissions are listed in [docs/operations.md](docs/operations.md#permissions). |
 | Git access | Through the operator's `git` configuration, such as an SSH agent or a credential helper. Tack runs `git` with `GIT_TERMINAL_PROMPT=0` and stores no credential. The branch must accept a push from those credentials. |
 | A Workload file | The sites, their contexts, the Git repository and where each field lives in it: [docs/workload.md](docs/workload.md). |
+
+### Verify a release
+
+From v1.3.0, each release signs `SHA256SUMS` and the chart with Sigstore, keyless, under the identity of its release workflow, and attests every asset with GitHub artifact attestations. No signing key exists. `make dist` at a release's tag, in a clean checkout with the Go version of `go.mod`, gives the same archives. Releases v1.2.1 and older carry no signature.
+
+| Asset | Verify with |
+|---|---|
+| `SHA256SUMS`, and through it every asset | [cosign](https://docs.sigstore.dev/cosign/verifying/verify/) 3: `cosign verify-blob` with `SHA256SUMS.sigstore.json` |
+| Any asset, one by one | the GitHub CLI: `gh attestation verify` |
+| The chart at `oci://ghcr.io/takodotid/charts/tack` | `cosign verify` |
+| `tack-$VERSION-<os>-<arch>.cdx.json` | the CycloneDX SBOM of that archive's binary, listed in `SHA256SUMS` |
+
+In the folder of the download above, before `tar -xzf`:
+
+```sh
+id="https://github.com/takodotid/tack/.github/workflows/release.yaml@refs/tags/$VERSION"
+issuer=https://token.actions.githubusercontent.com
+curl -fsSLO https://github.com/takodotid/tack/releases/download/$VERSION/SHA256SUMS.sigstore.json
+cosign verify-blob --bundle SHA256SUMS.sigstore.json --certificate-identity "$id" --certificate-oidc-issuer "$issuer" SHA256SUMS
+gh attestation verify $NAME.tar.gz --repo takodotid/tack --cert-identity "$id"
+cosign verify ghcr.io/takodotid/charts/tack:${VERSION#v} --certificate-identity "$id" --certificate-oidc-issuer "$issuer"
+```
+
+`cosign verify-blob` proves that the release workflow of the tag wrote `SHA256SUMS`; the `sha256sum -c` above then ties the archive to it.
 
 ## Upgrading within v1
 
@@ -294,7 +319,7 @@ The end-to-end test builds two kind clusters with Flux, CloudNativePG, Strait an
 | git, openssl, curl, sha256sum | any |
 | Internet access | to pull images, and to fetch CloudNativePG's release manifest and Strait's source at the commit pinned in `test/e2e/env/lib.sh` |
 
-`test/e2e/install-tools.sh [DIR]` installs kind, kubectl, flux and helm at these versions into `DIR` (default `bin/tools`); add it to `PATH`.
+`hack/tools/install.sh [DIR]` installs kind, kubectl, flux and helm at these versions into `DIR` (default `bin/tools`), and fails unless each download matches the SHA-256 pinned in the script; add `DIR` to `PATH`. It runs on Linux, amd64 or arm64.
 
 ```sh
 make e2e
@@ -330,6 +355,8 @@ Everything the test creates is named `tack-e2e*`. [test/e2e/env/README.md](test/
 | [docs/runbooks/stop-reasons.md](docs/runbooks/stop-reasons.md) | the way on for each reason a run stops or waits |
 | [docs/runbooks/no-primary-after-demotion.md](docs/runbooks/no-primary-after-demotion.md) | a planned run that stopped between its demotion and its promotion |
 | [docs/runbooks/abandon-run.md](docs/runbooks/abandon-run.md) | abandoning a run, and removing a hold left behind |
+| [docs/runbooks/release.md](docs/runbooks/release.md) | publishing a release, and what to do when it stops |
+| [SECURITY.md](SECURITY.md) | reporting a vulnerability, supported versions |
 | [rfcs/](rfcs/) | the design, one subject per RFC |
 | `tack --help`, `tack <command> --help`, `man tack` | every command, flag and exit code |
 | `tack --skill` | the guide for AI agents |
@@ -338,7 +365,7 @@ Everything the test creates is named `tack-e2e*`. [test/e2e/env/README.md](test/
 
 - [AGENTS.md](AGENTS.md) holds the rules for every change, by a human or an agent.
 - The design lives in [rfcs/](rfcs/). A design change starts as an RFC, `Draft` while under discussion, and becomes `Active` once the maintainers approve it. The code conforms to the Active RFCs; if they disagree, the RFC is amended first.
-- Before a pull request: `make verify test`. For a change to how a run behaves, also `make e2e`.
+- Before a pull request: `make verify test lint`. For a change to how a run behaves, also `make e2e`.
 - Commits follow conventional commits: `type(scope): subject`.
 
 ## License

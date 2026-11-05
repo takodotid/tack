@@ -132,5 +132,8 @@ Commit and push only when the operator asks.
 | `make build` | builds `bin/tack` |
 | `make test` | unit and golden tests; `go test ./internal/cli -update` rewrites the golden files |
 | `make verify` | regenerates the CRD and deepcopy code, checks gofmt and vet, fails on stale generated files |
-| `make dist` | static binaries for Linux, macOS and Windows, man pages, the CRD |
+| `make dist` | static binaries for Linux, macOS and Windows, man pages, the CRD; the same bytes for the same commit |
+| `make sbom` | after `make dist`, a CycloneDX SBOM per archive |
+| `make lint` | `go mod verify`, `govulncheck`, `helm lint`, and the check that every action is pinned by SHA |
+| `hack/release/build.sh vX.Y.Z` | every asset of a release and `SHA256SUMS` in `dist/`, as the release workflow builds them |
 | `make e2e` | the end-to-end test on kind; it creates only `tack-e2e*` clusters, networks, containers and images |
