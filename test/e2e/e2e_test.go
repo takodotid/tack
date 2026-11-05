@@ -18,6 +18,9 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/client-go/tools/clientcmd"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
+
 	"github.com/takodotid/tack/internal/version"
 )
 
@@ -37,7 +40,26 @@ const (
 	exitStopped  = 3
 	exitWaiting  = 4
 	exitFault    = 42
+	// operator is the ServiceAccount bound to the chart's roles only (rbacValues).
+	operator = "tack-e2e-operator"
 )
+
+// rbacValues turn on the chart's roles for the objects of the e2e's Workload and its SiteService, and bind them to
+// the ServiceAccount operator ([RFC#0009] Requirement 29). No GitOps object of the e2e has spec.postBuild, so they
+// name no ConfigMap or Secret (row 12).
+const rbacValues = `rbac:
+  create: true
+  subjects:
+  - {kind: ServiceAccount, name: ` + operator + `, namespace: ` + ledgerNS + `}
+  objects:
+  - namespace: db
+    clusters: [pg-a, pg-b]
+    poolers: [pg-a-pooler-rw, pg-b-pooler-rw]
+    siteServices: [postgres]
+  - namespace: flux-system
+    kustomizations: [site-a, site-b]
+    gitRepositories: [tack-e2e]
+`
 
 func node(site string) string    { return "tack-e2e-" + site + "-control-plane" }
 func context(site string) string { return "kind-tack-e2e-" + site }
@@ -69,8 +91,9 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// setup builds tack with the fault hook, installs the chart (the CRD) in the
-// ledger namespace at both sites, and writes the Workload.
+// setup builds tack with the fault hook, installs the chart (the CRD and the
+// roles of rbacValues) in the ledger namespace at both sites, creates the
+// ServiceAccount operator there, and writes the Workload.
 func setup() error {
 	build := exec.Command("go", "build", "-tags", "e2efault", "-o", tackBin, "./cmd/tack")
 	build.Dir = repo
@@ -78,12 +101,19 @@ func setup() error {
 	if err := build.Run(); err != nil {
 		return fmt.Errorf("build tack: %w", err)
 	}
+	values := filepath.Join(work, "chart-values.yaml")
+	if err := os.WriteFile(values, []byte(rbacValues), 0o644); err != nil {
+		return err
+	}
 	for _, s := range []string{"a", "b"} {
 		helm := exec.Command("helm", "--kubeconfig", kubeconfig, "--kube-context", context(s),
 			"upgrade", "--install", "tack", filepath.Join(repo, "deploy/helm/tack"),
-			"--namespace", ledgerNS, "--create-namespace", "--wait")
+			"--namespace", ledgerNS, "--create-namespace", "--wait", "-f", values)
 		if out, err := helm.CombinedOutput(); err != nil {
 			return fmt.Errorf("site %s: install chart: %v: %s", s, err, out)
+		}
+		if out, err := kubectlIn(s, "apiVersion: v1\nkind: ServiceAccount\nmetadata: {name: "+operator+", namespace: "+ledgerNS+"}\n", "apply", "-f", "-"); err != nil {
+			return fmt.Errorf("site %s: create ServiceAccount %s: %v: %s", s, operator, err, out)
 		}
 	}
 	url, err := gitURL()
@@ -758,9 +788,41 @@ func TestRebuildAndSwitchBack(t *testing.T) {
 	}
 }
 
+// operatorKubeconfig writes a kubeconfig whose context for each site has the
+// admin's cluster and a token of the ServiceAccount operator, and returns its
+// path. The token is never printed.
+func operatorKubeconfig(t *testing.T) string {
+	t.Helper()
+	cfg, err := clientcmd.LoadFromFile(kubeconfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []string{"a", "b"} {
+		token, err := exec.Command("kubectl", "--kubeconfig", kubeconfig, "--context", context(s),
+			"-n", ledgerNS, "create", "token", operator, "--duration", "1h").Output()
+		if err != nil {
+			t.Fatalf("site %s: create a token of ServiceAccount %s: %v", s, operator, err)
+		}
+		user := operator + "-" + s
+		cfg.AuthInfos[user] = &clientcmdapi.AuthInfo{Token: strings.TrimSpace(string(token))}
+		cfg.Contexts[context(s)].AuthInfo = user
+	}
+	path := filepath.Join(work, "kubeconfig-"+operator)
+	if err := clientcmd.WriteToFile(*cfg, path); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 // TestRoutingFromStrait runs a switch with the routing check on, against the
 // Strait that up.sh installs at both sites. Strait routes to pg-b before the
 // run; the run succeeds only once Strait routes to pg-a at both sites.
+//
+// tack plans, runs and reads the run as the ServiceAccount operator, bound to
+// the chart's roles only, with Kubernetes' default bindings: the roles grant
+// every permission of the run, the routing check (row 13 of the permissions
+// table), the ledger's Events (row 14) and the history's user (row 15)
+// among them ([RFC#0009] Requirement 29).
 func TestRoutingFromStrait(t *testing.T) {
 	for _, s := range []string{"a", "b"} {
 		kubectl(t, s, "apply", "-f", filepath.Join(repo, "test/e2e/fixtures/strait/siteservice.yaml"))
@@ -787,7 +849,9 @@ func TestRoutingFromStrait(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tackOK(t, "run", "-f", routed, "--to", "a", "--yes")
+	restricted := operatorKubeconfig(t)
+	tackOK(t, "plan", "--kubeconfig", restricted, "-f", routed, "--to", "a")
+	run := createdRun(t, tackOK(t, "run", "--kubeconfig", restricted, "-f", routed, "--to", "a", "--yes"))
 	assertPrimary(t, "a", "b")
 	sf := latestRun(t, "a")
 	for _, id := range []string{"routing-a", "routing-b"} {
@@ -799,6 +863,21 @@ func TestRoutingFromStrait(t *testing.T) {
 		if why := routeTo(s, "pg-a"); why != "" {
 			t.Errorf("Strait at site %s: %s", s, why)
 		}
+	}
+
+	user := "system:serviceaccount:" + ledgerNS + ":" + operator
+	if got := strings.TrimSpace(kubectl(t, "a", "-n", ledgerNS, "get", "sitefailover", run, "-o", `jsonpath={range .status.history[*]}{.state}/{.user};{end}`)); got != "Running/"+user+";Succeeded/"+user+";" {
+		t.Errorf("history %q, want Running and Succeeded by %s", got, user)
+	}
+	events := kubectl(t, "a", "-n", ledgerNS, "get", "events", "--field-selector", "involvedObject.kind=SiteFailover,involvedObject.name="+run,
+		"-o", `jsonpath={range .items[*]}{.reason}{"\n"}{end}`)
+	for _, want := range []string{"RunRunning", "StepSucceeded", "RunSucceeded"} {
+		if !strings.Contains(events, want+"\n") {
+			t.Errorf("no Event %s on the ledger:\n%s", want, events)
+		}
+	}
+	if status := tackOK(t, "status", "--kubeconfig", restricted, run, "-f", routed); !strings.Contains(status, "State: Succeeded") {
+		t.Errorf("tack status as %s does not show the run Succeeded", operator)
 	}
 }
 
