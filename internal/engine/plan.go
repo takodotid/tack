@@ -245,7 +245,9 @@ func (e *Env) Recheck(ctx context.Context, p *Plan) error {
 			return stale("the workload's runs could not be read again: %v", err)
 		}
 		for _, r := range runs {
-			if !p.runs[r.Name] {
+			// A run abandoned before it recorded its start ran no step,
+			// so the sites are as the plan read them (PR #49).
+			if !p.runs[r.Name] && !(r.Status.State == "" && r.Status.Abandoned != nil) {
 				return stale("run %s of the workload started after the plan was made", r.Name)
 			}
 		}

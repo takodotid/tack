@@ -623,6 +623,26 @@ func TestRunRefusesPlanAfterAnotherRun(t *testing.T) {
 	}
 }
 
+// PR #49's finding. A run that lost the race of #35 row 35 while the
+// operator confirmed ran no step and changed nothing: its ledger holds
+// only status.abandoned. It does not make the plan stale.
+func TestRunIgnoresAbandonedRunAtConfirmation(t *testing.T) {
+	f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": testenv.Site("b", "a", 0)})
+	f.flux.Fail["Hold"] = errors.New("stop at the first hold")
+	typeAfter(t, func() {
+		other := siteLossRun("a", fixedNow)
+		other.Name, other.Spec.Mode = "pg-main-other", failoverv1.ModePlanned
+		other.Status = failoverv1.SiteFailoverStatus{Abandoned: &failoverv1.Abandonment{At: metav1.NewTime(fixedNow), Reason: "run X of the workload (Running) was created at the same time"}}
+		if err := f.clients.Sites["a"].Create(context.Background(), other); err != nil {
+			t.Fatal(err)
+		}
+	})
+	out, code := run(t, f, "run", "-f", "testdata/workload.yaml", "--to", "b")
+	if code != ExitStopped || !strings.Contains(out, "stop at the first hold") {
+		t.Fatalf("exit %d, want %d at the first hold:\n%s", code, ExitStopped, out)
+	}
+}
+
 // A site that was lost at plan time answers again while the operator
 // confirms, with older ledgers. The plan did not search it, so they do not
 // make it stale.
