@@ -672,3 +672,42 @@ func TestStatusHidesCapturedValues(t *testing.T) {
 		}
 	}
 }
+
+// #35 row 22 (RFC0009 Requirement 4). tack resume asks like tack run.
+// Without a terminal and without --yes it refuses, and a wrong name
+// changes nothing: no cluster write, no Flux call, the ledger as it was.
+func TestResumeNeedsConfirmation(t *testing.T) {
+	t.Cleanup(func() { isTerminal, stdin = stdinIsTerminal, os.Stdin })
+	for _, tt := range []struct {
+		name     string
+		terminal bool
+		typed    string
+		code     int
+		want     string
+	}{
+		{name: "no terminal", code: ExitUsage, want: "no terminal to confirm on: pass --yes once a human approved this run"},
+		{name: "wrong name", terminal: true, typed: "yes\n", code: ExitError, want: "not confirmed; nothing was changed"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": append(testenv.Site("b", "a", 0), stoppedRun(t, "pg-main-earlier"))})
+			store := &ledger.Store{Client: f.clients.Sites["b"], Namespace: "tack-system"}
+			before, err := store.Get(context.Background(), "pg-main-earlier")
+			if err != nil {
+				t.Fatal(err)
+			}
+			isTerminal = func() bool { return tt.terminal }
+			stdin = strings.NewReader(tt.typed)
+			out, code := run(t, f, "resume", "pg-main-earlier", "-f", "testdata/workload.yaml")
+			if code != tt.code || !strings.Contains(out, tt.want) {
+				t.Fatalf("exit %d, want %d with %q:\n%s", code, tt.code, tt.want, out)
+			}
+			if f.clients.Writes != 0 || len(f.flux.Calls) != 0 {
+				t.Errorf("%d cluster writes, Flux %v", f.clients.Writes, f.flux.Calls)
+			}
+			after, err := store.Get(context.Background(), "pg-main-earlier")
+			if err != nil || after.ResourceVersion != before.ResourceVersion {
+				t.Errorf("the ledger was written: %v, resourceVersion %s, then %s", err, before.ResourceVersion, after.ResourceVersion)
+			}
+		})
+	}
+}
