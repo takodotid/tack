@@ -299,3 +299,32 @@ func TestResumeStopsBeforePromotionWhenThirdSiteIsPrimary(t *testing.T) {
 		}
 	}
 }
+
+// #46 (PR #48's comment). With --fence c for a third site that is primary,
+// b and c are both primary from the promotion until the run declares b at
+// c, and c may take writes that b lacks. The run records the follow-up
+// Rebuild for c, once, so a later planned run to c is refused until it is
+// rebuilt ([RFC#0003] Requirement 14).
+func TestFenceOfThirdSiteRecordsRebuild(t *testing.T) {
+	s := newSites3(t)
+	ctx := context.Background()
+	env := s.env("b")
+	env.Ledger = &diesBefore{Ledger: env.Ledger, step: "promote-b"}
+	if err := env.Start(ctx, s.planned3("run-1"), engine.Options{}); err == nil {
+		t.Fatal("the run went on after its process died")
+	}
+	s.promoteByHand("c")
+	if err := s.env("b").Resume(ctx, s.ledger("b", "run-1"), engine.Options{Fence: []string{"c"}}); err != nil {
+		t.Fatalf("resume --fence c: %v", err)
+	}
+	sf := s.ledger("b", "run-1")
+	var rebuild []failoverv1.FollowUp
+	for _, f := range sf.Status.FollowUps {
+		if f.Action == engine.FollowUpRebuild {
+			rebuild = append(rebuild, f)
+		}
+	}
+	if len(rebuild) != 1 || rebuild[0].Site != "c" || !strings.Contains(rebuild[0].Reason, "--fence c") {
+		t.Fatalf("follow-ups %+v, want one Rebuild for c", sf.Status.FollowUps)
+	}
+}
