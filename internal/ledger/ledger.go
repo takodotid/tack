@@ -71,8 +71,9 @@ const ListPage = 100
 
 // List implements engine.Ledger, newest first. It reads the ledgers in
 // pages of ListPage, each with the same namespace and selector. When the
-// API server no longer serves the pages' snapshot (410 Expired), it lists
-// them all again in one request, as client-go's pager does.
+// API server no longer serves the pages' snapshot (410 Expired on a page
+// after the first), it lists them all again in one request, as client-go's
+// pager does.
 func (s *Store) List(ctx context.Context) ([]failoverv1.SiteFailover, error) {
 	opts := []client.ListOption{client.InNamespace(s.Namespace)}
 	if len(s.Selector) > 0 {
