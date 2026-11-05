@@ -116,7 +116,8 @@ func TestAbandonAndTakeOverRecordHistory(t *testing.T) {
 		t.Fatalf("run: exit %d:\n%s", code, out)
 	}
 	h = ledgerAt(t, f, "b", "pg-main-earlier").Status.History
-	if len(h) != 1 || h[0].State != failoverv1.HistoryTakenOver || h[0].Message != "run pg-main-20261027-101500 took this run over" || h[0].User != testenv.User {
+	if len(h) != 1 || h[0].State != failoverv1.HistoryTakenOver || h[0].Message != "run pg-main-20261027-101500 took this run over" || h[0].User != testenv.User ||
+		!slices.Equal(h[0].Flags, []string{"--take-over=pg-main-earlier"}) {
 		t.Errorf("history of the run taken over: %+v", h)
 	}
 	events := strings.Join(append(testenv.Events(f.clients.Sites["b"], "tack-system", "pg-main-other"), testenv.Events(f.clients.Sites["b"], "tack-system", "pg-main-earlier")...), "\n")

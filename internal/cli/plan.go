@@ -290,7 +290,7 @@ func supersede(env *engine.Env, old []foundRun) func(ctx context.Context, run, b
 			return err
 		}
 		sf.Status.SupersededBy = by
-		entry := env.Entry(ctx, sf, failoverv1.HistoryTakenOver, nil)
+		entry := env.Entry(ctx, sf, failoverv1.HistoryTakenOver, []string{"--take-over=" + run})
 		entry.Reason, entry.Message = "", "run "+by+" took this run over"
 		engine.AppendHistory(&sf.Status, entry)
 		engine.Stamp(&sf.Status)
