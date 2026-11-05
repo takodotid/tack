@@ -161,12 +161,48 @@ func stepDiff(got, want failoverv1.Step) string {
 	return fmt.Sprintf("step %s differs from the plan in %v", got.ID, keys)
 }
 
-// fields returns a step as the API server stores it, by top-level key.
+// fields returns a step as the API server stores it, by top-level key. An
+// empty list or object reads as absent: the API server may drop either.
 func fields(s failoverv1.Step) (map[string]any, error) {
 	b, err := json.Marshal(s)
 	if err != nil {
 		return nil, err
 	}
 	var m map[string]any
-	return m, json.Unmarshal(b, &m)
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil, err
+	}
+	for k, v := range m {
+		if v = normal(v); v == nil {
+			delete(m, k)
+		} else {
+			m[k] = v
+		}
+	}
+	return m, nil
+}
+
+// normal returns v with each empty list, empty object and null removed.
+func normal(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		for k, c := range x {
+			if c = normal(c); c == nil {
+				delete(x, k)
+			} else {
+				x[k] = c
+			}
+		}
+		if len(x) == 0 {
+			return nil
+		}
+	case []any:
+		if len(x) == 0 {
+			return nil
+		}
+		for i := range x {
+			x[i] = normal(x[i])
+		}
+	}
+	return v
 }
