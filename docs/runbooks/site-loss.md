@@ -7,7 +7,7 @@ If the old site still runs, its Cluster stays primary and takes writes until one
 | Event | When |
 |---|---|
 | Flux at the old site applies the run's commit | only once that site reaches Git again, and after the run's commit exists |
-| Tack fences it | on a `tack resume` that reaches the site, after `--fence` if it answers as primary |
+| Tack fences it | on a `tack resume` that reaches the site, after `--fence` if it answers as primary or declares itself primary |
 
 Until then there are two primaries. Confirm the loss, and fence the old primary, before the run. Tack does neither.
 
@@ -24,7 +24,7 @@ Until then there are two primaries. Confirm the loss, and fence the old primary,
 
 1. **Plan.** `tack plan -f workload.yaml --to NEW --mode site-loss`. Its notes name the sites it could not read.
 2. **Run.** `tack run -f workload.yaml --to NEW --mode site-loss`. The steps at the lost site are `Deferred`. With Git down too, the run waits with exit code 4: [break-glass](../operations.md#break-glass).
-3. **When the old site answers again,** `tack resume RUN -f workload.yaml`. If it answers as primary, the run stops with `FencedSiteIsPrimary`; check it, then `tack resume RUN -f workload.yaml --fence OLD`.
+3. **When the old site answers again,** `tack resume RUN -f workload.yaml`. If it answers as primary, or its Cluster still declares itself primary, the run stops with `FencedSiteIsPrimary`; check it, then `tack resume RUN -f workload.yaml --fence OLD`. A run whose old site answers its API at the start, with its instances down, stops the same way before its first step there; the plan says so.
 4. **Rebuild the old primary:** [rebuild-old-primary.md](rebuild-old-primary.md).
 
 ## When Tack refuses the lost site

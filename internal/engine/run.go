@@ -357,7 +357,8 @@ var errUnread = errors.New("the site did not answer the read before its steps")
 // that runs in this process, whatever that step's state: an approval to
 // fence lasts one process, and the ledger does not tell a site that came
 // back from one that never left. It stops the run when the site answers as
-// primary, unless the operator approved fencing it. A site that does not
+// primary, or declares itself primary, unless the operator approved
+// fencing it. A site that does not
 // answer the read is not known to be fenced: gate returns errUnread, and
 // its steps are deferred.
 //
@@ -384,12 +385,27 @@ func (r *runner) gate(ctx context.Context, site string) error {
 	if !s.Reachable {
 		return fmt.Errorf("%w: %s", errUnread, s.Error)
 	}
-	if s.Role == driver.RolePrimary && site != r.sf.Spec.To && !slices.Contains(r.opts.Fence, site) {
+	if what := asPrimary(*s); what != "" && site != r.sf.Spec.To && !slices.Contains(r.opts.Fence, site) {
 		return stop.Ask(failoverv1.ReasonFencedSiteIsPrimary,
-			"site %s answers as primary (%s); it should be fenced. Check it, then resume with --fence %s", site, s.Summary, site)
+			"site %s %s (%s); it should be fenced. Check it, then resume with --fence %s", site, what, s.Summary, site)
 	}
 	r.gated[site] = true
 	return nil
+}
+
+// asPrimary says how a site that answered shows itself primary: it
+// answers as primary, or it declares itself primary, which CloudNativePG
+// promotes at once, before an instance reports it ([RFC#0004] Motivation).
+// It returns "" for any other site. The read before a site's steps and the
+// read before the promotion both use it.
+func asPrimary(s driver.SiteState) string {
+	switch {
+	case s.Role == driver.RolePrimary:
+		return "answers as primary"
+	case s.DeclaredPrimary == s.Name:
+		return "declares itself primary"
+	}
+	return ""
 }
 
 // promotion returns the ID of the step that promotes to: the run's first
@@ -443,12 +459,8 @@ func (r *runner) beforePromotion(ctx context.Context) error {
 		if s.Name == to || !s.Reachable {
 			continue
 		}
-		what := "answers as primary"
-		switch {
-		case s.Role == driver.RolePrimary:
-		case s.DeclaredPrimary == s.Name:
-			what = "declares itself primary"
-		default:
+		what := asPrimary(s)
+		if what == "" {
 			continue
 		}
 		if !r.fencesAfter(s.Name) {
