@@ -9,7 +9,7 @@
 | `tack status [RUN] --context site-b` | the same from one context, without the Workload file; `--namespace` when the ledger namespace is not `tack-system` |
 | `tack status RUN -f workload.yaml -o yaml` | the whole `SiteFailover` object |
 | `tack abandon RUN -f workload.yaml --reason TEXT` | marks a run that must never go on: [runbooks/abandon-run.md](runbooks/abandon-run.md) |
-| `kubectl --context site-b -n tack-system get sfo` | the ledgers at one site, with workload, mode, from, to, state and phase |
+| `kubectl --context site-b -n tack-system get sfo` | the ledgers at one site, with workload, mode, from, to, state, reason and phase |
 | `kubectl --context site-b -n tack-system describe sfo RUN` | also the ledger's Events: each step's start and end, and each change of the run's state, for as long as the API server keeps Events (1 h by default) |
 
 Every `tack` command starts each progress line, such as a step or a retried check, with its time in UTC (`2026-10-27T10:15:00Z`), so a terminal's log lines up with the ledger and the API servers' audit logs ([RFC#0009](../rfcs/RFC0009.md#progress-and-status), Requirement 27). The history in `status.history` keeps at most 100 entries: the first, and the newest ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 22).

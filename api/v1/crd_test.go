@@ -2,6 +2,7 @@ package v1
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -61,5 +62,21 @@ func TestCRDVersions(t *testing.T) {
 	}
 	if !equality.Semantic.DeepEqual(v1.Subresources, v1alpha1.Subresources) || !equality.Semantic.DeepEqual(v1.AdditionalPrinterColumns, v1alpha1.AdditionalPrinterColumns) {
 		t.Error("v1alpha1's subresources or printer columns differ from v1's")
+	}
+}
+
+// #35 row 49. kubectl get sfo showed a run's state, but not why it
+// stopped or waits. Every version lists the Reason after the State
+// ([RFC#0003] Requirement 15).
+func TestCRDPrintsReason(t *testing.T) {
+	for _, v := range readCRD(t).Spec.Versions {
+		var names []string
+		for _, c := range v.AdditionalPrinterColumns {
+			names = append(names, c.Name+"="+c.JSONPath)
+		}
+		got := strings.Join(names, " ")
+		if !strings.Contains(got, "State=.status.state Reason=.status.reason Phase=.status.phase") {
+			t.Errorf("version %s: columns %s, want Reason after State", v.Name, got)
+		}
 	}
 }

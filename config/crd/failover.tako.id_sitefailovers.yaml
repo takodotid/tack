@@ -32,6 +32,9 @@ spec:
     - jsonPath: .status.state
       name: State
       type: string
+    - jsonPath: .status.reason
+      name: Reason
+      type: string
     - jsonPath: .status.phase
       name: Phase
       type: string
@@ -1217,6 +1220,9 @@ spec:
       type: string
     - jsonPath: .status.state
       name: State
+      type: string
+    - jsonPath: .status.reason
+      name: Reason
       type: string
     - jsonPath: .status.phase
       name: Phase
