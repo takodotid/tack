@@ -37,7 +37,7 @@ While a run is stopped, its objects stay held: Flux applies nothing to them, inc
 |---|---|
 | When | The branch moved from the run's base before its commit, or the push was rejected because it moved. Flux at a site applied a revision other than the run's base, its commit or the head accepted after it. The branch moved past the run's commit, or no longer contains it, before a release. Nothing is released at a site before its check. |
 | Check | The message names the base or the run's commit, and the head. Review `git log --oneline BASE..HEAD`, and `git diff BASE HEAD` for the files of the run's `git-commit` step. |
-| Way on | When the new commits leave the run's fields alone, or set them as live has them: `tack resume RUN -f workload.yaml --accept-git-head HEAD`. When they change a field of the run: fix Git first, then accept the head that fixes it. After the run's commit, the accepted head must contain that commit. What the flag changes for the rest of the run: [operations.md](../operations.md#stopped-and-waiting-runs). |
+| Way on | When the new commits leave the run's fields alone, or set them as live has them: `tack resume RUN -f workload.yaml --accept-git-head HEAD`. When the message names one head, `HEAD` stands for it, and any other commit is refused: a head pushed after the stop needs its own stop and review. When they change a field of the run: fix Git first, then accept the head that fixes it. After the run's commit, the accepted head must contain that commit. What the flag changes for the rest of the run: [operations.md](../operations.md#stopped-and-waiting-runs). |
 
 ## GitDiffersFromLive
 

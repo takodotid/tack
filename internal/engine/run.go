@@ -193,6 +193,28 @@ func (r *Resumption) run(ctx context.Context, opts Options) error {
 	return r.env.resume(ctx, r.sf, opts)
 }
 
+// AcceptHEAD is the value of --accept-git-head that names the head the
+// run's GitChanged stop named.
+const AcceptHEAD = "HEAD"
+
+// AcceptedHead returns the commit that --accept-git-head head accepts
+// for the run. When the run's GitChanged stop named one commit
+// (status.git.changedRevision), head must name it, or be HEAD, which
+// stands for it: the operator reviewed that commit, not whatever the
+// branch holds later (#35 row 37). A stop that named none, and a ledger
+// of an older Tack, accept head as given.
+func AcceptedHead(sf *failoverv1.SiteFailover, head string) (string, error) {
+	changed := sf.Status.Git.ChangedRevision
+	switch {
+	case head == "" || changed == "":
+		return head, nil
+	case head == AcceptHEAD || sameCommit(head, changed):
+		return changed, nil
+	}
+	return "", fmt.Errorf("--accept-git-head %s is not the commit the run stopped on: the stop named %s. Review that commit, then resume with --accept-git-head %s. Nothing was changed",
+		head, changed, changed)
+}
+
 // ErrCannotResume is returned when a run cannot resume: it never recorded
 // its start, or another run took it over or started after it.
 var ErrCannotResume = errors.New("the run cannot resume")
@@ -225,15 +247,20 @@ func (e *Env) checkLatest(ctx context.Context, sf *failoverv1.SiteFailover, chec
 }
 
 func (e *Env) resume(ctx context.Context, sf *failoverv1.SiteFailover, opts Options) error {
-	if opts.AcceptGitHead != "" {
+	head, err := AcceptedHead(sf, opts.AcceptGitHead)
+	if err != nil {
+		return err
+	}
+	if head != "" {
 		// Before the run's commit, the accepted head is the commit's base.
 		// After it, the Release phase checks Git against it.
 		if sf.Status.Git.Commit == "" {
-			sf.Status.Git.AcceptedRevision = opts.AcceptGitHead
+			sf.Status.Git.AcceptedRevision = head
 		} else {
-			sf.Status.Git.ReleaseRevision = opts.AcceptGitHead
+			sf.Status.Git.ReleaseRevision = head
 		}
 	}
+	sf.Status.Git.ChangedRevision = ""
 	sf.Status.State, sf.Status.Reason, sf.Status.Message = failoverv1.RunRunning, "", ""
 	if err := e.write(ctx, sf); err != nil {
 		return err
@@ -596,7 +623,7 @@ func (r *runner) halt(ctx context.Context, step *failoverv1.Step, err error, set
 	if !ok {
 		se = &stop.Error{Reason: failoverv1.ReasonStepFailed, Message: err.Error()}
 	}
-	se = &stop.Error{Reason: se.Reason, Message: r.hideCaptured(se.Message), Wait: se.Wait}
+	se = &stop.Error{Reason: se.Reason, Message: r.hideCaptured(se.Message), Wait: se.Wait, Head: se.Head}
 	st := r.stepStatus(step.ID)
 	st.Message = se.Message
 	if note := r.retried[step.Site]; note != "" {
@@ -621,6 +648,10 @@ func (r *runner) halt(ctx context.Context, step *failoverv1.Step, err error, set
 	}
 	r.sf.Status.Reason = se.Reason
 	r.sf.Status.Message = fmt.Sprintf("step %s: %s", step.ID, se.Message)
+	r.sf.Status.Git.ChangedRevision = ""
+	if se.Reason == failoverv1.ReasonGitChanged {
+		r.sf.Status.Git.ChangedRevision = se.Head
+	}
 	if werr := r.write(ctx, r.sf); werr != nil {
 		return errors.Join(werr, errors.New(r.sf.Status.Message))
 	}

@@ -250,6 +250,9 @@ func printStatus(w io.Writer, sf *failoverv1.SiteFailover) {
 		if g.ReleaseRevision != "" {
 			fmt.Fprintf(w, ", release checked against %s", g.ReleaseRevision)
 		}
+		if g.ChangedRevision != "" {
+			fmt.Fprintf(w, "; the stop names %s for --accept-git-head", g.ChangedRevision)
+		}
 		fmt.Fprintln(w)
 	}
 	if len(st.Captured) > 0 {

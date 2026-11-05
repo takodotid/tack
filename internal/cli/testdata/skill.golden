@@ -103,6 +103,8 @@ decide. Each decision has its own flag:
 
   GitChanged           Git moved during the run. Review the new commits, then
                        --accept-git-head SHA makes that commit the new base.
+                       When the stop names one commit, SHA must be that
+                       commit; HEAD stands for it.
   FencedSiteIsPrimary  a site other than the new primary answers as
                        primary. --fence SITE lets this resume demote it,
                        when the message offers it. A resume without it

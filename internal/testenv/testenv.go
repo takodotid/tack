@@ -420,7 +420,7 @@ func (g *Git) Commit(_ context.Context, _ *failoverv1.WorkloadSpec, req engine.C
 		return "", stop.Wait(failoverv1.ReasonGitUnreachable, "remote unreachable")
 	}
 	if g.Head != "" && g.Head != req.Base {
-		return "", stop.Ask(failoverv1.ReasonGitChanged, "branch moved from %s to %s", req.Base, g.Head)
+		return "", stop.AskHead(failoverv1.ReasonGitChanged, g.Head, "branch moved from %s to %s", req.Base, g.Head)
 	}
 	g.Commits = append(g.Commits, req)
 	g.Head = fmt.Sprintf("c%039d", len(g.Commits))

@@ -507,6 +507,12 @@ type GitStatus struct {
 	// it instead of the run's commit. It contains the run's commit.
 	// +optional
 	ReleaseRevision string `json:"releaseRevision,omitempty"`
+
+	// ChangedRevision is the one commit that the run's GitChanged stop
+	// named. While it is set, --accept-git-head must name it. Unset when
+	// the stop named none, and once the run goes on.
+	// +optional
+	ChangedRevision string `json:"changedRevision,omitempty"`
 }
 
 // FollowUp is an action left for the operator.

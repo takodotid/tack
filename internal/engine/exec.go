@@ -174,17 +174,24 @@ func (r *runner) checkBase(site, applied string) error {
 	case g.BaseRevision == "":
 		g.BaseRevision = applied
 		return nil
-	case SameRevision(g.BaseRevision, applied) || g.AcceptedRevision != "":
+	case SameRevision(g.BaseRevision, applied):
 		return nil
-	case g.Commit == "":
-		return stop.Ask(failoverv1.ReasonGitChanged,
-			"Flux at site %s applied %s, but the run's base is %s: Git changed during the run", site, applied, g.BaseRevision)
 	}
 	sha := RevisionSHA(applied)
-	if sameCommit(sha, g.Commit) || g.ReleaseRevision != "" && sameCommit(sha, g.ReleaseRevision) {
+	switch {
+	case g.AcceptedRevision != "" && sameCommit(sha, g.AcceptedRevision):
+		return nil
+	case g.Commit == "" && g.AcceptedRevision != "":
+		return stop.AskHead(failoverv1.ReasonGitChanged, sha,
+			"Flux at site %s applied %s, which is neither the run's base %s nor the head %s the operator accepted: Git changed during the run. Review it, then resume with --accept-git-head %s",
+			site, applied, g.BaseRevision, g.AcceptedRevision, sha)
+	case g.Commit == "":
+		return stop.AskHead(failoverv1.ReasonGitChanged, sha,
+			"Flux at site %s applied %s, but the run's base is %s: Git changed during the run. Review it, then resume with --accept-git-head %s", site, applied, g.BaseRevision, sha)
+	case sameCommit(sha, g.Commit) || g.ReleaseRevision != "" && sameCommit(sha, g.ReleaseRevision):
 		return nil
 	}
-	return stop.Ask(failoverv1.ReasonGitChanged,
+	return stop.AskHead(failoverv1.ReasonGitChanged, sha,
 		"Flux at site %s applied %s, which is neither the run's base %s nor its commit %s: Git changed during the run. Review it; if it contains the run's commit, resume with --accept-git-head %s",
 		site, applied, g.BaseRevision, g.Commit, sha)
 }
@@ -293,7 +300,7 @@ func (r *runner) verifyGit(ctx context.Context, s *failoverv1.Step) (string, err
 				"branch %s of %s is at %s, which does not contain %s: Git was rewritten before the release at site %s. Review it, then resume with --accept-git-head on a commit that contains the switch",
 				w.Git.Branch, Redact(w.Git.URL), head, want, s.Site)
 		}
-		return "", stop.Ask(failoverv1.ReasonGitChanged,
+		return "", stop.AskHead(failoverv1.ReasonGitChanged, head,
 			"branch %s of %s moved past %s to %s before the release at site %s: Flux applies it once the objects are released. Review the commits (git log %s..%s), then resume with --accept-git-head %s",
 			w.Git.Branch, Redact(w.Git.URL), want, head, s.Site, want, head, head)
 	}

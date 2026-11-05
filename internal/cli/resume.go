@@ -150,6 +150,8 @@ decide. Each decision has its own flag:
 
   GitChanged           Git moved during the run. Review the new commits, then
                        --accept-git-head SHA makes that commit the new base.
+                       When the stop names one commit, SHA must be that
+                       commit; HEAD stands for it.
   FencedSiteIsPrimary  a site other than the new primary answers as
                        primary. --fence SITE lets this resume demote it,
                        when the message offers it. A resume without it
@@ -207,10 +209,14 @@ func newResume(o *options) *cobra.Command {
 			printStatus(out, sf)
 			fmt.Fprintln(out)
 			printClusters(out, sf, env.Clients)
-			// Refuse a run that cannot resume before asking the operator.
+			// Refuse a run that cannot resume, or a head the run did not
+			// stop on, before asking the operator.
 			res, err := env.CheckResume(ctx, sf)
 			if err != nil {
 				return err
+			}
+			if _, err := engine.AcceptedHead(sf, opts.AcceptGitHead); err != nil {
+				return usageError{err}
 			}
 			if err := o.confirm(out, yes, sf.Spec.Workload.Name); err != nil {
 				return err
