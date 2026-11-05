@@ -200,8 +200,10 @@ Modes:
   site-loss  the new site promotes without a token; the old primary then
              needs a rebuild. Use it only when the old site is lost:
              Tack cannot tell a lost site from one cut off from this
-             host. Confirm the loss and fence the old primary first:
-             https://github.com/takodotid/tack/blob/main/docs/runbooks/site-loss.md
+             host. Confirm the loss and fence the old primary first.
+
+Confirming a site loss and fencing the old primary:
+  https://github.com/takodotid/tack/blob/main/docs/runbooks/site-loss.md
 
 If Git cannot be reached (break-glass), the run still holds and switches the
 live objects, then waits with exit code 4; "tack resume" finishes it once Git
