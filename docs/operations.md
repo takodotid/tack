@@ -83,7 +83,7 @@ After `--accept-git-head`, the check before release reports differences outside 
 
 ## Interrupting a run
 
-The first Ctrl-C, SIGTERM or SIGHUP stops the run: the step in flight ends, and the ledger records the stop, which can take up to 30 s when the ledger's site is slow. A second signal ends `tack` at once, without that record: the ledger then shows the step `Running`, and `tack resume` runs it again. SIGHUP comes when the terminal or SSH session ends; run `tack` in `tmux` or `screen` on a remote host, so a dropped connection does not stop the run.
+The first Ctrl-C, SIGTERM or SIGHUP stops the run: the step in flight ends, and the ledger records the stop, which can take up to 30 s when the ledger's site is slow, then its Event, up to 5 s more. A second signal ends `tack` at once, without that record; once the ledger holds the stop, it loses only the Event: the ledger then shows the step `Running`, and `tack resume` runs it again. SIGHUP comes when the terminal or SSH session ends; run `tack` in `tmux` or `screen` on a remote host, so a dropped connection does not stop the run.
 
 ## Break-glass
 

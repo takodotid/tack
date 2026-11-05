@@ -229,18 +229,15 @@ type Resumption struct {
 	checks *SiteChecks
 }
 
-// CheckResume refuses a run that cannot resume: a ledger that a newer
-// tack wrote last ([RFC#0003] Requirement 24), a ledger that never
-// recorded its start ([RFC#0003] Requirement 20), a run whose steps are not
+// CheckResume refuses a run that cannot resume: a ledger that never
+// recorded its start ([RFC#0003] Requirement 20), a ledger that a newer
+// tack wrote last (Requirement 24), a run whose steps are not
 // the plan its driver composes from its ledger (Requirement 21), a run
 // that another run took over, and a run older than another run of the
 // workload, whose plan may no longer match the sites (Requirement 18).
 // tack resume calls it before it asks the operator, then
 // Resumption.Resume after.
 func (e *Env) CheckResume(ctx context.Context, sf *failoverv1.SiteFailover) (*Resumption, error) {
-	if err := CheckWriter(sf); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrCannotResume, err)
-	}
 	if a := sf.Status.Abandoned; a != nil {
 		return nil, fmt.Errorf("%w: run %s was abandoned at %s: %s", ErrCannotResume, sf.Name, a.At.UTC().Format(time.RFC3339), a.Reason)
 	}
@@ -251,6 +248,9 @@ func (e *Env) CheckResume(ctx context.Context, sf *failoverv1.SiteFailover) (*Re
 	res := &Resumption{env: e, sf: sf, checks: e.SiteChecks(sf.Spec.Mode, sf.Spec.To)}
 	if res.done() {
 		return res, nil
+	}
+	if err := CheckWriter(sf); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrCannotResume, err)
 	}
 	if err := e.checkLatest(ctx, sf, res.checks); err != nil {
 		return nil, err

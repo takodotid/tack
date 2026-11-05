@@ -75,6 +75,26 @@ func TestResumeRefusesLedgerOfNewerTack(t *testing.T) {
 	}
 }
 
+// RFC0003 Requirement 24: a run that succeeded with no deferred step is
+// not checked: nothing of it runs, and tack resume writes nothing.
+func TestResumeOfSucceededRunIgnoresWriter(t *testing.T) {
+	setVersion(t, "v1.3.0")
+	f := newFixture(t)
+	if _, err := f.start("b", failoverv1.ModePlanned, engine.Options{}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	sf := f.ledger("b")
+	sf.Status.WrittenBy = "v1.4.0"
+	if err := f.env("b").Ledger.UpdateStatus(context.Background(), sf); err != nil {
+		t.Fatal(err)
+	}
+	before := f.ledger("b").ResourceVersion
+	after, err := f.resume("b", engine.Options{})
+	if err != nil || after.ResourceVersion != before || after.Status.WrittenBy != "v1.4.0" {
+		t.Errorf("resume: %v, resourceVersion %s to %s, writtenBy %q", err, before, after.ResourceVersion, after.Status.WrittenBy)
+	}
+}
+
 // RFC0003 Requirement 24: every status write records this tack's version,
 // the abandonment after the create among them.
 func TestEveryWriteRecordsWrittenBy(t *testing.T) {
