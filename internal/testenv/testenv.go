@@ -221,6 +221,9 @@ func Object(apiVersion, kind, namespace, name string, fields map[string]any) *un
 type Flux struct {
 	mu       sync.Mutex
 	Revision string
+	// Revisions is the revision Flux applied at a site, by site, when it
+	// is not Revision.
+	Revisions map[string]string
 	// Owners is how Flux applies an object, by <site>/<kind>/<name>.
 	Owners map[string]engine.Owner
 	Held   map[string]string
@@ -316,6 +319,9 @@ func (f *Flux) Reconcile(ctx context.Context, site string, _ []failoverv1.Object
 	defer f.mu.Unlock()
 	if revision != "" {
 		return "main@sha1:" + revision, notes, nil
+	}
+	if rev, ok := f.Revisions[site]; ok {
+		return rev, notes, nil
 	}
 	return f.Revision, notes, nil
 }
