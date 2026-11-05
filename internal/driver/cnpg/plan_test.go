@@ -355,3 +355,23 @@ func TestValidate(t *testing.T) {
 		}
 	}
 }
+
+// RFC0002 Requirement 2: the step after which a site no longer runs as
+// primary, by the IDs the plans hold.
+func TestDemotion(t *testing.T) {
+	for _, tt := range []struct {
+		mode failoverv1.Mode
+		site string
+		want string
+	}{
+		{failoverv1.ModePlanned, "a", "demote-a"},
+		{failoverv1.ModeSiteLoss, "a", "fence-a"},
+		{failoverv1.ModePlanned, "c", "declare-c"},
+		{failoverv1.ModeSiteLoss, "c", "declare-c"},
+		{failoverv1.ModePlanned, "b", ""},
+	} {
+		if got := (Driver{}).Demotion(driver.Request{From: "a", To: "b", Mode: tt.mode}, tt.site); got != tt.want {
+			t.Errorf("%s, site %s: %q, want %q", tt.mode, tt.site, got, tt.want)
+		}
+	}
+}

@@ -308,6 +308,21 @@ func (d Driver) Plan(w *failoverv1.WorkloadSpec, t *driver.Topology, r driver.Re
 	return b.steps, follow, nil
 }
 
+// Demotion implements driver.Driver: demote-<from> in a planned run,
+// fence-<from> in a site loss, declare-<site> at a third site. The IDs are
+// unchanged since v1.0.0.
+func (Driver) Demotion(r driver.Request, site string) string {
+	switch {
+	case site == r.To:
+		return ""
+	case site != r.From:
+		return "declare-" + site
+	case r.Mode == failoverv1.ModeSiteLoss:
+		return "fence-" + site
+	}
+	return "demote-" + site
+}
+
 func checkTarget(toSt *driver.SiteState, r driver.Request) error {
 	if toSt == nil || !toSt.Reachable {
 		return fmt.Errorf("site %s must be reachable to become primary", r.To)

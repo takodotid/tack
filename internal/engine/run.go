@@ -388,6 +388,17 @@ func (r *runner) run(ctx context.Context) error {
 			if err := r.identify(ctx, step.Site); err != nil {
 				return r.stopBefore(ctx, step, err)
 			}
+		}
+		// The read of the other sites comes before the read before the
+		// step's site, so a site that is primary again after its demotion
+		// gets one way on, not first --fence and then a stop that --fence
+		// cannot help.
+		if r.readsOthers(i) {
+			if err := r.readOthers(ctx, i); err != nil {
+				return r.stopBefore(ctx, step, err)
+			}
+		}
+		if step.Site != "" {
 			if step.Deferrable {
 				if err := r.gate(ctx, step.Site); err != nil {
 					if ctx.Err() != nil {
@@ -409,11 +420,6 @@ func (r *runner) run(ctx context.Context) error {
 					r.printf("  deferred  %s (site %s did not answer the read before its steps)\n", step.ID, step.Site)
 					continue
 				}
-			}
-		}
-		if step.ID == r.promotion() {
-			if err := r.beforePromotion(ctx); err != nil {
-				return r.stopBefore(ctx, step, err)
 			}
 		}
 		if step.Type == failoverv1.StepRelease && !r.verified[step.Site] {
@@ -521,41 +527,70 @@ func (r *runner) promotion() string {
 	return ""
 }
 
-// fencesAfter tells whether the run has a Failover step at site after the
-// promotion, such as the step that declares the new primary at a third
-// site. Only such a step can fence a site that is primary at the promotion.
-func (r *runner) fencesAfter(site string) bool {
-	promotion, after := r.promotion(), false
-	for _, s := range r.sf.Spec.Steps {
-		if s.ID == promotion {
-			after = true
-			continue
-		}
-		if after && s.Phase == failoverv1.PhaseFailover && s.Site == site {
-			return true
-		}
+// index returns the position of the step id in the plan, or -1.
+func (r *runner) index(id string) int {
+	if id == "" {
+		return -1
 	}
-	return false
+	return slices.IndexFunc(r.sf.Spec.Steps, func(s failoverv1.Step) bool { return s.ID == id })
 }
 
-// beforePromotion reads every site but to before the step that promotes
-// to, in each process, and stops the run when a site that answers is
-// primary, or declares itself primary: promoting to would give two
-// primaries ([RFC#0007] Requirement 9). The read before a site's steps
-// (gate) cannot see it: it skips to, and does not run for a site whose
-// steps are done, such as an old primary promoted again by hand after its
-// demotion (issue #45).
+// request is the run's request, as its driver takes it.
+func (r *runner) request() driver.Request {
+	return driver.Request{From: r.sf.Spec.From, To: r.sf.Spec.To, Mode: r.sf.Spec.Mode}
+}
+
+// fencesAfter tells whether the step that makes site declare another
+// primary, as the driver names it, comes after the promotion and has not
+// succeeded, such as the step that declares the new primary at a third
+// site. Only such a step can fence a site that is primary at the promotion
+// or after it.
+func (r *runner) fencesAfter(site string) bool {
+	p, d := r.index(r.promotion()), r.index(r.Driver.Demotion(r.request(), site))
+	return p >= 0 && d > p && r.stepStatus(r.sf.Spec.Steps[d].ID).State != failoverv1.StepSucceeded
+}
+
+// readsOthers tells whether the run reads every site but to before step
+// i: a Failover step after the step that demotes or fences from, the
+// promotion among them ([RFC#0007] Requirement 9). A plan without the
+// demotion the driver names reads only before the promotion.
+func (r *runner) readsOthers(i int) bool {
+	step := &r.sf.Spec.Steps[i]
+	if step.Phase != failoverv1.PhaseFailover {
+		return false
+	}
+	if step.ID == r.promotion() {
+		return true
+	}
+	d := r.index(r.Driver.Demotion(r.request(), r.sf.Spec.From))
+	return d >= 0 && i > d
+}
+
+// readOthers reads every site but to before step i, in each process, and
+// stops the run when a site that answers is primary, or declares itself
+// primary ([RFC#0007] Requirement 9). Before the promotion, promoting to
+// would give two primaries; after it, there are two. The read before a
+// site's steps (gate) cannot see it: it skips to, and does not run for a
+// site whose steps are done, such as an old primary promoted again by hand
+// after its demotion (issues #45 and #46). Before the promotion, it also
+// compares the values the run captured with their source (checkCaptured).
 //
 // A site that gave no answer in this process gives none here, without
 // another check; any other site gets the run's checks, so a site checked
 // before in this process is not checked again. A site that gives no answer
 // does not stop the run. --fence lets the run go on only for a site that
-// the run fences after the promotion.
-func (r *runner) beforePromotion(ctx context.Context) error {
+// the run fences after the promotion, with a step not yet done.
+func (r *runner) readOthers(ctx context.Context, i int) error {
 	to := r.sf.Spec.To
+	p := r.index(r.promotion())
+	promoted := p >= 0 && i > p
+	read := "the read after the demotion"
+	if i == p {
+		read = "the read before the promotion"
+	}
 	topo, err := r.Driver.Discover(ctx, &r.sf.Spec.Workload.Spec, runChecks{r: r, skip: to})
 	if err != nil {
-		return fmt.Errorf("the read before the promotion: %w", err)
+		return fmt.Errorf("%s: %w", read, err)
 	}
 	for _, s := range topo.Sites {
 		if s.Name == to || !s.Reachable {
@@ -565,15 +600,24 @@ func (r *runner) beforePromotion(ctx context.Context) error {
 		if what == "" {
 			continue
 		}
-		if !r.fencesAfter(s.Name) {
+		fences, fence := r.fencesAfter(s.Name), slices.Contains(r.opts.Fence, s.Name)
+		switch {
+		case !fences && !promoted:
 			return stop.Ask(failoverv1.ReasonFencedSiteIsPrimary,
-				"site %s %s (%s). Promoting %s now gives two primaries, and no step of this run is left to fence %s, so --fence cannot help. The workload was changed outside this run, such as by a recovery by hand, and the run's plan may be stale: see docs/runbooks/abandon-run.md",
+				"site %s %s (%s). Promoting %s gives two primaries, and no step of this run is left to fence %s, so --fence cannot help. The workload was changed outside this run, such as by a recovery by hand, and the run's plan may be stale: see docs/runbooks/abandon-run.md",
 				s.Name, what, s.Summary, to, s.Name)
-		}
-		if !slices.Contains(r.opts.Fence, s.Name) {
+		case !fences:
+			return stop.Ask(failoverv1.ReasonFencedSiteIsPrimary,
+				"site %s %s (%s), and so does %s, which this run promoted: two primaries. No step of this run is left to fence %s, so --fence cannot help. The workload was changed outside this run, such as by a recovery by hand: see docs/runbooks/abandon-run.md",
+				s.Name, what, s.Summary, to, s.Name)
+		case !fence && !promoted:
 			return stop.Ask(failoverv1.ReasonFencedSiteIsPrimary,
 				"site %s %s (%s), and this run fences it only after it promotes %s. Check it, then resume with --fence %s: %s and %s are then both primary until the run fences %s",
 				s.Name, what, s.Summary, to, s.Name, to, s.Name, s.Name)
+		case !fence:
+			return stop.Ask(failoverv1.ReasonFencedSiteIsPrimary,
+				"site %s %s (%s), and so does %s, which this run promoted, until this run fences %s. Check it, then resume with --fence %s",
+				s.Name, what, s.Summary, to, s.Name, s.Name)
 		}
 	}
 	return nil
