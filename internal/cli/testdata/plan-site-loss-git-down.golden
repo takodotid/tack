@@ -1,3 +1,4 @@
+2026-10-27T10:15:00Z   not read  the runs at site a: site a is unreachable: connection refused
 Plan for workload pg-main: SiteLoss, site a to site b
 Ledger: SiteFailover tack-system/pg-main-20261027-101500 at site b
 
@@ -124,7 +125,7 @@ Follow-ups for the operator:
 
 Notes:
   site loss: Tack cannot tell a lost site from one cut off from this host. If site a still runs, it stays primary until Flux there applies the run's commit or Tack fences it. Confirm the loss and fence it first: https://github.com/takodotid/tack/blob/main/docs/runbooks/site-loss.md
-  site a is unreachable: connection refused; the steps at site a wait for it to come back
+  site a is unreachable: connection refused; the steps at site a wait for it to come back, and the runs whose ledgers are there were not read
   Git: git: remote unreachable; the Git step waits for Git (break-glass)
 
 Nothing was changed. To run this plan: tack run -f testdata/workload.yaml --to b --from a --mode site-loss

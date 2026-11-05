@@ -159,3 +159,52 @@ func TestStatusListsRunTakenOver(t *testing.T) {
 		t.Errorf("status lacks the runs:\n%s", out)
 	}
 }
+
+// #59, observed in a two-site test of v1.3.0: after the runbook removed
+// every hold, tack abandon listed each object "(held)" and said "the run's
+// holds stay after it is abandoned", from the ledger. It says that the
+// list is the ledger's record, reads and changes no object of the
+// workload, and says that kubectl get sfo still shows the run's state.
+func TestAbandonListsHoldsAsRecorded(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		state failoverv1.RunState
+		want  string
+	}{
+		{name: "stopped", state: failoverv1.RunStopped, want: "kubectl get sfo still shows its State as Stopped: "},
+		{name: "never started", want: "kubectl get sfo still shows its State empty: "},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			sf := heldRun(t, "pg-main-earlier")
+			sf.Status.State = tt.state
+			// The runbook removed the hold: the object holds none.
+			f := newFactory(map[string][]client.Object{
+				"a": testenv.Site("a", "a", 2),
+				"b": append(testenv.Site("b", "a", 0), sf),
+			})
+			out, code := run(t, f, "abandon", "pg-main-earlier", "-f", "testdata/workload.yaml", "--reason", "holds removed by hand", "--yes")
+			if code != ExitOK {
+				t.Fatalf("exit %d:\n%s", code, out)
+			}
+			for _, want := range []string{
+				"Held objects, as the ledger records them:\n  site a: Cluster db/pg-a (held)\n",
+				"The ledger records these objects as held by the run, and not released:\n  Cluster db/pg-a at site a\n",
+				"Abandon does not read the objects: a hold removed by hand is still listed.",
+				tt.want,
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("output lacks %q:\n%s", want, out)
+				}
+			}
+			if strings.Contains(out, "holds stay after it is abandoned") {
+				t.Errorf("output says the holds stay:\n%s", out)
+			}
+			if len(f.flux.Calls) > 0 || len(f.flux.Held) > 0 {
+				t.Errorf("abandon acted on the workload's objects: calls %v, holds %v", f.flux.Calls, f.flux.Held)
+			}
+			if a := ledgerAt(t, f, "b", "pg-main-earlier").Status.Abandoned; a == nil || !a.At.Equal(&metav1.Time{Time: fixedNow}) {
+				t.Errorf("status.abandoned %+v", a)
+			}
+		})
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -51,6 +52,11 @@ type options struct {
 	// reachWaits are the pauses between the checks of a site in the search
 	// for runs. Nil uses engine.DefaultReachWaits.
 	reachWaits []time.Duration
+
+	mu sync.Mutex
+	// named holds the sites that a search for runs left out and that a
+	// progress line named: each is named once ([RFC#0009] Requirement 16).
+	named map[string]bool
 }
 
 const rootLong = `Tack switches a stateful workload's primary from one site to another: a

@@ -1,5 +1,6 @@
 2026-10-27T10:15:00Z   retry     site c did not answer check 1 of 3 (site c is unreachable: connection refused); next check in 1ms
 2026-10-27T10:15:00Z   retry     site c did not answer check 2 of 3 (site c is unreachable: connection refused); next check in 1ms
+2026-10-27T10:15:00Z   not read  the runs at site c: no answer to 3 checks over 0s: site c is unreachable: connection refused
 Plan for workload pg-main: Planned, site a to site b
 Ledger: SiteFailover tack-system/pg-main-20261027-101500 at site b
 
@@ -145,6 +146,6 @@ Release
         read SiteService apps/postgres until status.route.members is [pg-b] with reason Active; wait up to 2m0s
 
 Notes:
-  no answer to 3 checks over 0s: site c is unreachable: connection refused; the steps at site c wait for it to come back
+  no answer to 3 checks over 0s: site c is unreachable: connection refused; the steps at site c wait for it to come back, and the runs whose ledgers are there were not read
 
 Nothing was changed. To run this plan: tack run -f testdata/workload-3.yaml --to b --from a --mode planned

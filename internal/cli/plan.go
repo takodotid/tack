@@ -134,7 +134,7 @@ func (o *options) makePlan(ctx context.Context, p *planFlags, progress io.Writer
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	env.Runs = workloadRuns(&w.Spec, w.Name)
+	env.Runs = o.workloadRuns(&w.Spec, w.Name, progress)
 	plan, err := env.MakePlan(ctx, req)
 	if errors.Is(err, engine.ErrNoFrom) {
 		err = usageError{err}
@@ -195,7 +195,7 @@ func newRun(o *options) *cobra.Command {
 			if err := env.Recheck(cmd.Context(), plan); err != nil {
 				return err
 			}
-			old, err := checkNoActiveRun(cmd.Context(), env, plan.SiteFailover, takeOver)
+			old, err := o.checkNoActiveRun(cmd.Context(), env, plan.SiteFailover, takeOver)
 			if err != nil {
 				return err
 			}
@@ -235,20 +235,22 @@ func stdinIsTerminal() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
 // checkNoActiveRun refuses a second active run of the same workload. It
 // checks the sites again: the plan's checks may be older than the
 // operator's confirmation. A run that another run took over is not active.
-// It returns the runs to take over that it found.
-func checkNoActiveRun(ctx context.Context, env *engine.Env, sf *failoverv1.SiteFailover, takeOver []string) ([]foundRun, error) {
+// It names each site it leaves out on the progress lines, and returns the
+// runs to take over that it found.
+func (o *options) checkNoActiveRun(ctx context.Context, env *engine.Env, sf *failoverv1.SiteFailover, takeOver []string) ([]foundRun, error) {
 	// Start searches again with the same checks once its ledger exists.
 	env.StartChecks = env.SiteChecks(sf.Spec.Mode, sf.Spec.To)
-	runs, err := findRuns(ctx, env.StartChecks, &sf.Spec.Workload.Spec, sf.Spec.Workload.Name)
+	found, err := findRuns(ctx, env.StartChecks, &sf.Spec.Workload.Spec, sf.Spec.Workload.Name)
 	if err != nil {
 		return nil, err
 	}
-	all := make([]failoverv1.SiteFailover, len(runs))
-	for i, r := range runs {
+	o.leftOut(env.Out, found.missing)
+	all := make([]failoverv1.SiteFailover, len(found.runs))
+	for i, r := range found.runs {
 		all[i] = *r.sf
 	}
 	var old []foundRun
-	for _, r := range runs {
+	for _, r := range found.runs {
 		if slices.Contains(takeOver, r.sf.Name) {
 			old = append(old, r)
 			continue

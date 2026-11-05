@@ -4,12 +4,13 @@
 
 | Command | Shows |
 |---|---|
-| `tack status -f workload.yaml` | the workload's runs at every reachable site: site, run, mode, from, to, state, reason, start. The state is `Abandoned` for an abandoned run, and `TakenOver` for a run another run took over |
-| `tack status RUN -f workload.yaml` | one run: state and reason, message, the version of the `tack` that last wrote it, Git base and commit, captured values by name, held objects, each phase and step with its state, start, end, attempts and last result, follow-ups, and the history: each start, stop, wait and success of the run, with the version, the user and the flags of the `tack` that recorded it |
+| `tack status -f workload.yaml` | the workload's runs at every reachable site: site, run, mode, from, to, state, reason, start. The state is `Abandoned` for an abandoned run, and `TakenOver` for a run another run took over. After the list, each site that gave no answer, with its error: its runs are not listed, and the command exits with code 1. With `-o yaml`, those lines follow the ledgers as YAML comments |
+| `tack status RUN -f workload.yaml` | one run: state and reason, message, the version of the `tack` that last wrote it, Git base and commit, captured values by name, held objects as the ledger records them, each phase and step with its state, start, end, attempts and last result, follow-ups, and the history: each start, stop, wait and success of the run, with the version, the user and the flags of the `tack` that recorded it |
 | `tack status [RUN] --context site-b` | the same from one context, without the Workload file; `--namespace` when the ledger namespace is not `tack-system` |
 | `tack status RUN -f workload.yaml -o yaml` | the whole `SiteFailover` object |
 | `tack abandon RUN -f workload.yaml --reason TEXT` | marks a run that must never go on: [runbooks/abandon-run.md](runbooks/abandon-run.md) |
-| `kubectl --context site-b -n tack-system get sfo` | the ledgers at one site, with workload, mode, from, to, state, reason and phase |
+| `kubectl --context site-b -n tack-system get sfo` | the ledgers at one site, with workload, mode, from, to, state, reason and phase. The State column of an abandoned run shows its last state, such as `Stopped`: `status.abandoned` marks it apart from `status.state` ([RFC#0003](../rfcs/RFC0003.md#limitations)) |
+| `kubectl --context site-b -n tack-system get sfo -o custom-columns=NAME:.metadata.name,STATE:.status.state,REASON:.status.reason,ABANDONED:.status.abandoned.at,TAKEN-OVER-BY:.status.supersededBy` | the ledgers at one site, with the time each was abandoned and the run that took each over, `<none>` otherwise |
 | `kubectl --context site-b -n tack-system describe sfo RUN` | also the ledger's Events: each step's start and end, and each change of the run's state, for as long as the API server keeps Events (1 h by default) |
 
 Every `tack` command starts each progress line, such as a step or a retried check, with its time in UTC (`2026-10-27T10:15:00Z`), so a terminal's log lines up with the ledger and the API servers' audit logs ([RFC#0009](../rfcs/RFC0009.md#progress-and-status), Requirement 27). A read checks all its sites at once; the lines of its checks come grouped by site, in the order of the Workload's sites, each with the time it was printed, so a later site's lines can carry earlier times ([RFC#0007](../rfcs/RFC0007.md#requirements), Requirement 10). The credential plugins of the sites' contexts start at once too: when one prompts on the terminal, such as an OIDC login, log in to each context first, such as with `kubectl --context CTX get --raw /readyz` for each site ([RFC#0007](../rfcs/RFC0007.md#limitations)). The history in `status.history` keeps at most 100 entries: the first, and the newest ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 22).
@@ -30,7 +31,7 @@ Message: step git-commit: branch main of ssh://***@git.example.com/gitops.git is
 Started: 2026-10-27 10:15:00Z
 Git: base main@sha1:6dd30f74794e7c2d1ef0405918b9b92bb00a4a11, commit none
 Captured: demotionToken
-Held objects:
+Held objects, as the ledger records them:
   site a: Cluster db/pg-a (held)
   site a: Pooler db/pg-a-pooler-rw (held)
   site b: Cluster db/pg-b (held)
@@ -126,8 +127,9 @@ Delete old ledgers by hand when their number slows the searches. Delete only wha
 | Delete by name, one run at a time, never by label selector or `--all`. | A selector also matches the runs these rules keep. |
 
 ```sh
-# At every site: every run of the workload, and its state
-kubectl --context "$ctx" -n tack-system get sfo -l failover.tako.id/workload=pg-main
+# At every site: every run of the workload, its state, and whether it is abandoned or taken over
+kubectl --context "$ctx" -n tack-system get sfo -l failover.tako.id/workload=pg-main \
+  -o custom-columns=NAME:.metadata.name,STATE:.status.state,REASON:.status.reason,ABANDONED:.status.abandoned.at,TAKEN-OVER-BY:.status.supersededBy
 # One run: Succeeded, no Deferred step, no follow-up Rebuild
 tack status RUN -f workload.yaml
 kubectl --context "$ctx" -n tack-system delete sfo RUN

@@ -128,7 +128,9 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 	}
 	for _, s := range topo.Sites {
 		if !s.Reachable {
-			notes = append(notes, fmt.Sprintf("%s; the steps at site %s wait for it to come back", s.Error, s.Name))
+			// Its runs were not read either: the search shares the
+			// plan's checks ([RFC#0009] Requirement 2).
+			notes = append(notes, fmt.Sprintf("%s; the steps at site %s wait for it to come back, and the runs whose ledgers are there were not read", s.Error, s.Name))
 			continue
 		}
 		if note := checks.Note(s.Name); note != "" {
