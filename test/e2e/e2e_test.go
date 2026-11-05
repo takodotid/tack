@@ -761,9 +761,10 @@ func TestTakeOver(t *testing.T) {
 		t.Fatalf("resume of a ledger without a start: exit %d, want 1 with a refusal", code)
 	}
 
-	// Planned in the same second as the run it takes over, this run gets
-	// that run's name with -2 appended (issue #37). Two ledgers can then
-	// share a creation second, so the names come from tack's output.
+	// When this run is planned in the same second as the run it takes
+	// over, it gets that run's name with -2 appended (issue #37). Two
+	// ledgers can then share a creation second, so the names come from
+	// tack's output.
 	out, code = tack(t, []string{"TACK_FAULT=hold-a-cluster-pg-a:before"}, "run", "-f", workload, "--to", "b", "--take-over", runName(never), "--yes")
 	if code != exitFault {
 		t.Fatalf("exit %d, want the fault exit %d", code, exitFault)
