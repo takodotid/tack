@@ -2,6 +2,8 @@ package cnpg
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -177,5 +179,152 @@ func TestPlanAllowed(t *testing.T) {
 	})
 	if _, _, err := (Driver{}).Plan(w, topo, driver.Request{From: "a", To: "b", Mode: failoverv1.ModeSiteLoss}); err != nil {
 		t.Errorf("site loss: %v", err)
+	}
+}
+
+// leaves lists the fields a JSON merge patch sets, as dotted paths, with
+// their JSON values; null removes a field.
+func leaves(t *testing.T, merge string) map[string]string {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal([]byte(merge), &m); err != nil {
+		t.Fatalf("patch %s: %v", merge, err)
+	}
+	out := map[string]string{}
+	var walk func(prefix string, v any)
+	walk = func(prefix string, v any) {
+		if mm, ok := v.(map[string]any); ok {
+			for k, c := range mm {
+				p := k
+				if prefix != "" {
+					p = prefix + "." + k
+				}
+				walk(p, c)
+			}
+			return
+		}
+		b, _ := json.Marshal(v)
+		out[prefix] = string(b)
+	}
+	walk("", m)
+	return out
+}
+
+// RFC0002 Requirement 2: GitChange covers every field the Failover steps
+// patch, with the value the last patch leaves, so Git equals live after
+// the run. A field the patches remove is a removal in Git.
+func TestGitChangeCoversPatches(t *testing.T) {
+	for _, tt := range []struct {
+		mode failoverv1.Mode
+		edit func(site string, replica, status map[string]any)
+	}{
+		{mode: failoverv1.ModePlanned},
+		{mode: failoverv1.ModeSiteLoss, edit: func(s string, r, st map[string]any) {
+			if s == "a" {
+				r["primary"] = "pg-b"
+				st["instancesReportedState"] = map[string]any{"pg-a-1": map[string]any{"isPrimary": false}}
+			}
+		}},
+	} {
+		t.Run(string(tt.mode), func(t *testing.T) {
+			w, topo := topology(t, tt.edit)
+			req := driver.Request{From: "a", To: "b", Mode: tt.mode}
+			steps, _, err := Driver{}.Plan(w, topo, req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			changes, err := Driver{}.GitChange(w, topo, req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			git := map[string]*string{}
+			for _, c := range changes {
+				git[c.Site+" "+c.Object.Kind+"/"+c.Object.Name+" "+c.Field] = c.Value
+			}
+			final := map[string]string{}
+			for _, s := range steps {
+				if s.Type != failoverv1.StepPatch {
+					continue
+				}
+				for path, v := range leaves(t, s.Patch.Merge) {
+					final[s.Site+" "+s.Patch.Object.Kind+"/"+s.Patch.Object.Name+" "+path] = v
+				}
+			}
+			if len(final) == 0 {
+				t.Fatal("no patched field")
+			}
+			for k, v := range final {
+				g, ok := git[k]
+				switch {
+				case !ok:
+					t.Errorf("%s is patched to %s, and Git does not set it", k, v)
+				case v == "null" && g != nil:
+					t.Errorf("%s is removed live, Git sets %s", k, *g)
+				case v != "null" && (g == nil || *g != v):
+					t.Errorf("%s is %s live after the patches, Git has %v", k, v, g)
+				}
+			}
+		})
+	}
+}
+
+// RFC0004 Requirement 10: the demotion wait times out after
+// timeouts.demotion, every other wait after timeouts.promotion.
+func TestWaitTimeouts(t *testing.T) {
+	for _, mode := range []failoverv1.Mode{failoverv1.ModePlanned, failoverv1.ModeSiteLoss} {
+		w, topo := topology(t, func(s string, r, st map[string]any) {
+			if mode == failoverv1.ModeSiteLoss && s == "a" {
+				r["primary"] = "pg-b"
+				st["instancesReportedState"] = map[string]any{"pg-a-1": map[string]any{"isPrimary": false}}
+			}
+		})
+		steps, _, err := Driver{}.Plan(w, topo, driver.Request{From: "a", To: "b", Mode: mode})
+		if err != nil {
+			t.Fatal(err)
+		}
+		waits := 0
+		for _, s := range steps {
+			if s.Type != failoverv1.StepWait {
+				continue
+			}
+			waits++
+			want := w.Timeouts.Promotion.Duration
+			if strings.HasPrefix(s.ID, "wait-demoted-") {
+				want = w.Timeouts.Demotion.Duration
+			}
+			if s.Wait.Timeout.Duration != want {
+				t.Errorf("%s %s: timeout %s, want %s", mode, s.ID, s.Wait.Timeout.Duration, want)
+			}
+		}
+		if waits == 0 {
+			t.Errorf("%s: no Wait step", mode)
+		}
+	}
+}
+
+// RFC0004 Requirement 9: Verify at to waits for a healthy primary that
+// declares itself; at any other site, for its Cluster to declare to's.
+func TestVerify(t *testing.T) {
+	w := spec3()
+	req := driver.Request{From: "a", To: "b", Mode: failoverv1.ModePlanned}
+	for site, want := range map[string][]string{
+		"b": {`{.spec.replica.primary} Equals "pg-b"`, `{.status.instancesReportedState.*.isPrimary} Contains "true"`, `{.status.phase} Equals "Cluster in healthy state"`},
+		"a": {`{.spec.replica.primary} Equals "pg-b"`},
+		"c": {`{.spec.replica.primary} Equals "pg-b"`},
+	} {
+		steps, err := Driver{}.Verify(w, req, site)
+		if err != nil || len(steps) != 1 || steps[0].Type != failoverv1.StepWait || steps[0].ID != "verify-"+site || steps[0].Site != site {
+			t.Fatalf("site %s: %v, %+v", site, err, steps)
+		}
+		var got []string
+		for _, c := range steps[0].Wait.Conditions {
+			got = append(got, fmt.Sprintf("%s %s %q", c.JSONPath, c.Operator, c.Value))
+		}
+		if strings.Join(got, "; ") != strings.Join(want, "; ") {
+			t.Errorf("site %s: conditions %q, want %q", site, got, want)
+		}
+		if steps[0].Wait.Object.Name != "pg-"+site {
+			t.Errorf("site %s: waits on %s", site, steps[0].Wait.Object.Name)
+		}
 	}
 }
