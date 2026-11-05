@@ -328,3 +328,44 @@ func TestFenceOfThirdSiteRecordsRebuild(t *testing.T) {
 		t.Fatalf("follow-ups %+v, want one Rebuild for c", sf.Status.FollowUps)
 	}
 }
+
+// A read that lets c through by --fence, then stops before the promotion
+// on a changed token, promoted nothing: it records no Rebuild for c.
+func TestFenceOfThirdSiteRecordsNoRebuildWhenTheReadStops(t *testing.T) {
+	s := newSites3(t)
+	ctx := context.Background()
+	env := s.env("b")
+	env.Ledger = &diesBefore{Ledger: env.Ledger, step: "promote-b"}
+	if err := env.Start(ctx, s.planned3("run-1"), engine.Options{}); err == nil {
+		t.Fatal("the run went on after its process died")
+	}
+	first := s.ledger("b", "run-1").Status.Captured["demotionToken"]
+	// a is promoted and demoted again by hand: its token changes.
+	s.promoteByHand("a")
+	u := testenv.Object("postgresql.cnpg.io/v1", "Cluster", "db", "pg-a", nil)
+	if err := s.clients.Sites["a"].Patch(ctx, u, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"replica":{"primary":"pg-b"}}}`))); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		if err := s.clients.Sites["a"].Get(ctx, client.ObjectKeyFromObject(u), u); err != nil {
+			t.Fatal(err)
+		}
+		if tok, _ := field(u.Object, "status", "demotionToken").(string); tok != "" && tok != first {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("site a published no new token")
+		}
+	}
+	s.promoteByHand("c")
+	err := s.env("b").Resume(ctx, s.ledger("b", "run-1"), engine.Options{Fence: []string{"c"}})
+	sf := s.ledger("b", "run-1")
+	if !errors.Is(err, engine.ErrStopped) || sf.Status.Reason != failoverv1.ReasonTokenMissing {
+		t.Fatalf("err %v, %s: %s", err, sf.Status.Reason, sf.Status.Message)
+	}
+	for _, f := range sf.Status.FollowUps {
+		if f.Action == engine.FollowUpRebuild {
+			t.Errorf("follow-up %+v recorded, though nothing was promoted", f)
+		}
+	}
+}
