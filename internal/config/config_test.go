@@ -95,3 +95,48 @@ func TestParseRouting(t *testing.T) {
 		})
 	}
 }
+
+// #35 row 50 (RFC0009 Requirement 11). YAML 1.1 reads an unquoted n, on
+// or yes as a boolean and 010 as a number, so a site named so became
+// "false", "true" or "8", and --to n then failed. Such a name, or a
+// reference to one, is refused unquoted, and kept as written quoted.
+func TestParseSiteNames(t *testing.T) {
+	sites := func(a, b string) string {
+		return strings.Replace(strings.Replace(workload, "{name: a,", "{name: "+a+",", 1), "{name: b,", "{name: "+b+",", 1)
+	}
+	for _, tt := range []struct {
+		name  string
+		src   string
+		err   string
+		names []string
+	}{
+		{name: "plain names", src: sites("a", "b"), names: []string{"a", "b"}},
+		{name: "n", src: sites("n", "b"), err: `spec.sites[0].name: YAML reads n as "false"; quote it, as "n"`},
+		{name: "on and yes", src: sites("on", "yes"), err: `spec.sites[0].name: YAML reads on as "true"; quote it, as "on"` + "\n  " + `spec.sites[1].name: YAML reads yes as "true"; quote it, as "yes"`},
+		{name: "a number", src: sites("010", "b"), err: `spec.sites[0].name: YAML reads 010 as "8"; quote it, as "010"`},
+		{name: "quoted", src: sites(`"n"`, `'on'`), names: []string{"n", "on"}},
+		{name: "a quoted false", src: sites(`"false"`, "b"), names: []string{"false", "b"}},
+		{name: "a reference", src: sites(`"n"`, "b") + "  routing: {strait: {services: [{site: n, namespace: apps, name: pg}], members: [{site: \"n\", member: pg-a}, {site: b, member: pg-b}]}}\n",
+			err: `spec.routing.strait.services[0].site: YAML reads n as "false"; quote it, as "n"`},
+		{name: "a Git mapping", src: strings.Replace(sites(`"y"`, "b"), "branch: main}", "branch: main, fields: [{site: y, object: {kind: Cluster, name: pg}, field: spec.x, file: f.yaml, path: x}]}", 1),
+			err: `spec.git.fields[0].site: YAML reads y as "true"; quote it, as "y"`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w, err := Parse([]byte("apiVersion: failover.tako.id/v1\n" + tt.src))
+			switch {
+			case tt.err != "":
+				if err == nil || !strings.Contains(err.Error(), tt.err) {
+					t.Fatalf("got %v, want %q", err, tt.err)
+				}
+			case err != nil:
+				t.Fatal(err)
+			default:
+				for i, n := range tt.names {
+					if got := w.Spec.Sites[i].Name; got != n {
+						t.Errorf("site %d is %q, want %q", i, got, n)
+					}
+				}
+			}
+		})
+	}
+}

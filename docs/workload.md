@@ -99,7 +99,7 @@ Required fields have no default. Durations are Go durations, such as `90s`, `15m
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
-| `name` | yes | | The site's name in `--to`, `--from`, `--fence` and the ledger. Unique. Lowercase letters, digits and `-`, starting and ending with a letter or digit, at most 63 characters. |
+| `name` | yes | | The site's name in `--to`, `--from`, `--fence` and the ledger. Unique. Lowercase letters, digits and `-`, starting and ending with a letter or digit, at most 63 characters. Quote a name that YAML reads as a boolean or a number, such as `"n"`, `"on"` or `"010"`, here and wherever a `site:` names it: Tack refuses it unquoted. |
 | `kubeContext` | yes | | The kubeconfig context for this site. A context missing from the kubeconfig is an error; Tack never uses the current context instead. [One kubeconfig](#every-sites-context-in-one-kubeconfig) holds every site's context. |
 | `cnpg.cluster.namespace`, `cnpg.cluster.name` | yes | | The site's CloudNativePG `Cluster`. Each site's Cluster needs its own name. |
 | `cnpg.pooler.namespace`, `cnpg.pooler.name` | no | | The site's read-write `Pooler`. Tack also waits on the Deployment of the same name, which CloudNativePG runs for it. Without a pooler, Tack moves no Pooler at this site. Never name a Pooler `<cluster>-rw`, `<cluster>-ro` or `<cluster>-r`: its Service takes its name, the Cluster already owns Services with those names, and CloudNativePG then never reconciles the Pooler. |

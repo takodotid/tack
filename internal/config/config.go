@@ -9,8 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"gopkg.in/yaml.v3"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/yaml"
+	k8syaml "sigs.k8s.io/yaml"
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
 )
@@ -53,18 +54,100 @@ func Load(path string) (*Workload, error) {
 // Parse decodes, defaults and validates a Workload.
 func Parse(b []byte) (*Workload, error) {
 	var w Workload
-	if err := yaml.UnmarshalStrict(b, &w); err != nil {
+	if err := k8syaml.UnmarshalStrict(b, &w); err != nil {
 		return nil, fmt.Errorf("workload: %w", err)
 	}
 	if (w.APIVersion != failoverv1.GroupVersion.String() && w.APIVersion != DeprecatedAPIVersion) || w.Kind != Kind {
 		return nil, fmt.Errorf("workload: want apiVersion %s and kind %s, got %q and %q",
 			failoverv1.GroupVersion.String(), Kind, w.APIVersion, w.Kind)
 	}
+	if err := checkSiteNames(b, &w.Spec); err != nil {
+		return nil, err
+	}
 	Default(&w.Spec)
 	if err := Validate(w.Name, &w.Spec); err != nil {
 		return nil, err
 	}
 	return &w, nil
+}
+
+// checkSiteNames refuses a site name, or a reference to one, written as a
+// plain YAML scalar that the decoder reads as other text: YAML 1.1 reads n,
+// on or yes as a boolean, and 010 or 1e3 as a number, which become "false",
+// "true", "8" or "1000". The site would then answer to neither --to n nor
+// the name the operator wrote (#35 row 50). A quoted name is kept as
+// written.
+func checkSiteNames(b []byte, s *failoverv1.WorkloadSpec) error {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(b, &doc); err != nil || len(doc.Content) == 0 {
+		// The strict decode before read the file.
+		return nil
+	}
+	spec := child(doc.Content[0], "spec")
+	var errs []string
+	check := func(path string, n *yaml.Node, decoded string) {
+		const quoted = yaml.DoubleQuotedStyle | yaml.SingleQuotedStyle | yaml.LiteralStyle | yaml.FoldedStyle
+		if n == nil || n.Kind != yaml.ScalarNode || n.Style&quoted != 0 || n.Value == decoded {
+			return
+		}
+		errs = append(errs, fmt.Sprintf("%s: YAML reads %s as %q; quote it, as %q", path, n.Value, decoded, n.Value))
+	}
+	each := func(list *yaml.Node, key, path string, decoded func(i int) (string, bool)) {
+		if list == nil || list.Kind != yaml.SequenceNode {
+			return
+		}
+		for i, item := range list.Content {
+			if d, ok := decoded(i); ok {
+				check(fmt.Sprintf("%s[%d].%s", path, i, key), child(item, key), d)
+			}
+		}
+	}
+	each(child(spec, "sites"), "name", "spec.sites", func(i int) (string, bool) {
+		return at(s.Sites, i, func(x failoverv1.Site) string { return x.Name })
+	})
+	git := child(spec, "git")
+	each(child(git, "fields"), "site", "spec.git.fields", func(i int) (string, bool) {
+		return at(s.Git.Fields, i, func(x failoverv1.FieldMapping) string { return x.Site })
+	})
+	if s.Git.Find != nil {
+		each(child(child(git, "find"), "paths"), "site", "spec.git.find.paths", func(i int) (string, bool) {
+			return at(s.Git.Find.Paths, i, func(x failoverv1.SitePath) string { return x.Site })
+		})
+	}
+	if s.Routing != nil && s.Routing.Strait != nil {
+		strait := child(child(spec, "routing"), "strait")
+		each(child(strait, "services"), "site", "spec.routing.strait.services", func(i int) (string, bool) {
+			return at(s.Routing.Strait.Services, i, func(x failoverv1.StraitService) string { return x.Site })
+		})
+		each(child(strait, "members"), "site", "spec.routing.strait.members", func(i int) (string, bool) {
+			return at(s.Routing.Strait.Members, i, func(x failoverv1.StraitMember) string { return x.Site })
+		})
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("workload: site names must stay as written:\n  %s", strings.Join(errs, "\n  "))
+	}
+	return nil
+}
+
+// child returns the value of key in a YAML mapping, or nil.
+func child(m *yaml.Node, key string) *yaml.Node {
+	if m == nil || m.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == key {
+			return m.Content[i+1]
+		}
+	}
+	return nil
+}
+
+// at returns field of the i-th element of list, if there is one.
+func at[T any](list []T, i int, field func(T) string) (string, bool) {
+	if i >= len(list) {
+		return "", false
+	}
+	return field(list[i]), true
 }
 
 // Default fills unset fields.

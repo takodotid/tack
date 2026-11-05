@@ -8,10 +8,14 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
+	"github.com/takodotid/tack/internal/config"
+	"github.com/takodotid/tack/internal/driver"
 	"github.com/takodotid/tack/internal/driver/cnpg"
 	"github.com/takodotid/tack/internal/engine"
 	"github.com/takodotid/tack/internal/testenv"
@@ -179,5 +183,32 @@ func TestResumeAcceptsItsOwnPlan(t *testing.T) {
 				t.Fatalf("refused: %v", err)
 			}
 		})
+	}
+}
+
+// #35 row 50. Before v1.3.0, a site written as n in the Workload file was
+// recorded as "false". The check of site names reads the file only: a
+// ledger that names a site "false" still resumes, and a file that quotes
+// the name as "false" still finds it.
+func TestResumeAcceptsSiteNamedFalse(t *testing.T) {
+	w, err := config.Parse([]byte(strings.Replace(workloadYAML, "{name: a,", `{name: "false",`, 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	clients := testenv.NewClients(map[string][]client.Object{"false": testenv.Site("a", "a", 2), "b": testenv.Site("b", "a", 0)})
+	env := &engine.Env{Clients: clients, Driver: cnpg.Driver{}, Flux: testenv.NewFlux("main@sha1:1111111111111111111111111111111111111111"), Git: &testenv.Git{},
+		ReachWaits: []time.Duration{time.Millisecond, time.Millisecond}}
+	p, err := env.MakePlan(context.Background(), engine.Request{Run: "run-1", Workload: w.Name, Spec: &w.Spec,
+		Request: driver.Request{From: "false", To: "b", Mode: failoverv1.ModePlanned}})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	sf := p.SiteFailover
+	sf.Status.State = failoverv1.RunStopped
+	if _, err := env.CheckResume(context.Background(), sf); err != nil {
+		t.Fatalf("refused: %v", err)
+	}
+	if sf.Spec.Steps[0].ID != "hold-false-cluster-pg-a" {
+		t.Errorf("first step %s", sf.Spec.Steps[0].ID)
 	}
 }

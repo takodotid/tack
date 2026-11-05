@@ -192,7 +192,7 @@ Each release also needs:
 
 | From | To | CRD | Also before the new CLI runs |
 |---|---|---|---|
-| v1.2.x | v1.3.0 | new optional fields: `spec.takeOvers`, `status.abandoned`, `status.git.changedRevision` | nothing |
+| v1.2.x | v1.3.0 | new optional fields: `spec.takeOvers`, `status.abandoned`, `status.git.changedRevision` | Quote every site name that YAML reads as a boolean or a number, such as `n`, `on` or `010`, in each Workload file: v1.3.0 refuses it unquoted ([docs/workload.md](docs/workload.md#specsites)). A run planned before recorded the decoded name, such as `false`, and its flags, such as `--fence`, take that name. |
 | v1.2.0 | v1.2.1 | unchanged | nothing |
 | v1.0.x or v1.1.x | v1.2.x | new optional fields: `spec.takeOver`, `spec.fingerprints`, `status.fingerprints`, `status.supersededBy`, `status.git.releaseRevision` | Grant `get` on the namespace `kube-system` at every site: the plan reads its UID to identify the site's cluster, and fails with `forbidden` without it. Move a user out of an `http` or `https` Git URL, such as `https://user@git.example.com/gitops.git`, into git's configuration (`credential.<url>.username`): Tack refuses such a URL. `ssh://git@git.example.com/gitops.git` and `git@git.example.com:gitops.git` still work. |
 
