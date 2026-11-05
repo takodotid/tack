@@ -412,6 +412,16 @@ func (g *Git) Resolve(_ context.Context, w *failoverv1.WorkloadSpec, changes []d
 	return out, nil
 }
 
+// HasMapping implements engine.Git, as Resolve maps a change.
+func (g *Git) HasMapping(w *failoverv1.WorkloadSpec, c driver.FieldChange) bool {
+	for _, f := range w.Git.Fields {
+		if f.Site == c.Site && f.Object.Kind == c.Object.Kind && f.Object.Name == c.Object.Name && f.Field == c.Field {
+			return true
+		}
+	}
+	return w.Git.Find != nil
+}
+
 // Commit implements engine.Git.
 func (g *Git) Commit(_ context.Context, _ *failoverv1.WorkloadSpec, req engine.CommitRequest) (string, error) {
 	g.mu.Lock()

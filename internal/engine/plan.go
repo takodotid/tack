@@ -161,13 +161,10 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
+	// One Resolve, so the plan fetches Git once (#35 row 12).
 	var required []driver.FieldChange
 	for _, c := range changes {
-		if !c.Optional {
-			required = append(required, c)
-			continue
-		}
-		if _, err := e.Git.Resolve(ctx, req.Spec, []driver.FieldChange{c}); errors.Is(err, ErrNoMapping) {
+		if c.Optional && !e.Git.HasMapping(req.Spec, c) {
 			notes = append(notes, fmt.Sprintf("Git: no mapping for %s of %s at site %s: Tack leaves it as Git has it; the check before release stops the run if Git sets it",
 				c.Field, refString(c.Object), c.Site))
 			continue

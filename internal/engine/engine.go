@@ -65,6 +65,11 @@ type Git interface {
 	// read, it returns the changes unresolved with an error that says so.
 	Resolve(ctx context.Context, w *failoverv1.WorkloadSpec, changes []driver.FieldChange) ([]failoverv1.GitChange, error)
 
+	// HasMapping reports, without reading Git, whether a change has a
+	// spec.git.fields entry, or spec.git.find covers it. Resolve fails
+	// with ErrNoMapping on a change without.
+	HasMapping(w *failoverv1.WorkloadSpec, c driver.FieldChange) bool
+
 	// Commit writes one commit on top of base, or adopts the run's commit
 	// when it is already there.
 	Commit(ctx context.Context, w *failoverv1.WorkloadSpec, req CommitRequest) (string, error)
