@@ -715,6 +715,9 @@ func (r *runner) readOthers(ctx context.Context, i int) error {
 	if err != nil {
 		return fmt.Errorf("%s: %w", read, err)
 	}
+	// fenced are the follow-ups of the sites --fence lets through, recorded
+	// once no site stops the run.
+	var fenced []failoverv1.FollowUp
 	for _, s := range topo.Sites {
 		if s.Name == to || !s.Reachable {
 			continue
@@ -745,25 +748,31 @@ func (r *runner) readOthers(ctx context.Context, i int) error {
 		// --fence lets the run promote to, or go on after it, while the
 		// site is primary: both may take writes until the run fences it
 		// (#46).
-		r.rebuild(s.Name, fmt.Sprintf("site %s %s while this run promoted %s, which the operator let go on with --fence %s, so %s may hold writes that %s lacks: recreate its member from %s (docs/runbooks/rebuild-old-primary.md)",
-			s.Name, what, to, s.Name, s.Name, to, to))
+		fenced = append(fenced, failoverv1.FollowUp{Site: s.Name, Action: FollowUpRebuild,
+			Reason: fmt.Sprintf("site %s %s while this run promoted %s, which the operator let go on with --fence %s, so %s may hold writes that %s lacks: recreate its member from %s (docs/runbooks/rebuild-old-primary.md)",
+				s.Name, what, to, s.Name, s.Name, to, to)})
 	}
 	if i == p {
-		return r.checkCaptured(ctx, i)
+		if err := r.checkCaptured(ctx, i); err != nil {
+			return err
+		}
+	}
+	for _, f := range fenced {
+		r.rebuild(f)
 	}
 	return nil
 }
 
-// rebuild records the follow-up Rebuild for a site, once. The ledger's
-// next write carries it.
-func (r *runner) rebuild(site, reason string) {
-	for _, f := range r.sf.Status.FollowUps {
-		if f.Site == site && f.Action == FollowUpRebuild {
+// rebuild records a follow-up Rebuild, once per site. The ledger's next
+// write carries it.
+func (r *runner) rebuild(f failoverv1.FollowUp) {
+	for _, o := range r.sf.Status.FollowUps {
+		if o.Site == f.Site && o.Action == f.Action {
 			return
 		}
 	}
-	r.sf.Status.FollowUps = append(r.sf.Status.FollowUps, failoverv1.FollowUp{Site: site, Action: FollowUpRebuild, Reason: reason})
-	r.printf("  note      follow-up for site %s: Rebuild (%s)\n", site, reason)
+	r.sf.Status.FollowUps = append(r.sf.Status.FollowUps, f)
+	r.printf("  note      follow-up for site %s: %s (%s)\n", f.Site, f.Action, f.Reason)
 }
 
 // checkCaptured reads again, before the promotion, each value a Capture
