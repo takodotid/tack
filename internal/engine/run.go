@@ -296,7 +296,10 @@ var ErrCannotResume = errors.New("the run cannot resume")
 
 // checkLatest refuses a run that another run took over or started after.
 // It reads the runs at every site of the run's Workload snapshot that
-// answers checks.
+// answers checks. Creation times come from the API server of each ledger's
+// site, to the second: a run created in the same second at the same site,
+// or within ClockSkew at another site, counts as started after this one,
+// unless this run took it over.
 func (e *Env) checkLatest(ctx context.Context, sf *failoverv1.SiteFailover, checks *SiteChecks) error {
 	if by := sf.Status.SupersededBy; by != "" {
 		return fmt.Errorf("%w: run %s was taken over by run %s; see tack status %s", ErrCannotResume, sf.Name, by, by)
@@ -308,20 +311,32 @@ func (e *Env) checkLatest(ctx context.Context, sf *failoverv1.SiteFailover, chec
 	if err != nil {
 		return fmt.Errorf("search the workload's runs before resuming %s: %w", sf.Name, err)
 	}
-	for _, r := range runs {
+	for i := range runs {
+		r := &runs[i]
 		switch {
 		case r.Name == sf.Name:
 		case r.Status.State == "" && r.Status.Abandoned != nil:
 			// It ran no step, so the sites are as this run's plan read them.
 		case r.TakesOver(sf.Name):
 			return fmt.Errorf("%w: run %s was taken over by run %s; see tack status %s", ErrCannotResume, sf.Name, r.Name, r.Name)
-		case r.CreationTimestamp.After(sf.CreationTimestamp.Time):
-			return fmt.Errorf("%w: run %s started after run %s, so the plan of %s may no longer match the sites; see tack status %s",
+		case sf.TakesOver(r.Name):
+			// This run took it over, so it is older.
+		case !r.CreationTimestamp.Before(&sf.CreationTimestamp) && r.Spec.To == sf.Spec.To:
+			return fmt.Errorf("%w: run %s started after run %s, or in the same second, so the plan of %s may no longer match the sites; see tack status %s",
 				ErrCannotResume, r.Name, sf.Name, sf.Name, r.Name)
+		case r.CreationTimestamp.After(sf.CreationTimestamp.Add(-ClockSkew)) && r.Spec.To != sf.Spec.To:
+			return fmt.Errorf("%w: run %s started after run %s, or less than %s before it by the clock of another site's API server, so the plan of %s may no longer match the sites; see tack status %s",
+				ErrCannotResume, r.Name, sf.Name, ClockSkew, sf.Name, r.Name)
 		}
 	}
 	return nil
 }
+
+// ClockSkew is how far apart the clocks of two sites' API servers may be.
+// A run's ledger lives at its to site, and that site's API server sets its
+// creation time, to the second. A run of another site created less than
+// ClockSkew before this one may have started after it (#38 item 7).
+const ClockSkew = 10 * time.Second
 
 func (e *Env) resume(ctx context.Context, sf *failoverv1.SiteFailover, opts Options) error {
 	head, err := AcceptedHead(sf, opts.AcceptGitHead)
