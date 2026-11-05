@@ -108,14 +108,14 @@ stateDiagram-v2
 
 ## Status
 
-The latest release is v1.1.3. The API is `failover.tako.id/v1`, for both the `SiteFailover` ledger and the Workload file. A change that would break a user comes as a new API version. `failover.tako.id/v1alpha1`, the API of v0.1.x, is deprecated and still served: see [Upgrading from v0.1.x](#upgrading-from-v01x).
+The latest release is v1.2.1. The API is `failover.tako.id/v1`, for both the `SiteFailover` ledger and the Workload file. A change that would break a user comes as a new API version. `failover.tako.id/v1alpha1`, the API of v0.1.x, is deprecated and still served: see [Upgrading from v0.1.x](#upgrading-from-v01x).
 
 ## Install
 
 Each release on the [releases page](https://github.com/takodotid/tack/releases) has an archive per platform, `SHA256SUMS`, the CRD, and a Helm chart of the CRD. Each archive holds `tack`, its man pages and the CRD. The chart is also published at `oci://ghcr.io/takodotid/charts/tack`.
 
 ```sh
-VERSION=v1.1.3
+VERSION=v1.2.1
 OS=linux      # or darwin
 ARCH=amd64    # or arm64
 NAME=tack-$VERSION-$OS-$ARCH
@@ -131,7 +131,7 @@ sudo cp $NAME/man/man1/*.1 /usr/local/share/man/man1/
 On Windows the archive is a `.zip` with `tack.exe`. Install it in PowerShell:
 
 ```powershell
-$VERSION = "v1.1.3"
+$VERSION = "v1.2.1"
 $NAME = "tack-$VERSION-windows-amd64"    # or arm64
 $URL = "https://github.com/takodotid/tack/releases/download/$VERSION"
 Invoke-WebRequest "$URL/$NAME.zip" -OutFile "$NAME.zip" -UseBasicParsing
@@ -154,7 +154,7 @@ Add that folder to `Path` once, then open a new terminal.
 
 To build from source instead: `make build` writes `bin/tack`.
 
-At every site, install the CRD with the chart, in the ledger namespace. The namespace must match `spec.ledger.namespace` in the Workload file.
+At every site, install the CRD with the chart, which holds only the CRD. Name the release's namespace after the ledger namespace, `spec.ledger.namespace` in the Workload file, so that `--create-namespace` creates it. Tack never creates the ledger namespace: without it, `tack run` fails at the ledger's create, before any step.
 
 ```sh
 for ctx in site-a site-b; do
@@ -163,7 +163,14 @@ for ctx in site-a site-b; do
 done
 ```
 
-The same command upgrades the CRD to a new release. `helm uninstall` keeps the CRD, because deleting it deletes every ledger: set `crds.keep=false` to change that. Without Helm, apply the CRD instead: `kubectl --context "$ctx" apply --server-side -f $NAME/failover.tako.id_sitefailovers.yaml`, then create the namespace.
+| Rule | Why |
+|---|---|
+| One release per cluster. | The CRD is cluster-scoped. A second release, under another name or in another namespace, fails with `invalid ownership metadata` and changes nothing. |
+| One way per cluster: the chart, or `kubectl apply --server-side` of the CRD. | The chart refuses a CRD that kubectl applied, with `invalid ownership metadata`. To hand such a CRD to the chart, label it `app.kubernetes.io/managed-by=Helm`, annotate it `meta.helm.sh/release-name=tack` and `meta.helm.sh/release-namespace=tack-system`, then install. |
+| Upgrade with the same command. | `helm upgrade` without values reuses the release's last values, `crds.keep` and `crds.install` included: `helm --kube-context "$ctx" -n tack-system get values tack` shows them. |
+| Never set `crds.keep=false` while the site holds a ledger that matters: a run that is not `Succeeded`, or a `Rebuild` follow-up not yet done. | With `crds.keep=false`, `helm uninstall` deletes the CRD, and every ledger with it. So does an upgrade with `crds.install=false`. A lost `Rebuild` follow-up lets a planned run onto a member that diverged ([RFC#0003](rfcs/RFC0003.md#requirements), Requirement 14). The upgrade that sets `crds.keep=false` takes the keep policy off the CRD at once. |
+
+`helm uninstall` with `crds.keep=true`, the default, leaves the CRD, every ledger and the namespace; installing again under the same release name and namespace takes the CRD back. Without Helm, apply the CRD instead: `kubectl --context "$ctx" apply --server-side -f $NAME/failover.tako.id_sitefailovers.yaml`, then create the ledger namespace.
 
 Tack also needs:
 
@@ -172,6 +179,26 @@ Tack also needs:
 | A kube context per site | All in one kubeconfig (`--kubeconfig`, or the standard loading rules). To combine one file per cluster, see [docs/workload.md](docs/workload.md#every-sites-context-in-one-kubeconfig). The permissions are listed in [docs/operations.md](docs/operations.md#permissions). |
 | Git access | Through the operator's `git` configuration, such as an SSH agent or a credential helper. Tack runs `git` with `GIT_TERMINAL_PROMPT=0` and stores no credential. The branch must accept a push from those credentials. |
 | A Workload file | The sites, their contexts, the Git repository and where each field lives in it: [docs/workload.md](docs/workload.md). |
+
+## Upgrading within v1
+
+Upgrade in this order:
+
+1. **Finish or stop every run.** `tack status -f workload.yaml`, for each workload, lists every run `Succeeded`, or `Stopped` or `Waiting` with no `tack` process running it. A run that resumes after the upgrade runs its remaining steps by the new CLI's rules.
+2. **The CRD at every site,** the way it was installed: the `helm upgrade --install` above, or `kubectl apply --server-side` of the new CRD. Do this before any operator runs the new CLI against the site. A CRD older than the CLI drops the fields it does not know, without an error: `tack run` refuses to create a ledger at such a site, and status writes there lose those fields.
+3. **Every operator's CLI together,** and every script that runs `tack`. A CLI older than the one that last wrote a ledger drops the status fields it does not know when it writes that ledger ([RFC#0003](rfcs/RFC0003.md#limitations), Limitations). The ledger does not record which CLI wrote it.
+
+Each release also needs:
+
+| From | To | CRD | Also before the new CLI runs |
+|---|---|---|---|
+| v1.2.0 | v1.2.1 | unchanged | nothing |
+| v1.0.x or v1.1.x | v1.2.x | new optional fields: `spec.takeOver`, `spec.fingerprints`, `status.fingerprints`, `status.supersededBy`, `status.git.releaseRevision` | Grant `get` on the namespace `kube-system` at every site: the plan reads its UID to identify the site's cluster, and fails with `forbidden` without it. Move a user out of an `http` or `https` Git URL, such as `https://user@git.example.com/gitops.git`, into git's configuration (`credential.<url>.username`): Tack refuses such a URL. `ssh://git@git.example.com/gitops.git` and `git@git.example.com:gitops.git` still work. |
+
+| A ledger written by | Under v1.2.1 |
+|---|---|
+| v1.2.0 | `tack resume` continues it. |
+| v1.0.x or v1.1.x | `tack resume` continues it. Each site's cluster is recorded in `status.fingerprints` on its first read, and checked after. |
 
 ## Upgrading from v0.1.x
 
@@ -296,9 +323,12 @@ Everything the test creates is named `tack-e2e*`. [test/e2e/env/README.md](test/
 | Doc | Content |
 |---|---|
 | [docs/workload.md](docs/workload.md) | every field of the Workload file, with a complete example |
-| [docs/operations.md](docs/operations.md) | reading a run, stop reasons, break-glass, permissions |
+| [docs/operations.md](docs/operations.md) | reading a run, the decision flags, break-glass, permissions |
 | [docs/runbooks/site-loss.md](docs/runbooks/site-loss.md) | confirming a site loss and fencing the old primary before a site-loss run |
 | [docs/runbooks/rebuild-old-primary.md](docs/runbooks/rebuild-old-primary.md) | rebuilding an old primary after a site loss |
+| [docs/runbooks/stop-reasons.md](docs/runbooks/stop-reasons.md) | the way on for each reason a run stops or waits |
+| [docs/runbooks/no-primary-after-demotion.md](docs/runbooks/no-primary-after-demotion.md) | a planned run that stopped between its demotion and its promotion |
+| [docs/runbooks/abandon-run.md](docs/runbooks/abandon-run.md) | abandoning a run, and removing a hold left behind |
 | [rfcs/](rfcs/) | the design, one subject per RFC |
 | `tack --help`, `tack <command> --help`, `man tack` | every command, flag and exit code |
 | `tack --skill` | the guide for AI agents |
