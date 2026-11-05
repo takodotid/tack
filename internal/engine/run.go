@@ -410,6 +410,9 @@ type runner struct {
 	identified map[string]bool
 	// verified holds the sites whose VerifyGit succeeded in this process.
 	verified map[string]bool
+	// rechecked is set once the read before the first Failover step
+	// passed in this process.
+	rechecked bool
 }
 
 func (r *runner) run(ctx context.Context) error {
@@ -461,6 +464,11 @@ func (r *runner) run(ctx context.Context) error {
 				continue
 			}
 		}
+		if step.Phase == failoverv1.PhaseFailover && !r.rechecked && !r.switchStarted() {
+			if err := r.recheck(ctx); err != nil {
+				return r.stopBefore(ctx, step, err)
+			}
+		}
 		// The read of the other sites comes before the read before the
 		// step's site, so a site that is primary again after its demotion
 		// gets one way on, not first --fence and then a stop that --fence
@@ -509,6 +517,49 @@ func (r *runner) run(ctx context.Context) error {
 		}
 	}
 	return r.finish(ctx)
+}
+
+// switchStarted tells whether a Failover step started in any process: it
+// is neither Pending nor Deferred, or it has an attempt.
+func (r *runner) switchStarted() bool {
+	for _, s := range r.sf.Spec.Steps {
+		if s.Phase != failoverv1.PhaseFailover {
+			continue
+		}
+		st := r.stepStatus(s.ID)
+		if st.Attempts > 0 || st.State != failoverv1.StepPending && st.State != failoverv1.StepDeferred {
+			return true
+		}
+	}
+	return false
+}
+
+// recheck reads every site again before the run's first Failover step,
+// while none started, and refuses a run that its driver no longer allows
+// on what it reads, as the read after the confirmation of tack run does
+// ([RFC#0009] Requirement 13). A run can wait between Hold and its switch
+// for hours, such as at a stop, and the operator may have switched the
+// primary meanwhile (#46). A site whose steps can wait for it and that
+// answers as primary, or declares itself primary, is left out: the read
+// before its steps and the read of the other sites decide on it, with or
+// without --fence ([RFC#0007] Requirements 6 and 9).
+func (r *runner) recheck(ctx context.Context) error {
+	topo, err := r.Driver.Discover(ctx, &r.sf.Spec.Workload.Spec, runChecks{r: r})
+	if err != nil {
+		return fmt.Errorf("the read before the first Failover step: %w", err)
+	}
+	req := r.request()
+	for i := range topo.Sites {
+		if s := &topo.Sites[i]; s.Reachable && deferrable(req, s.Name) && asPrimary(*s) != "" {
+			s.Reachable = false
+		}
+	}
+	if _, _, err := r.Driver.Plan(&r.sf.Spec.Workload.Spec, topo, req); err != nil {
+		return fmt.Errorf("the read before the first Failover step: driver %s no longer allows the run: %v. No Failover step of this run ran. When the sites are back as the plan read them, resume; else abandon the run (docs/runbooks/abandon-run.md) and plan again",
+			r.sf.Spec.Workload.Spec.Driver, err)
+	}
+	r.rechecked = true
+	return nil
 }
 
 // verifyStep returns the VerifyGit step of a site.
