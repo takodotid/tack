@@ -116,7 +116,7 @@ func (e *Env) checkStarted(ctx context.Context, sf *failoverv1.SiteFailover) err
 		if reason != "" || r.Name == sf.Name || r.Name == sf.Spec.TakeOver || Ended(r, runs) {
 			continue
 		}
-		reason = fmt.Sprintf("run %s of the workload, %s, started at the same time", r.Name, orPending(r.Status.State))
+		reason = fmt.Sprintf("run %s of the workload (%s) was created at the same time", r.Name, orPending(r.Status.State))
 	}
 	if reason == "" {
 		return nil

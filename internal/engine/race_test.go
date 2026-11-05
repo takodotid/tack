@@ -113,7 +113,7 @@ func TestRunThatWinsTheRaceGoesOn(t *testing.T) {
 	if err := f.clients.Sites["b"].Create(ctx, loser); err != nil {
 		t.Fatal(err)
 	}
-	loser.Status = failoverv1.SiteFailoverStatus{Abandoned: &failoverv1.Abandonment{At: metav1.Now(), Reason: "run run-1 of the workload started at the same time"}}
+	loser.Status = failoverv1.SiteFailoverStatus{Abandoned: &failoverv1.Abandonment{At: metav1.Now(), Reason: "run run-1 of the workload (not started) was created at the same time"}}
 	if err := f.clients.Sites["b"].Status().Update(ctx, loser); err != nil {
 		t.Fatal(err)
 	}
