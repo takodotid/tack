@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -180,6 +181,47 @@ func TestPlanAllowed(t *testing.T) {
 	})
 	if _, _, err := (Driver{}).Plan(w, topo, driver.Request{From: "a", To: "b", Mode: failoverv1.ModeSiteLoss}); err != nil {
 		t.Errorf("site loss: %v", err)
+	}
+}
+
+// RFC0002 Requirement 2: once Plan allows a request, it returns what Steps
+// returns from the Workload alone, and Objects lists what Discover reports.
+// A resume composes the plan again from them ([RFC#0003] Requirement 21).
+func TestStepsArePlansSteps(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		req  driver.Request
+		edit func(site string, replica, status map[string]any)
+	}{
+		{name: "planned", req: driver.Request{From: "a", To: "b", Mode: failoverv1.ModePlanned}},
+		{name: "planned to c", req: driver.Request{From: "a", To: "c", Mode: failoverv1.ModePlanned}},
+		{name: "site loss", req: driver.Request{From: "a", To: "b", Mode: failoverv1.ModeSiteLoss},
+			edit: func(s string, r, st map[string]any) {
+				if s == "a" {
+					r["primary"] = "pg-b"
+					st["instancesReportedState"] = map[string]any{"pg-a-1": map[string]any{"isPrimary": false}}
+				}
+			}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w, topo := topology(t, tt.edit)
+			planned, pfollow, err := Driver{}.Plan(w, topo, tt.req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			steps, sfollow, err := Driver{}.Steps(w, tt.req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(planned, steps) || !reflect.DeepEqual(pfollow, sfollow) {
+				t.Errorf("Plan and Steps differ:\nPlan  %+v %+v\nSteps %+v %+v", planned, pfollow, steps, sfollow)
+			}
+			for _, s := range topo.Sites {
+				if got := (Driver{}).Objects(w, s.Name); !reflect.DeepEqual(got, s.Objects) {
+					t.Errorf("site %s: Objects %v, Discover %v", s.Name, got, s.Objects)
+				}
+			}
+		})
 	}
 }
 

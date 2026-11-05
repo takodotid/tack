@@ -105,6 +105,16 @@ func objects(s *failoverv1.Site) []failoverv1.ObjectRef {
 	return out
 }
 
+// Objects implements driver.Driver: the site's Cluster, and its Pooler
+// when the Workload names one.
+func (Driver) Objects(w *failoverv1.WorkloadSpec, site string) []failoverv1.ObjectRef {
+	s := siteByName(w, site)
+	if s == nil || s.CNPG == nil {
+		return nil
+	}
+	return objects(s)
+}
+
 // Discover implements driver.Driver.
 func (Driver) Discover(ctx context.Context, w *failoverv1.WorkloadSpec, c kube.Clients) (*driver.Topology, error) {
 	byCluster := map[string]string{}
@@ -206,24 +216,64 @@ func read(st *driver.SiteState, u *unstructured.Unstructured, byCluster map[stri
 	}
 }
 
-// Plan implements driver.Driver.
+// Plan implements driver.Driver: the refusals of the topology, then Steps.
 func (d Driver) Plan(w *failoverv1.WorkloadSpec, t *driver.Topology, r driver.Request) ([]failoverv1.Step, []failoverv1.FollowUp, error) {
-	from, to, err := sites(w, r)
-	if err != nil {
+	if _, _, err := sites(w, r); err != nil {
 		return nil, nil, err
 	}
+	if err := check(t, r); err != nil {
+		return nil, nil, err
+	}
+	return d.Steps(w, r)
+}
+
+// check refuses a request that the topology does not allow.
+func check(t *driver.Topology, r driver.Request) error {
 	fromSt, _ := t.Site(r.From)
 	toSt, _ := t.Site(r.To)
 	if err := checkTarget(toSt, r); err != nil {
-		return nil, nil, err
+		return err
 	}
 	for _, s := range t.Sites {
 		if s.Reachable && s.Facts[factEnabled] != "" {
-			return nil, nil, fmt.Errorf("site %s: Cluster %s uses spec.replica.enabled; Tack needs the distributed topology with spec.replica.primary", s.Name, s.Facts[factCluster])
+			return fmt.Errorf("site %s: Cluster %s uses spec.replica.enabled; Tack needs the distributed topology with spec.replica.primary", s.Name, s.Facts[factCluster])
 		}
 		if s.Reachable && s.Facts[factInProgress] == "true" {
-			return nil, nil, fmt.Errorf("site %s: a demotion is in progress; wait for it to finish", s.Name)
+			return fmt.Errorf("site %s: a demotion is in progress; wait for it to finish", s.Name)
 		}
+	}
+	switch r.Mode {
+	case failoverv1.ModePlanned:
+		if fromSt == nil || !fromSt.Reachable {
+			return fmt.Errorf("site %s is unreachable: a planned switchover needs it", r.From)
+		}
+		if fromSt.Role != driver.RolePrimary || !fromSt.Healthy {
+			return fmt.Errorf("site %s is not a healthy primary (%s): a planned switchover needs one", r.From, fromSt.Summary)
+		}
+		for _, s := range t.Sites {
+			if s.Reachable && s.DeclaredPrimary != r.From {
+				return fmt.Errorf("site %s declares %s primary, not %s: the declarations disagree; fix them before a switchover", s.Name, orNone(s.DeclaredPrimary), r.From)
+			}
+		}
+		if toSt.Facts[factMinApplyDelay] != "" {
+			return fmt.Errorf("site %s: Cluster sets spec.replica.minApplyDelay, which CloudNativePG does not allow with a promotion token", r.To)
+		}
+	case failoverv1.ModeSiteLoss:
+		if fromSt != nil && fromSt.Reachable && fromSt.Role == driver.RolePrimary {
+			return fmt.Errorf("site %s answers as primary (%s): use a planned switchover, or stop it first", r.From, fromSt.Summary)
+		}
+	default:
+		return fmt.Errorf("unknown mode %q", r.Mode)
+	}
+	return nil
+}
+
+// Steps implements driver.Driver: the steps depend on the Workload and the
+// request only, so a resume can compose them again from the ledger.
+func (d Driver) Steps(w *failoverv1.WorkloadSpec, r driver.Request) ([]failoverv1.Step, []failoverv1.FollowUp, error) {
+	from, to, err := sites(w, r)
+	if err != nil {
+		return nil, nil, err
 	}
 	toName := to.CNPG.Cluster.Name
 	b := &builder{w: w, toName: toName}
@@ -231,20 +281,6 @@ func (d Driver) Plan(w *failoverv1.WorkloadSpec, t *driver.Topology, r driver.Re
 
 	switch r.Mode {
 	case failoverv1.ModePlanned:
-		if fromSt == nil || !fromSt.Reachable {
-			return nil, nil, fmt.Errorf("site %s is unreachable: a planned switchover needs it", r.From)
-		}
-		if fromSt.Role != driver.RolePrimary || !fromSt.Healthy {
-			return nil, nil, fmt.Errorf("site %s is not a healthy primary (%s): a planned switchover needs one", r.From, fromSt.Summary)
-		}
-		for _, s := range t.Sites {
-			if s.Reachable && s.DeclaredPrimary != r.From {
-				return nil, nil, fmt.Errorf("site %s declares %s primary, not %s: the declarations disagree; fix them before a switchover", s.Name, orNone(s.DeclaredPrimary), r.From)
-			}
-		}
-		if toSt.Facts[factMinApplyDelay] != "" {
-			return nil, nil, fmt.Errorf("site %s: Cluster sets spec.replica.minApplyDelay, which CloudNativePG does not allow with a promotion token", r.To)
-		}
 		if from.CNPG.Pooler != nil {
 			b.scale(from, 0)
 		}
@@ -273,9 +309,6 @@ func (d Driver) Plan(w *failoverv1.WorkloadSpec, t *driver.Topology, r driver.Re
 		b.poolers(r)
 
 	case failoverv1.ModeSiteLoss:
-		if fromSt != nil && fromSt.Reachable && fromSt.Role == driver.RolePrimary {
-			return nil, nil, fmt.Errorf("site %s answers as primary (%s): use a planned switchover, or stop it first", r.From, fromSt.Summary)
-		}
 		b.patch("fence-"+from.Name, from, ClusterRef(from), "fence Cluster "+from.CNPG.Cluster.Name+": declare "+toName+" primary, so it never runs as primary again",
 			replicaPatch(toName, nil))
 		if from.CNPG.Pooler != nil {

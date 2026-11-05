@@ -1,0 +1,600 @@
+apiVersion: failover.tako.id/v1
+kind: SiteFailover
+metadata:
+  labels:
+    failover.tako.id/workload: pg-main
+  name: pg-main-20261027-101500
+  namespace: tack-system
+spec:
+  fingerprints:
+  - kubeSystemUID: uid-a
+    site: a
+  - kubeSystemUID: uid-b
+    site: b
+  from: a
+  mode: Planned
+  steps:
+  - description: 'hold Cluster db/pg-a at site a: Flux stops applying it'
+    hold:
+      kustomization:
+        name: a
+        namespace: flux-system
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-a
+        namespace: db
+    id: hold-a-cluster-pg-a
+    phase: Hold
+    site: a
+    type: Hold
+  - description: 'hold Pooler db/pg-a-pooler-rw at site a: Flux stops applying it'
+    hold:
+      kustomization:
+        name: a
+        namespace: flux-system
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Pooler
+        name: pg-a-pooler-rw
+        namespace: db
+    id: hold-a-pooler-pg-a-pooler-rw
+    phase: Hold
+    site: a
+    type: Hold
+  - description: reconcile Flux at site a, so no apply started before the hold is
+      still in flight
+    id: reconcile-hold-a
+    phase: Hold
+    reconcile:
+      kustomizations:
+      - name: a
+        namespace: flux-system
+      timeout: 5m0s
+    site: a
+    type: Reconcile
+  - description: 'hold Cluster db/pg-b at site b: Flux stops applying it'
+    hold:
+      kustomization:
+        name: b
+        namespace: flux-system
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-b
+        namespace: db
+    id: hold-b-cluster-pg-b
+    phase: Hold
+    site: b
+    type: Hold
+  - description: 'hold Pooler db/pg-b-pooler-rw at site b: Flux stops applying it'
+    hold:
+      kustomization:
+        name: b
+        namespace: flux-system
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Pooler
+        name: pg-b-pooler-rw
+        namespace: db
+    id: hold-b-pooler-pg-b-pooler-rw
+    phase: Hold
+    site: b
+    type: Hold
+  - description: reconcile Flux at site b, so no apply started before the hold is
+      still in flight
+    id: reconcile-hold-b
+    phase: Hold
+    reconcile:
+      kustomizations:
+      - name: b
+        namespace: flux-system
+      timeout: 5m0s
+    site: b
+    type: Reconcile
+  - description: set Pooler pg-a-pooler-rw to 0 instances
+    id: pooler-a
+    patch:
+      merge: '{"spec":{"instances":0}}'
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Pooler
+        name: pg-a-pooler-rw
+        namespace: db
+    phase: Failover
+    site: a
+    type: Patch
+  - description: wait until the Pooler pg-a-pooler-rw runs no pod
+    id: wait-pooler-a
+    phase: Failover
+    site: a
+    type: Wait
+    wait:
+      conditions:
+      - jsonPath: '{.status.replicas}'
+        operator: Empty
+      object:
+        apiVersion: apps/v1
+        kind: Deployment
+        name: pg-a-pooler-rw
+        namespace: db
+      timeout: 10m0s
+  - description: 'demote Cluster pg-a: declare pg-b primary and drop any old token'
+    id: demote-a
+    patch:
+      merge: '{"spec":{"replica":{"primary":"pg-b","promotionToken":null}}}'
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-a
+        namespace: db
+    phase: Failover
+    site: a
+    type: Patch
+  - description: wait until Cluster pg-a has demoted and published its demotion token
+    id: wait-demoted-a
+    phase: Failover
+    site: a
+    type: Wait
+    wait:
+      conditions:
+      - jsonPath: '{.status.demotionToken}'
+        operator: NotEmpty
+      - jsonPath: '{.status.switchReplicaClusterStatus.inProgress}'
+        operator: NotEquals
+        value: "true"
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-a
+        namespace: db
+      timeout: 10m0s
+  - capture:
+      into: demotionToken
+      jsonPath: '{.status.demotionToken}'
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-a
+        namespace: db
+    description: record the demotion token of Cluster pg-a in the ledger
+    id: capture-token
+    phase: Failover
+    site: a
+    type: Capture
+  - description: promote Cluster pg-b with the demotion token, in one patch
+    id: promote-b
+    patch:
+      merge: '{"spec":{"replica":{"primary":"pg-b","promotionToken":"$(demotionToken)"}}}'
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-b
+        namespace: db
+    phase: Failover
+    site: b
+    type: Patch
+  - description: wait until Cluster pg-b has used the token and runs a healthy primary
+    id: wait-promoted-b
+    phase: Failover
+    site: b
+    type: Wait
+    wait:
+      conditions:
+      - jsonPath: '{.status.lastPromotionToken}'
+        operator: Equals
+        value: $(demotionToken)
+      - jsonPath: '{.status.instancesReportedState.*.isPrimary}'
+        operator: Contains
+        value: "true"
+      - jsonPath: '{.status.phase}'
+        operator: Equals
+        value: Cluster in healthy state
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-b
+        namespace: db
+      timeout: 10m0s
+  - description: remove the used token from Cluster pg-b, so it can never apply again
+    id: clear-token-b
+    patch:
+      merge: '{"spec":{"replica":{"promotionToken":null}}}'
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-b
+        namespace: db
+    phase: Failover
+    site: b
+    type: Patch
+  - description: set Pooler pg-b-pooler-rw to 2 instances
+    id: pooler-b
+    patch:
+      merge: '{"spec":{"instances":2}}'
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Pooler
+        name: pg-b-pooler-rw
+        namespace: db
+    phase: Failover
+    site: b
+    type: Patch
+  - description: wait until the Pooler pg-b-pooler-rw has 2 ready pods
+    id: wait-pooler-b
+    phase: Failover
+    site: b
+    type: Wait
+    wait:
+      conditions:
+      - jsonPath: '{.status.readyReplicas}'
+        operator: Equals
+        value: "2"
+      object:
+        apiVersion: apps/v1
+        kind: Deployment
+        name: pg-b-pooler-rw
+        namespace: db
+      timeout: 10m0s
+  - description: verify that Cluster pg-b is a healthy primary and declares itself
+    id: verify-b
+    phase: Failover
+    site: b
+    type: Wait
+    wait:
+      conditions:
+      - jsonPath: '{.spec.replica.primary}'
+        operator: Equals
+        value: pg-b
+      - jsonPath: '{.status.instancesReportedState.*.isPrimary}'
+        operator: Contains
+        value: "true"
+      - jsonPath: '{.status.phase}'
+        operator: Equals
+        value: Cluster in healthy state
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-b
+        namespace: db
+      timeout: 10m0s
+  - description: commit the live state to https://git.example.com/gitops.git branch
+      main
+    git:
+      changes:
+      - field: spec.replica.primary
+        file: apps/db/values-a.yaml
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-a
+          namespace: db
+        path: cnpg.replica.primary
+        site: a
+        value: '"pg-b"'
+      - field: spec.instances
+        file: apps/db/values-a.yaml
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Pooler
+          name: pg-a-pooler-rw
+          namespace: db
+        path: pooler.instances
+        site: a
+        value: "0"
+      - field: spec.replica.primary
+        file: apps/db/values-b.yaml
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-b
+          namespace: db
+        path: cnpg.replica.primary
+        site: b
+        value: '"pg-b"'
+      - field: spec.instances
+        file: apps/db/values-b.yaml
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Pooler
+          name: pg-b-pooler-rw
+          namespace: db
+        path: pooler.instances
+        site: b
+        value: "2"
+      message: |-
+        tack: pg-main primary a to b (planned)
+
+        Run pg-main-20261027-101500, mode Planned.
+    id: git-commit
+    phase: PromoteToGitOps
+    type: Git
+  - description: wait for Flux at site a to apply the run's commit (held objects stay
+      as they are)
+    id: reconcile-git-a
+    phase: PromoteToGitOps
+    reconcile:
+      kustomizations:
+      - name: a
+        namespace: flux-system
+      revision: $(git.commit)
+      timeout: 5m0s
+    site: a
+    type: Reconcile
+  - description: wait for Flux at site b to apply the run's commit (held objects stay
+      as they are)
+    id: reconcile-git-b
+    phase: PromoteToGitOps
+    reconcile:
+      kustomizations:
+      - name: b
+        namespace: flux-system
+      revision: $(git.commit)
+      timeout: 5m0s
+    site: b
+    type: Reconcile
+  - description: check at site a that Git, as Flux renders it, equals live
+    id: verify-git-a
+    phase: Release
+    site: a
+    type: VerifyGit
+    verifyGit:
+      fields:
+      - field: spec.replica.primary
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-a
+          namespace: db
+      - field: spec.instances
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Pooler
+          name: pg-a-pooler-rw
+          namespace: db
+      objects:
+      - apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-a
+        namespace: db
+      - apiVersion: postgresql.cnpg.io/v1
+        kind: Pooler
+        name: pg-a-pooler-rw
+        namespace: db
+  - description: 'release Cluster db/pg-a at site a: Flux applies it again'
+    id: release-a-cluster-pg-a
+    phase: Release
+    release:
+      kustomization:
+        name: a
+        namespace: flux-system
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-a
+        namespace: db
+    site: a
+    type: Release
+  - description: 'release Pooler db/pg-a-pooler-rw at site a: Flux applies it again'
+    id: release-a-pooler-pg-a-pooler-rw
+    phase: Release
+    release:
+      kustomization:
+        name: a
+        namespace: flux-system
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Pooler
+        name: pg-a-pooler-rw
+        namespace: db
+    site: a
+    type: Release
+  - description: reconcile Flux at site a with the released objects
+    id: reconcile-release-a
+    phase: Release
+    reconcile:
+      kustomizations:
+      - name: a
+        namespace: flux-system
+      revision: $(git.commit)
+      timeout: 5m0s
+    site: a
+    type: Reconcile
+  - description: check at site a that Flux changed nothing
+    id: verify-noop-a
+    phase: Release
+    site: a
+    type: VerifyNoop
+    verifyNoop:
+      fields:
+      - field: spec.replica.primary
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-a
+          namespace: db
+      - field: spec.instances
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Pooler
+          name: pg-a-pooler-rw
+          namespace: db
+      objects:
+      - apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-a
+        namespace: db
+      - apiVersion: postgresql.cnpg.io/v1
+        kind: Pooler
+        name: pg-a-pooler-rw
+        namespace: db
+  - description: check at site b that Git, as Flux renders it, equals live
+    id: verify-git-b
+    phase: Release
+    site: b
+    type: VerifyGit
+    verifyGit:
+      fields:
+      - field: spec.replica.primary
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-b
+          namespace: db
+      - field: spec.instances
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Pooler
+          name: pg-b-pooler-rw
+          namespace: db
+      objects:
+      - apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-b
+        namespace: db
+      - apiVersion: postgresql.cnpg.io/v1
+        kind: Pooler
+        name: pg-b-pooler-rw
+        namespace: db
+  - description: 'release Cluster db/pg-b at site b: Flux applies it again'
+    id: release-b-cluster-pg-b
+    phase: Release
+    release:
+      kustomization:
+        name: b
+        namespace: flux-system
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-b
+        namespace: db
+    site: b
+    type: Release
+  - description: 'release Pooler db/pg-b-pooler-rw at site b: Flux applies it again'
+    id: release-b-pooler-pg-b-pooler-rw
+    phase: Release
+    release:
+      kustomization:
+        name: b
+        namespace: flux-system
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Pooler
+        name: pg-b-pooler-rw
+        namespace: db
+    site: b
+    type: Release
+  - description: reconcile Flux at site b with the released objects
+    id: reconcile-release-b
+    phase: Release
+    reconcile:
+      kustomizations:
+      - name: b
+        namespace: flux-system
+      revision: $(git.commit)
+      timeout: 5m0s
+    site: b
+    type: Reconcile
+  - description: check at site b that Flux changed nothing
+    id: verify-noop-b
+    phase: Release
+    site: b
+    type: VerifyNoop
+    verifyNoop:
+      fields:
+      - field: spec.replica.primary
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-b
+          namespace: db
+      - field: spec.instances
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Pooler
+          name: pg-b-pooler-rw
+          namespace: db
+      objects:
+      - apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-b
+        namespace: db
+      - apiVersion: postgresql.cnpg.io/v1
+        kind: Pooler
+        name: pg-b-pooler-rw
+        namespace: db
+  to: b
+  workload:
+    name: pg-main
+    spec:
+      driver: cnpg
+      git:
+        branch: main
+        fields:
+        - field: spec.replica.primary
+          file: apps/db/values-a.yaml
+          object:
+            apiVersion: ""
+            kind: Cluster
+            name: pg-a
+            namespace: db
+          path: cnpg.replica.primary
+          site: a
+        - field: spec.instances
+          file: apps/db/values-a.yaml
+          object:
+            apiVersion: ""
+            kind: Pooler
+            name: pg-a-pooler-rw
+            namespace: db
+          path: pooler.instances
+          site: a
+        - field: spec.replica.primary
+          file: apps/db/values-b.yaml
+          object:
+            apiVersion: ""
+            kind: Cluster
+            name: pg-b
+            namespace: db
+          path: cnpg.replica.primary
+          site: b
+        - field: spec.instances
+          file: apps/db/values-b.yaml
+          object:
+            apiVersion: ""
+            kind: Pooler
+            name: pg-b-pooler-rw
+            namespace: db
+          path: pooler.instances
+          site: b
+        url: https://git.example.com/gitops.git
+      ledger:
+        namespace: tack-system
+      sites:
+      - cnpg:
+          cluster:
+            name: pg-a
+            namespace: db
+          pooler:
+            instances: 2
+            name: pg-a-pooler-rw
+            namespace: db
+        kubeContext: site-a
+        name: a
+      - cnpg:
+          cluster:
+            name: pg-b
+            namespace: db
+          pooler:
+            instances: 2
+            name: pg-b-pooler-rw
+            namespace: db
+        kubeContext: site-b
+        name: b
+      timeouts:
+        demotion: 10m0s
+        flux: 5m0s
+        promotion: 10m0s
+        routing: 2m0s
+status:
+  git: {}

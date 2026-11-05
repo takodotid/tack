@@ -123,4 +123,39 @@ Tack acts with the operator's credentials for each site's kube context. Every si
 
 The runbooks' own `kubectl` commands need more, such as `patch` on `sitefailovers/status`; each runbook says so.
 
+### Who may write ledgers
+
+Writing a ledger is privileged. A ledger names the steps, the kube contexts and the Git URL that `tack resume` uses with the operator's credentials, so anyone who may create `sitefailovers`, or update their status, can plant a run, or change one, for an operator to resume.
+
+| Rule | Why |
+|---|---|
+| Grant rows 5 and 6 to the operators only, in the ledger namespace at every site. | Rows 5 and 6 are the write access. |
+| Keep the ledger namespace out of every Flux path, and keep `SiteFailover` objects out of Git. | A Kustomization applies what Git holds with kustomize-controller's service account, or the one its `spec.serviceAccountName` names. |
+| Check who else may write: `kubectl --context CTX auth can-i create sitefailovers.failover.tako.id -n tack-system --as system:serviceaccount:NS:NAME`, and the same for `update` on `sitefailovers/status`. | A wide role, such as `cluster-admin` or `edit` on the namespace, includes them. |
+
+A Role with rows 4 to 6, for a RoleBinding to the operators' group:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tack-ledger-writer
+  namespace: tack-system
+rules:
+- apiGroups: ["failover.tako.id"]
+  resources: ["sitefailovers"]
+  verbs: ["get", "list", "create"]
+- apiGroups: ["failover.tako.id"]
+  resources: ["sitefailovers/status"]
+  verbs: ["update"]
+```
+
+What `tack resume` checks of a ledger, and what it leaves to the operator:
+
+| Part of the ledger | Checked |
+|---|---|
+| `spec.steps` | Before the confirmation: they must be the plan that the driver composes from the ledger's Workload and request ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 21). At the Git step: each change's file and path must be where the Workload's mapping, or the manifest of its object, puts it ([RFC#0006](../rfcs/RFC0006.md#requirements), Requirement 15). |
+| `spec.workload`: contexts, Clusters, Git URL | Not checked: a planted Workload composes its own plan. The confirmation prints each site's context, API server and recorded cluster, and the Git URL: compare them with the Workload file. |
+| `status`: captured values, Git revisions, step states, holds, follow-ups | Not checked. |
+
 For Git, the operator's `git` configuration needs read access for `tack plan`, and push access to the branch for `tack run`. Tack pushes without force and skips client-side hooks; server-side rules still apply ([RFC#0006](../rfcs/RFC0006.md#requirements)).

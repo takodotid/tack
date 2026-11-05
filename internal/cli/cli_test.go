@@ -18,9 +18,9 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/yaml"
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
-	"github.com/takodotid/tack/internal/config"
 	"github.com/takodotid/tack/internal/driver"
 	_ "github.com/takodotid/tack/internal/driver/cnpg"
 	"github.com/takodotid/tack/internal/engine"
@@ -401,25 +401,29 @@ func TestSearchFailsOnRefusedCredential(t *testing.T) {
 }
 
 // stoppedRun is a run of testdata/workload.yaml from a to b that stopped,
-// with its ledger at site b.
+// with its ledger at site b. Its spec is a ledger that Tack v1.2.0 wrote
+// for that plan, so a resume composes the same steps ([RFC#0003]
+// Requirement 21).
 func stoppedRun(t *testing.T, name string) *failoverv1.SiteFailover {
 	t.Helper()
-	w, err := config.Load("testdata/workload.yaml")
+	b, err := os.ReadFile("../engine/testdata/ledgers/v1.2.0/planned.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	started := metav1.NewTime(fixedNow.Add(-time.Hour))
-	return &failoverv1.SiteFailover{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "tack-system", Labels: map[string]string{engine.LabelWorkload: "pg-main"},
-			CreationTimestamp: started},
-		Spec: failoverv1.SiteFailoverSpec{
-			Workload: failoverv1.WorkloadSnapshot{Name: w.Name, Spec: w.Spec}, Mode: failoverv1.ModePlanned, From: "a", To: "b",
-			Steps: []failoverv1.Step{{ID: "hold-a-cluster-pg-a", Phase: failoverv1.PhaseHold, Type: failoverv1.StepHold, Site: "a",
-				Hold: &failoverv1.ObjectStep{Object: failoverv1.ObjectRef{APIVersion: "postgresql.cnpg.io/v1", Kind: "Cluster", Namespace: "db", Name: "pg-a"}}}},
-		},
-		Status: failoverv1.SiteFailoverStatus{State: failoverv1.RunStopped, Reason: failoverv1.ReasonStepFailed, StartedAt: &started,
-			Steps: []failoverv1.StepStatus{{ID: "hold-a-cluster-pg-a", State: failoverv1.StepFailed}}},
+	var sf failoverv1.SiteFailover
+	if err := yaml.UnmarshalStrict(b, &sf); err != nil {
+		t.Fatal(err)
 	}
+	started := metav1.NewTime(fixedNow.Add(-time.Hour))
+	sf.Name, sf.CreationTimestamp = name, started
+	for i := range sf.Spec.Steps {
+		if g := sf.Spec.Steps[i].Git; g != nil {
+			g.Message = strings.ReplaceAll(g.Message, "pg-main-20261027-101500", name)
+		}
+	}
+	sf.Status = failoverv1.SiteFailoverStatus{State: failoverv1.RunStopped, Reason: failoverv1.ReasonStepFailed, StartedAt: &started,
+		Steps: []failoverv1.StepStatus{{ID: "hold-a-cluster-pg-a", State: failoverv1.StepFailed}}}
+	return &sf
 }
 
 // tack resume with --context finds the run at one site, but searches every

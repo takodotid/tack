@@ -221,10 +221,12 @@ type Resumption struct {
 }
 
 // CheckResume refuses a run that cannot resume: a ledger that never
-// recorded its start ([RFC#0003] Requirement 20), a run that another run
-// took over, and a run older than another run of the workload, whose plan
-// may no longer match the sites (Requirement 18). tack resume calls it
-// before it asks the operator, then Resumption.Resume after.
+// recorded its start ([RFC#0003] Requirement 20), a run whose steps are not
+// the plan its driver composes from its ledger (Requirement 21), a run
+// that another run took over, and a run older than another run of the
+// workload, whose plan may no longer match the sites (Requirement 18).
+// tack resume calls it before it asks the operator, then
+// Resumption.Resume after.
 func (e *Env) CheckResume(ctx context.Context, sf *failoverv1.SiteFailover) (*Resumption, error) {
 	if a := sf.Status.Abandoned; a != nil {
 		return nil, fmt.Errorf("%w: run %s was abandoned at %s: %s", ErrCannotResume, sf.Name, a.At.UTC().Format(time.RFC3339), a.Reason)
@@ -238,6 +240,9 @@ func (e *Env) CheckResume(ctx context.Context, sf *failoverv1.SiteFailover) (*Re
 		return res, nil
 	}
 	if err := e.checkLatest(ctx, sf, res.checks); err != nil {
+		return nil, err
+	}
+	if err := e.checkPlan(sf); err != nil {
 		return nil, err
 	}
 	return res, nil

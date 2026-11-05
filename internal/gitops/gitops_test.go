@@ -886,3 +886,50 @@ func TestCommitRunsNoHooks(t *testing.T) {
 		t.Errorf("hook %s ran", e.Name())
 	}
 }
+
+// #35 row 11 (RFC0006 Requirement 15). The ledger records where each Git
+// change is written, and anyone who may write a ledger could point it
+// elsewhere: a value or a removal into any file. The commit refuses a
+// change that is not where the Workload's mapping, or the manifest that
+// defines its object, puts it, and pushes nothing.
+func TestCommitRefusesAnotherTarget(t *testing.T) {
+	isolate(t)
+	for _, tt := range []struct {
+		name   string
+		change func(c *failoverv1.GitChange)
+		index  int
+		want   string
+	}{
+		{name: "a mapped field in another file", index: 0, change: func(c *failoverv1.GitChange) {
+			c.File, c.Path = "deploy/site-a/cluster.yaml", "spec.replica.primary"
+		}, want: "spec.git.fields maps it to helm/values-a.yaml at cnpg.clusters[0].replica.primary"},
+		{name: "a found field in a document of another object", index: 3, change: func(c *failoverv1.GitChange) {
+			c.Document = i32(0)
+		}, want: "that document does not define Pooler db/pg-rw"},
+		{name: "a found field in a file of another object", index: 2, change: func(c *failoverv1.GitChange) {
+			c.File, c.Document = "deploy/site-a/pooler.yml", i32(1)
+		}, want: "that document does not define Cluster db/pg"},
+		{name: "a removal at another path", index: 4, change: func(c *failoverv1.GitChange) {
+			c.Path = "spec.replica.source"
+		}, want: "is written at the field's own path, spec.replica.promotionToken"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			rm := newRemote(t, fixture())
+			base := rm.head()
+			w := workload(rm.url)
+			r := newRepo(t)
+			changes, err := r.Resolve(context.Background(), w, switchover())
+			if err != nil {
+				t.Fatalf("Resolve: %v", err)
+			}
+			tt.change(&changes[tt.index])
+			_, err = r.Commit(context.Background(), w, engine.CommitRequest{Run: "run-1", Base: base, Changes: changes, Message: "m"})
+			if err == nil || !strings.Contains(err.Error(), tt.want) || !strings.Contains(err.Error(), "do not resume the run") {
+				t.Fatalf("Commit: %v, want a refusal with %q", err, tt.want)
+			}
+			if h := rm.head(); h != base {
+				t.Errorf("pushed %s", h)
+			}
+		})
+	}
+}

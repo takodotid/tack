@@ -94,11 +94,20 @@ type Driver interface {
 	Discover(ctx context.Context, w *failoverv1.WorkloadSpec, c kube.Clients) (*Topology, error)
 
 	// Plan returns the Failover phase's steps, in order. It checks that the
-	// request makes sense for the topology.
+	// request makes sense for the topology, then returns what Steps returns.
 	Plan(w *failoverv1.WorkloadSpec, t *Topology, r Request) ([]failoverv1.Step, []failoverv1.FollowUp, error)
 
+	// Steps returns the Failover phase's steps and the follow-ups of a
+	// request from the Workload alone, without the checks of Plan. A
+	// resume composes the plan again with it ([RFC#0003] Requirement 21).
+	Steps(w *failoverv1.WorkloadSpec, r Request) ([]failoverv1.Step, []failoverv1.FollowUp, error)
+
+	// Objects returns the live objects a run may change at a site, from
+	// the Workload alone. Discover reports the same in each SiteState.
+	Objects(w *failoverv1.WorkloadSpec, site string) []failoverv1.ObjectRef
+
 	// GitChange returns the fields that make Git equal the live state
-	// after the run.
+	// after the run. They depend on the Workload and the request only.
 	GitChange(w *failoverv1.WorkloadSpec, t *Topology, r Request) ([]FieldChange, error)
 
 	// Verify returns the conditions that mean the switch is complete at a
