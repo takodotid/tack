@@ -55,11 +55,11 @@ func newAbandon(o *options) *cobra.Command {
 				return usagef("--reason must not be empty")
 			}
 			progress := o.progress(out)
-			runs, err := l.find(ctx, o, args[0], progress)
+			found, err := l.find(ctx, o, args[0], progress)
 			if err != nil {
 				return err
 			}
-			r, err := pick(runs, args[0])
+			r, err := found.pick(args[0])
 			if err != nil {
 				return err
 			}

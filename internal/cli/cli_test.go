@@ -278,7 +278,8 @@ func TestRunSearchRetried(t *testing.T) {
 
 // The search for a named run checks a site again when the run was not
 // found elsewhere, and only then. The search for every run checks each
-// site up to 3 times.
+// site up to 3 times; a site that still gives no answer fails the list
+// (#59).
 func TestStatusSearchRetried(t *testing.T) {
 	objects := func() map[string][]client.Object {
 		return map[string][]client.Object{
@@ -292,10 +293,11 @@ func TestStatusSearchRetried(t *testing.T) {
 		blip   string
 		args   []string
 		checks map[string]int
+		code   int
 	}{
 		{name: "named run, a blip where it is", blip: "b", args: []string{"pg-main-earlier"}, checks: map[string]int{"a": 1, "b": 2}},
 		{name: "named run, found, a site down", down: "a", args: []string{"pg-main-earlier"}, checks: map[string]int{"a": 1, "b": 1}},
-		{name: "every run, a site down", down: "a", checks: map[string]int{"a": 3, "b": 1}},
+		{name: "every run, a site down", down: "a", checks: map[string]int{"a": 3, "b": 1}, code: ExitError},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -307,8 +309,8 @@ func TestStatusSearchRetried(t *testing.T) {
 				f.clients.Blip(tt.blip, 1)
 			}
 			out, code := run(t, f, append([]string{"status", "-f", "testdata/workload.yaml"}, tt.args...)...)
-			if code != ExitOK || !strings.Contains(out, "pg-main-earlier") {
-				t.Fatalf("exit %d, want %d with the run:\n%s", code, ExitOK, out)
+			if code != tt.code || !strings.Contains(out, "pg-main-earlier") {
+				t.Fatalf("exit %d, want %d with the run:\n%s", code, tt.code, out)
 			}
 			for site, n := range tt.checks {
 				if got := f.clients.Checks[site]; got != n {

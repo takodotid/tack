@@ -241,8 +241,12 @@ Show runs and their steps from the ledger.
 
 ```text
 Status shows runs from their ledgers. Without RUN it lists the runs of the
-workload at every reachable site. With RUN it shows that run's phases and
-steps with their times and attempts, held objects, Git commits, captured
+workload at every reachable site. A site that gives no answer is named after
+the list, with its error, and status exits with code 1: the list is
+incomplete. With -o yaml, the names follow the ledgers as YAML comments.
+
+With RUN it shows that run's phases and steps with their times and
+attempts, held objects as the ledger records them, Git commits, captured
 values (by name only), follow-ups, and the history of the run's state: who
 started, stopped and resumed it, when, with which tack and flags.
 ```
