@@ -148,7 +148,7 @@ The chart creates roles that grant exactly the rows above when `rbac.create` is 
 |---|---|---|
 | `rbac.create` | `false` | Create the roles. |
 | `rbac.subjects` | `[]` | Bind each role to these subjects, such as the operators' group: a ClusterRoleBinding, and a RoleBinding next to each Role. Empty binds nothing. |
-| `rbac.objects` | `[]` | Per namespace, the names of the Workload files' objects: `clusters`, `poolers`, `kustomizations`, `gitRepositories`, `configMaps`, `secrets`, `siteServices`. Each list is optional. `poolers` also grants `get` on the Deployment of the same name (row 9). A kind without names gets no rule, and the chart fails on an entry without a namespace or without names. |
+| `rbac.objects` | `[]` | Per namespace, the names of the Workload files' objects: `clusters`, `poolers`, `kustomizations`, `gitRepositories`, `configMaps`, `secrets`, `siteServices`. Each list is optional. `poolers` also grants `get` on the Deployment of the same name (row 9). A kind without names gets no rule. The chart fails on an entry without a namespace or without names, and on a namespace listed twice. Each namespace must exist before the install: Helm does not create it. |
 
 ```sh
 helm --kube-context "$ctx" upgrade --install tack oci://ghcr.io/takodotid/charts/tack --version "${VERSION#v}" \

@@ -54,10 +54,15 @@ rules:
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create"]
+{{- $namespaces := dict }}
 {{- range $i, $o := $rbac.objects | default list }}
 {{- if not $o.namespace }}
 {{- fail (printf "rbac.objects[%d] needs a namespace" $i) }}
 {{- end }}
+{{- if hasKey $namespaces $o.namespace }}
+{{- fail (printf "rbac.objects[%d] repeats namespace %s: name its objects in one entry" $i $o.namespace) }}
+{{- end }}
+{{- $_ := set $namespaces $o.namespace true }}
 {{- if not (or $o.clusters $o.poolers $o.kustomizations $o.gitRepositories $o.configMaps $o.secrets $o.siteServices) }}
 {{- fail (printf "rbac.objects[%d] names no object" $i) }}
 {{- end }}

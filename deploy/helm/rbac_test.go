@@ -404,13 +404,14 @@ func TestRolesAreOptional(t *testing.T) {
 	}
 }
 
-// TestRolesNameTheirObjects: an rbac.objects entry without a namespace, or without names, fails the render; a
-// kind without names gets no rule; no subjects binds nothing.
+// TestRolesNameTheirObjects: an rbac.objects entry without a namespace, without names, or with the namespace of an
+// earlier entry fails the render; a kind without names gets no rule; no subjects binds nothing.
 func TestRolesNameTheirObjects(t *testing.T) {
 	for vals, want := range map[string]string{
-		"rbac: {create: true, objects: [{clusters: [pg-a]}]}\n":           "rbac.objects[0] needs a namespace",
-		"rbac: {create: true, objects: [{namespace: db}]}\n":              "rbac.objects[0] names no object",
-		"rbac: {create: true, objects: [{namespace: db, secrets: []}]}\n": "rbac.objects[0] names no object",
+		"rbac: {create: true, objects: [{clusters: [pg-a]}]}\n":                                               "rbac.objects[0] needs a namespace",
+		"rbac: {create: true, objects: [{namespace: db}]}\n":                                                  "rbac.objects[0] names no object",
+		"rbac: {create: true, objects: [{namespace: db, secrets: []}]}\n":                                     "rbac.objects[0] names no object",
+		"rbac: {create: true, objects: [{namespace: db, clusters: [pg-a]}, {namespace: db, poolers: [p]}]}\n": "rbac.objects[1] repeats namespace db",
 	} {
 		out, err := helm(t, vals, "template", release, chart, "--namespace", ledgerNS)
 		if err == nil || !strings.Contains(out, want) {
