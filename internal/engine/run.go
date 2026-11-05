@@ -386,7 +386,21 @@ func (r *runner) run(ctx context.Context) error {
 				continue
 			}
 			if err := r.identify(ctx, step.Site); err != nil {
-				return r.stopBefore(ctx, step, err)
+				if ctx.Err() != nil {
+					return r.stopBefore(ctx, step, ctx.Err())
+				}
+				if !kube.IsUnreachable(err) || !step.Deferrable {
+					return r.stopBefore(ctx, step, err)
+				}
+				// The site gave no answer to the read of its cluster's
+				// identity: it stays unreachable for this process.
+				r.reachable[step.Site] = err
+				r.deferStep(step, fmt.Sprintf("site %s unreachable: %v", step.Site, err))
+				if err := r.write(ctx, r.sf); err != nil {
+					return err
+				}
+				r.printf("  deferred  %s (site %s did not answer the read of its cluster's identity)\n", step.ID, step.Site)
+				continue
 			}
 		}
 		// The read of the other sites comes before the read before the
