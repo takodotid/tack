@@ -16,9 +16,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
+	"github.com/takodotid/tack/internal/kube"
 )
 
-// Store keeps the SiteFailover objects of one namespace at one site.
+// Store keeps the SiteFailover objects of one namespace at one site. Its
+// writes name the field manager tack ([RFC#0003] Requirement 25).
 type Store struct {
 	Client    client.Client
 	Namespace string
@@ -33,13 +35,13 @@ type Store struct {
 func (s *Store) Create(ctx context.Context, sf *failoverv1.SiteFailover) error {
 	sf.Namespace = s.Namespace
 	dry := sf.DeepCopy()
-	if err := s.Client.Create(ctx, dry, client.DryRunAll); err != nil {
+	if err := s.Client.Create(ctx, dry, client.DryRunAll, client.FieldOwner(kube.FieldManager)); err != nil {
 		return served(err)
 	}
 	if !equality.Semantic.DeepEqual(dry.Spec, sf.Spec) {
 		return fmt.Errorf("the cluster's SiteFailover CRD drops fields of the ledger's spec: apply the CRD of this Tack version there; nothing was created")
 	}
-	return served(s.Client.Create(ctx, sf))
+	return served(s.Client.Create(ctx, sf, client.FieldOwner(kube.FieldManager)))
 }
 
 // Get implements engine.Ledger.
@@ -57,7 +59,7 @@ func (s *Store) UpdateStatus(ctx context.Context, sf *failoverv1.SiteFailover) e
 	if sf.ResourceVersion == "" {
 		return fmt.Errorf("ledger %s has no resourceVersion", sf.Name)
 	}
-	return served(s.Client.Status().Update(ctx, sf))
+	return served(s.Client.Status().Update(ctx, sf, client.FieldOwner(kube.FieldManager)))
 }
 
 // List implements engine.Ledger, newest first.
@@ -98,7 +100,7 @@ func (s *Store) Event(ctx context.Context, sf *failoverv1.SiteFailover, warning 
 		FirstTimestamp: t, LastTimestamp: t, Count: 1,
 		Source: corev1.EventSource{Component: EventSource},
 	}
-	return s.Client.Create(ctx, ev)
+	return s.Client.Create(ctx, ev, client.FieldOwner(kube.FieldManager))
 }
 
 // User implements engine.Recorder: the user name that the site's API

@@ -20,13 +20,14 @@ import (
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/config"
+	"github.com/takodotid/tack/internal/kube"
 	"github.com/takodotid/tack/internal/redact"
 	"github.com/takodotid/tack/internal/stop"
 	"github.com/takodotid/tack/internal/version"
 )
 
 // FieldManager is the field manager of Tack's changes to live objects.
-const FieldManager = "tack"
+const FieldManager = kube.FieldManager
 
 func (r *runner) exec(ctx context.Context, s *failoverv1.Step) (string, error) {
 	switch s.Type {
