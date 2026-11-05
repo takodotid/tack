@@ -71,6 +71,10 @@ After `--accept-git-head`, the check before release reports differences outside 
 
 `tack resume` asks for the workload's name like `tack run`. `--yes` skips that, only for a resume a human approved.
 
+## Interrupting a run
+
+The first Ctrl-C, SIGTERM or SIGHUP stops the run: the step in flight ends, and the ledger records the stop, which can take up to 30 s when the ledger's site is slow. A second signal ends `tack` at once, without that record: the ledger then shows the step `Running`, and `tack resume` runs it again. SIGHUP comes when the terminal or SSH session ends; run `tack` in `tmux` or `screen` on a remote host, so a dropped connection does not stop the run.
+
 ## Break-glass
 
 In a site loss, Git may be down too. Tack then switches live and commits later. The sequence is in [RFC#0007](../rfcs/RFC0007.md#design).
