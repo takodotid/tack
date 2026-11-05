@@ -482,18 +482,21 @@ const minHidden = 8
 // hideCaptured replaces each captured value in a message with its name, so
 // the ledger and the output name captured values and never print them
 // ([RFC#0009] Requirement 10), whatever error carried one.
-func (r *runner) hideCaptured(msg string) string {
-	names := make([]string, 0, len(r.sf.Status.Captured))
-	for name := range r.sf.Status.Captured {
+func (r *runner) hideCaptured(msg string) string { return HideCaptured(r.sf.Status.Captured, msg) }
+
+// HideCaptured replaces each value of captured, of minHidden bytes or more,
+// in msg with $(name). tack status uses it too, for messages that an
+// older Tack wrote with a value in them.
+func HideCaptured(captured map[string]string, msg string) string {
+	names := make([]string, 0, len(captured))
+	for name := range captured {
 		names = append(names, name)
 	}
 	// The longest value first, so a value inside another is not replaced
 	// first.
-	slices.SortFunc(names, func(a, b string) int {
-		return len(r.sf.Status.Captured[b]) - len(r.sf.Status.Captured[a])
-	})
+	slices.SortFunc(names, func(a, b string) int { return len(captured[b]) - len(captured[a]) })
 	for _, name := range names {
-		if v := r.sf.Status.Captured[name]; len(v) >= minHidden {
+		if v := captured[name]; len(v) >= minHidden {
 			msg = strings.ReplaceAll(msg, v, "$("+name+")")
 		}
 	}

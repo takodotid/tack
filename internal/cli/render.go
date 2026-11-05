@@ -128,7 +128,7 @@ func printSteps(w io.Writer, sf *failoverv1.SiteFailover, withState bool) {
 			}
 			if withState {
 				if st := state[s.ID]; st.Message != "" {
-					fmt.Fprintf(w, "        result: %s\n", st.Message)
+					fmt.Fprintf(w, "        result: %s\n", engine.HideCaptured(sf.Status.Captured, st.Message))
 				}
 			}
 		}
@@ -226,7 +226,7 @@ func printStatus(w io.Writer, sf *failoverv1.SiteFailover) {
 	}
 	fmt.Fprintln(w)
 	if st.Message != "" {
-		fmt.Fprintf(w, "Message: %s\n", st.Message)
+		fmt.Fprintf(w, "Message: %s\n", engine.HideCaptured(st.Captured, st.Message))
 	}
 	if sf.Spec.TakeOver != "" {
 		fmt.Fprintf(w, "Takes over: run %s\n", sf.Spec.TakeOver)

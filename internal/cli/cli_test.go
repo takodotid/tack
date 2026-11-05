@@ -651,3 +651,24 @@ func TestYAMLRedactsGitURL(t *testing.T) {
 		t.Errorf("tack status prints the credential:\n%s", out)
 	}
 }
+
+// #35 row 41 (RFC0009 Requirement 10). A ledger whose messages an older
+// Tack wrote with a captured value in them: the text of tack status names
+// the value.
+func TestStatusHidesCapturedValues(t *testing.T) {
+	const token = "eyJsc24iOiIwLzMwMDAwMDAifQ=="
+	old := stoppedRun(t, "pg-main-earlier")
+	old.Status.Captured = map[string]string{"demotionToken": token}
+	old.Status.Message = "step hold-a-cluster-pg-a: wanted " + token
+	old.Status.Steps[0].Message = `{.status.lastPromotionToken} is "", want Equals "` + token + `"`
+	f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": append(testenv.Site("b", "a", 0), old)})
+	out, code := run(t, f, "status", "pg-main-earlier", "-f", "testdata/workload.yaml")
+	if code != ExitOK || strings.Contains(out, token) {
+		t.Fatalf("exit %d, tack status prints the captured value:\n%s", code, out)
+	}
+	for _, want := range []string{"Message: step hold-a-cluster-pg-a: wanted $(demotionToken)\n", `want Equals "$(demotionToken)"`, "Captured: demotionToken\n"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+}
