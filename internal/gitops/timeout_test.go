@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -132,5 +133,51 @@ func TestSSHTimeouts(t *testing.T) {
 				t.Errorf("ssh ran with %q; Tack's options %v, want %v", strings.TrimSpace(string(args)), got, tt.want)
 			}
 		})
+	}
+}
+
+// #35 row 12 (RFC0006 Requirement 3). Every git command carries the HTTP
+// low-speed limit: a transfer that stalls ends before the deadline.
+func TestGitCarriesLowSpeedLimit(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("needs /bin/sh")
+	}
+	isolate(t)
+	real, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("no git")
+	}
+	rm := newRemote(t, map[string]string{"README.md": "gitops\n"})
+	want := rm.head()
+	dir := t.TempDir()
+	log := filepath.Join(dir, "args")
+	script := "#!/bin/sh\necho \"$@\" >> '" + log + "'\nexec '" + real + "' \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	r := New(t.TempDir())
+	t.Cleanup(func() { r.Close() })
+	w := &failoverv1.WorkloadSpec{Git: failoverv1.GitSpec{URL: rm.url, Branch: "main"}}
+	if head, err := r.BranchHead(context.Background(), w); err != nil || head != want {
+		t.Fatalf("head %q, %v", head, err)
+	}
+	b, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fetched := false
+	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		if !strings.HasPrefix(line, "-c core.hooksPath=") {
+			// Not a command of Repo.git, such as the read of core.sshCommand.
+			continue
+		}
+		if !strings.Contains(line, "-c http.lowSpeedLimit=1 -c http.lowSpeedTime=30 ") {
+			t.Errorf("git ran without the low-speed limit: %s", line)
+		}
+		fetched = fetched || strings.Contains(line, " fetch ")
+	}
+	if !fetched {
+		t.Errorf("no fetch ran: %s", b)
 	}
 }
