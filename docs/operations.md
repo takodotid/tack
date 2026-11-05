@@ -5,7 +5,7 @@
 | Command | Shows |
 |---|---|
 | `tack status -f workload.yaml` | the workload's runs at every reachable site: site, run, mode, from, to, state, reason, start. The state is `Abandoned` for an abandoned run, and `TakenOver` for a run another run took over |
-| `tack status RUN -f workload.yaml` | one run: state and reason, message, Git base and commit, captured values by name, held objects, each phase and step with its state, start, end, attempts and last result, follow-ups, and the history: each start, stop, wait and success of the run, with the version, the user and the flags of the `tack` that recorded it |
+| `tack status RUN -f workload.yaml` | one run: state and reason, message, the version of the `tack` that last wrote it, Git base and commit, captured values by name, held objects, each phase and step with its state, start, end, attempts and last result, follow-ups, and the history: each start, stop, wait and success of the run, with the version, the user and the flags of the `tack` that recorded it |
 | `tack status [RUN] --context site-b` | the same from one context, without the Workload file; `--namespace` when the ledger namespace is not `tack-system` |
 | `tack status RUN -f workload.yaml -o yaml` | the whole `SiteFailover` object |
 | `tack abandon RUN -f workload.yaml --reason TEXT` | marks a run that must never go on: [runbooks/abandon-run.md](runbooks/abandon-run.md) |

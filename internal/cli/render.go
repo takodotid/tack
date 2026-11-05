@@ -13,6 +13,7 @@ import (
 	"github.com/takodotid/tack/internal/engine"
 	"github.com/takodotid/tack/internal/kube"
 	"github.com/takodotid/tack/internal/redact"
+	"github.com/takodotid/tack/internal/version"
 )
 
 // The annotations of a hold, as the plan prints them.
@@ -265,6 +266,13 @@ func printStatus(w io.Writer, sf *failoverv1.SiteFailover) {
 	}
 	if st.FinishedAt != nil {
 		fmt.Fprintf(w, "Finished: %s\n", st.FinishedAt.UTC().Format("2006-01-02 15:04:05Z"))
+	}
+	if st.WrittenBy != "" {
+		fmt.Fprintf(w, "Written by: tack %s", st.WrittenBy)
+		if version.Newer(st.WrittenBy, version.Version) {
+			fmt.Fprintf(w, ", newer than this tack %s: tack resume and tack abandon refuse the run, and this output leaves out the fields this tack does not know", version.Version)
+		}
+		fmt.Fprintln(w)
 	}
 	g := st.Git
 	if g.BaseRevision != "" || g.Commit != "" {

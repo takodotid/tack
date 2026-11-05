@@ -229,7 +229,8 @@ type Resumption struct {
 	checks *SiteChecks
 }
 
-// CheckResume refuses a run that cannot resume: a ledger that never
+// CheckResume refuses a run that cannot resume: a ledger that a newer
+// tack wrote last ([RFC#0003] Requirement 24), a ledger that never
 // recorded its start ([RFC#0003] Requirement 20), a run whose steps are not
 // the plan its driver composes from its ledger (Requirement 21), a run
 // that another run took over, and a run older than another run of the
@@ -237,6 +238,9 @@ type Resumption struct {
 // tack resume calls it before it asks the operator, then
 // Resumption.Resume after.
 func (e *Env) CheckResume(ctx context.Context, sf *failoverv1.SiteFailover) (*Resumption, error) {
+	if err := CheckWriter(sf); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrCannotResume, err)
+	}
 	if a := sf.Status.Abandoned; a != nil {
 		return nil, fmt.Errorf("%w: run %s was abandoned at %s: %s", ErrCannotResume, sf.Name, a.At.UTC().Format(time.RFC3339), a.Reason)
 	}
@@ -1178,7 +1182,7 @@ func joinMessage(id, msg string) string {
 func (e *Env) update(ctx context.Context, sf *failoverv1.SiteFailover) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
 	defer cancel()
-	CleanStatus(&sf.Status)
+	Stamp(&sf.Status)
 	sent := sf.DeepCopy()
 	start := e.now()
 	for attempt := 1; ; attempt++ {

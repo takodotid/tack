@@ -286,11 +286,14 @@ func supersede(env *engine.Env, old []foundRun) func(ctx context.Context, run, b
 		if err != nil {
 			return err
 		}
+		if err := engine.CheckWriter(sf); err != nil {
+			return err
+		}
 		sf.Status.SupersededBy = by
 		entry := env.Entry(ctx, sf, failoverv1.HistoryTakenOver, nil)
 		entry.Reason, entry.Message = "", "run "+by+" took this run over"
 		engine.AppendHistory(&sf.Status, entry)
-		engine.CleanStatus(&sf.Status)
+		engine.Stamp(&sf.Status)
 		if err := store.UpdateStatus(ctx, sf); err != nil {
 			return err
 		}

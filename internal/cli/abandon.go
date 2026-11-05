@@ -82,6 +82,9 @@ func newAbandon(o *options) *cobra.Command {
 			if sf.Status.State == failoverv1.RunSucceeded && !hasDeferred(sf) {
 				return fmt.Errorf("run %s succeeded, and no step of it is left: there is nothing to abandon", sf.Name)
 			}
+			if err := engine.CheckWriter(sf); err != nil {
+				return err
+			}
 			held := stillHeld(sf)
 			if len(held) > 0 {
 				fmt.Fprintf(out, "The run's holds stay after it is abandoned:\n")
@@ -102,7 +105,7 @@ func newAbandon(o *options) *cobra.Command {
 			entry := env.Entry(ctx, sf, failoverv1.HistoryAbandoned, flags)
 			entry.Reason, entry.Message = "", reason
 			engine.AppendHistory(&sf.Status, entry)
-			engine.CleanStatus(&sf.Status)
+			engine.Stamp(&sf.Status)
 			if err := env.Ledger.UpdateStatus(ctx, sf); err != nil {
 				if apierrors.IsConflict(err) {
 					return fmt.Errorf("the ledger of run %s changed since it was read, so another tack process may be running it. Nothing was changed: check, then abandon it again: %w", sf.Name, err)

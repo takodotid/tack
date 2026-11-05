@@ -482,6 +482,13 @@ type SiteFailoverStatus struct {
 	// +optional
 	Abandoned *Abandonment `json:"abandoned,omitempty"`
 
+	// WrittenBy is the version of the tack that last wrote this status. A
+	// tack of an older release refuses to write the ledger: it would drop
+	// the status fields it does not know. Unset in a ledger that a tack
+	// older than v1.3.0 wrote last.
+	// +optional
+	WrittenBy string `json:"writtenBy,omitempty"`
+
 	// History records the run's timeline, oldest first: each start of a
 	// tack process that runs it, each stop, wait and success, its
 	// abandonment and its take-over. Tack only appends to it. At

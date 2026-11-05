@@ -18,6 +18,8 @@ type recording struct {
 	engine.Ledger
 	mu     sync.Mutex
 	writes []string
+	// versions are the status.writtenBy of each write.
+	versions []string
 	// failRunning fails the first write that records the run Running: the
 	// process dies there.
 	failRunning bool
@@ -32,6 +34,7 @@ func (l *recording) UpdateStatus(ctx context.Context, sf *failoverv1.SiteFailove
 	}
 	l.mu.Lock()
 	l.writes = append(l.writes, fmt.Sprintf("%s %v", sf.Status.State, running))
+	l.versions = append(l.versions, sf.Status.WrittenBy)
 	fail := l.failRunning && sf.Status.State == failoverv1.RunRunning
 	l.mu.Unlock()
 	if fail {

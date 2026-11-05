@@ -2,7 +2,10 @@
 // that version ([RFC#0009] Requirement 17).
 package version
 
-import "regexp"
+import (
+	"regexp"
+	"strconv"
+)
 
 // Version is set at build time:
 // -X github.com/takodotid/tack/internal/version.Version=VERSION.
@@ -22,6 +25,50 @@ func RefOf(v string) string {
 		return v
 	}
 	return "main"
+}
+
+// described matches a release tag, or git describe's name of a build after
+// one, such as v1.2.1-5-g2961117, with -dirty for a tree with changes.
+var described = regexp.MustCompile(`^v([0-9]+)\.([0-9]+)\.([0-9]+)(?:-([0-9]+)-g[0-9a-f]+)?(?:-dirty)?$`)
+
+// order returns the release and the commits after it that v names, and
+// whether v names one.
+func order(v string) ([4]int, bool) {
+	m := described.FindStringSubmatch(v)
+	if m == nil {
+		return [4]int{}, false
+	}
+	var o [4]int
+	for i := range o {
+		if m[i+1] == "" {
+			continue
+		}
+		n, err := strconv.Atoi(m[i+1])
+		if err != nil {
+			return [4]int{}, false
+		}
+		o[i] = n
+	}
+	return o, true
+}
+
+// Newer tells whether version a is newer than version b ([RFC#0003]
+// Requirement 24). Each must name a release tag, or a build after one as
+// git describe names it; a build after a release is newer than the
+// release and older than the next. When either names neither, such as
+// dev or v1.3.0-rc.1, neither is newer.
+func Newer(a, b string) bool {
+	oa, okA := order(a)
+	ob, okB := order(b)
+	if !okA || !okB {
+		return false
+	}
+	for i := range oa {
+		if oa[i] != ob[i] {
+			return oa[i] > ob[i]
+		}
+	}
+	return false
 }
 
 // Ref returns the Git ref of the docs of this binary.
