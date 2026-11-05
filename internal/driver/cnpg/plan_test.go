@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -372,6 +373,64 @@ func TestDemotion(t *testing.T) {
 	} {
 		if got := (Driver{}).Demotion(driver.Request{From: "a", To: "b", Mode: tt.mode}, tt.site); got != tt.want {
 			t.Errorf("%s, site %s: %q, want %q", tt.mode, tt.site, got, tt.want)
+		}
+	}
+}
+
+// RFC0002 Requirement 2 and RFC0004 Requirement 7: on three sites and two,
+// in both modes, Demotion names a Failover step of the plan at that site
+// for every site but to: for from, the patch that declares to's Cluster
+// primary before the promotion; for another site, that patch after it. A
+// renamed step would make the engine's reads fall back without an error.
+func TestDemotionNamesPlannedSteps(t *testing.T) {
+	lost := func(s string, r, st map[string]any) {
+		if s == "a" {
+			r["primary"] = "pg-b"
+			st["instancesReportedState"] = map[string]any{"pg-a-1": map[string]any{"isPrimary": false}}
+		}
+	}
+	for _, mode := range []failoverv1.Mode{failoverv1.ModePlanned, failoverv1.ModeSiteLoss} {
+		for _, n := range []int{3, 2} {
+			var edit func(string, map[string]any, map[string]any)
+			if mode == failoverv1.ModeSiteLoss {
+				edit = lost
+			}
+			w, topo := topology(t, edit)
+			w.Sites, topo.Sites = w.Sites[:n], topo.Sites[:n]
+			req := driver.Request{From: "a", To: "b", Mode: mode}
+			steps, _, err := Driver{}.Plan(w, topo, req)
+			if err != nil {
+				t.Fatalf("%s, %d sites: %v", mode, n, err)
+			}
+			promotion := -1
+			for i, s := range steps {
+				if s.Site == "b" {
+					promotion = i
+					break
+				}
+			}
+			for _, site := range []string{"a", "b", "c"}[:n] {
+				id := Driver{}.Demotion(req, site)
+				if site == "b" {
+					if id != "" {
+						t.Errorf("%s, %d sites: Demotion(b) is %q, want none", mode, n, id)
+					}
+					continue
+				}
+				i := slices.IndexFunc(steps, func(s failoverv1.Step) bool { return s.ID == id })
+				if i < 0 {
+					t.Errorf("%s, %d sites: Demotion(%s) is %q, which the plan lacks", mode, n, site, id)
+					continue
+				}
+				s := steps[i]
+				if s.Phase != failoverv1.PhaseFailover || s.Type != failoverv1.StepPatch || s.Site != site || s.Patch.Object.Kind != "Cluster" ||
+					!strings.Contains(s.Patch.Merge, `"primary":"pg-b"`) {
+					t.Errorf("%s, %d sites: Demotion(%s) names %+v, want the patch that declares pg-b at %s", mode, n, site, s, site)
+				}
+				if before := i < promotion; before != (site == "a") {
+					t.Errorf("%s, %d sites: Demotion(%s) is at %d, the promotion at %d", mode, n, site, i, promotion)
+				}
+			}
 		}
 	}
 }

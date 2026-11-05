@@ -19,8 +19,12 @@ longer waits for it.
 
 Abandon changes nothing else. The objects the run holds stay held: remove
 the holds once Git equals live (docs/runbooks/abandon-run.md), or start the
-next run with --take-over RUN, which takes them over. A tack process that
-still runs the run ends at its next ledger write.
+next run with --take-over RUN, which takes them over.
+
+Abandon does not stop a tack process that runs the run: check first that
+none does. A step that runs, such as a promotion, still changes the
+workload. Only tack v1.3.0 and later honour the mark: an older tack resumes
+the run, and drops the mark.
 
 An agent never starts "tack abandon" without an explicit instruction from a
 human for that run.`
@@ -80,7 +84,7 @@ func newAbandon(o *options) *cobra.Command {
 				}
 				fmt.Fprintf(out, "Remove them once Git equals live (docs/runbooks/abandon-run.md), or start the next run with --take-over %s.\n", sf.Name)
 			}
-			fmt.Fprintf(out, "Check that no tack process runs %s: one that does ends at its next ledger write.\n", sf.Name)
+			fmt.Fprintf(out, "Check that no tack process runs %s: abandon does not stop one. Only tack v1.3.0 and later honour the mark.\n", sf.Name)
 			if err := o.confirm(out, yes, sf.Spec.Workload.Name); err != nil {
 				return err
 			}
