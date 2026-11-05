@@ -140,3 +140,29 @@ func TestRun(t *testing.T) {
 		t.Errorf("a missing archive: %v", err)
 	}
 }
+
+// The man pages of a release link the docs at its tag; of any other
+// build, at main.
+func TestCheckLinks(t *testing.T) {
+	page := func(ref string) string {
+		p := filepath.Join(t.TempDir(), "tack-run.1")
+		s := "confirm the loss first:\nhttps://github.com/takodotid/tack/blob/" + ref + "/docs/runbooks/site-loss.md\n"
+		if err := os.WriteFile(p, []byte(s), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	for _, tt := range []struct {
+		version, ref, err string
+	}{
+		{version: "v1.3.0", ref: "v1.3.0"},
+		{version: "v1.2.1-5-g2961117", ref: "main"},
+		{version: "v1.3.0", ref: "main", err: "links the docs at main, want v1.3.0 for version v1.3.0"},
+		{version: "v1.2.1-5-g2961117", ref: "v1.2.1", err: "links the docs at v1.2.1, want main"},
+	} {
+		err := checkLinks([]string{page(tt.ref)}, tt.version)
+		if tt.err == "" && err != nil || tt.err != "" && (err == nil || !strings.Contains(err.Error(), tt.err)) {
+			t.Errorf("version %s, link at %s: %v, want %q", tt.version, tt.ref, err, tt.err)
+		}
+	}
+}

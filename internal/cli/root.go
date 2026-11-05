@@ -17,6 +17,7 @@ import (
 	"github.com/takodotid/tack/internal/engine"
 	"github.com/takodotid/tack/internal/kube"
 	"github.com/takodotid/tack/internal/redact"
+	"github.com/takodotid/tack/internal/version"
 )
 
 // Exit codes.
@@ -27,9 +28,6 @@ const (
 	ExitStopped = 3
 	ExitWaiting = 4
 )
-
-// Version is set at build time.
-var Version = "dev"
 
 // Factory builds what a command needs. The binary supplies the real one;
 // tests supply fakes.
@@ -104,7 +102,7 @@ func NewRoot(f Factory) *cobra.Command {
 		Use:           "tack",
 		Short:         "Switch a stateful workload's primary between sites, with GitOps kept in step",
 		Long:          rootLong,
-		Version:       Version,
+		Version:       version.Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRun: func(cmd *cobra.Command, _ []string) {

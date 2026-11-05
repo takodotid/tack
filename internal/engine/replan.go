@@ -9,6 +9,7 @@ import (
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/driver"
+	"github.com/takodotid/tack/internal/version"
 )
 
 // checkPlan composes the run's plan again from its ledger, and refuses a
@@ -26,7 +27,7 @@ func (e *Env) checkPlan(sf *failoverv1.SiteFailover) error {
 	want, err := e.replan(sf)
 	if err != nil {
 		return fmt.Errorf("%w: the steps of run %s are not what driver %s plans from the run's Workload: %v. %s",
-			ErrCannotResume, sf.Name, sf.Spec.Workload.Spec.Driver, err, planWayOn)
+			ErrCannotResume, sf.Name, sf.Spec.Workload.Spec.Driver, err, planWayOn())
 	}
 	got := sf.Spec.Steps
 	for i := 0; i < len(got) || i < len(want); i++ {
@@ -43,14 +44,17 @@ func (e *Env) checkPlan(sf *failoverv1.SiteFailover) error {
 		}
 		if diff != "" {
 			return fmt.Errorf("%w: the steps of run %s are not what driver %s plans from the run's Workload: %s. %s",
-				ErrCannotResume, sf.Name, sf.Spec.Workload.Spec.Driver, diff, planWayOn)
+				ErrCannotResume, sf.Name, sf.Spec.Workload.Spec.Driver, diff, planWayOn())
 		}
 	}
 	return nil
 }
 
-// planWayOn is the way on of a run whose steps checkPlan refuses.
-const planWayOn = "The ledger was written outside tack, or by a tack that plans differently: do not resume it. Check who may write sitefailovers (docs/operations.md#who-may-write-ledgers), then abandon the run (tack abandon) and plan again, or start a new run with --take-over"
+// planWayOn returns the way on of a run whose steps checkPlan refuses.
+func planWayOn() string {
+	return "The ledger was written outside tack, or by a tack that plans differently: do not resume it. Check who may write sitefailovers (" +
+		version.DocLink("docs/operations.md#who-may-write-ledgers") + "), then abandon the run (tack abandon) and plan again, or start a new run with --take-over"
+}
 
 // replan composes the run's plan from its ledger, as MakePlan composed it.
 func (e *Env) replan(sf *failoverv1.SiteFailover) ([]failoverv1.Step, error) {

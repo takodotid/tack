@@ -16,6 +16,7 @@ import (
 	"github.com/takodotid/tack/internal/engine"
 	"github.com/takodotid/tack/internal/redact"
 	"github.com/takodotid/tack/internal/stop"
+	"github.com/takodotid/tack/internal/version"
 )
 
 // trailer is the commit trailer that names the run of a commit.
@@ -118,8 +119,8 @@ func (r *Repo) Commit(ctx context.Context, w *failoverv1.WorkloadSpec, req engin
 // write a ledger could point a removal or a value at any file (#35 row 11).
 func (r *Repo) checkTarget(ctx context.Context, c *clone, commit string, g *failoverv1.GitSpec, ch *failoverv1.GitChange) error {
 	refuse := func(format string, a ...any) error {
-		return fmt.Errorf("%s: the run would write %s%s at %s, but %s. The ledger's Git step does not match its Workload: do not resume the run, see docs/runbooks/abandon-run.md",
-			describeChange(ch), ch.File, docString(ch.Document), ch.Path, fmt.Sprintf(format, a...))
+		return fmt.Errorf("%s: the run would write %s%s at %s, but %s. The ledger's Git step does not match its Workload: do not resume the run, see %s",
+			describeChange(ch), ch.File, docString(ch.Document), ch.Path, fmt.Sprintf(format, a...), version.DocLink("docs/runbooks/abandon-run.md"))
 	}
 	m, err := mapping(g.Fields, driver.FieldChange{Site: ch.Site, Object: ch.Object, Field: ch.Field})
 	if err != nil {

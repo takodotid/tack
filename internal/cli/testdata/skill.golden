@@ -56,8 +56,9 @@ ledger. tack resume then refuses the run, and a new run of the workload no
 longer waits for it.
 
 Abandon changes nothing else. The objects the run holds stay held: remove
-the holds once Git equals live (docs/runbooks/abandon-run.md), or start the
-next run with --take-over RUN, which takes them over.
+the holds once Git equals live, or start the next run with --take-over RUN,
+which takes them over. The runbook:
+  https://github.com/takodotid/tack/blob/main/docs/runbooks/abandon-run.md
 
 Abandon does not stop a tack process that runs the run: check first that
 none does. A step that runs, such as a promotion, still changes the
@@ -199,8 +200,10 @@ Modes:
   site-loss  the new site promotes without a token; the old primary then
              needs a rebuild. Use it only when the old site is lost:
              Tack cannot tell a lost site from one cut off from this
-             host. Confirm the loss and fence the old primary first
-             (docs/runbooks/site-loss.md).
+             host. Confirm the loss and fence the old primary first.
+
+Confirming a site loss and fencing the old primary:
+  https://github.com/takodotid/tack/blob/main/docs/runbooks/site-loss.md
 
 If Git cannot be reached (break-glass), the run still holds and switches the
 live objects, then waits with exit code 4; "tack resume" finishes it once Git

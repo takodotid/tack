@@ -19,6 +19,7 @@ import (
 	"github.com/takodotid/tack/internal/kube"
 	"github.com/takodotid/tack/internal/ledger"
 	"github.com/takodotid/tack/internal/testenv"
+	"github.com/takodotid/tack/internal/version"
 )
 
 const workload3YAML = `apiVersion: failover.tako.id/v1
@@ -281,8 +282,8 @@ func TestPatchNeedsTheRunsHold(t *testing.T) {
 	// Issue #45: holding the object again resumes a plan that a recovery by
 	// hand may have made stale. The message says so before it says how.
 	stale, again := strings.Index(sf.Status.Message, "the run's plan may be stale"), strings.Index(sf.Status.Message, "annotate it again")
-	if stale < 0 || again < stale || !strings.Contains(sf.Status.Message, "docs/runbooks/abandon-run.md") {
-		t.Errorf("message %q: it must say that the plan may be stale, and name docs/runbooks/abandon-run.md, before it says to hold the object again", sf.Status.Message)
+	if stale < 0 || again < stale || !strings.Contains(sf.Status.Message, version.DocLink("docs/runbooks/abandon-run.md")) {
+		t.Errorf("message %q: it must say that the plan may be stale, and link to the abandon runbook, before it says to hold the object again", sf.Status.Message)
 	}
 	if after := f.versions("a"); after != before {
 		t.Errorf("site a changed: %s, then %s", before, after)

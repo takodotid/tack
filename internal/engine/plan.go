@@ -15,6 +15,7 @@ import (
 	"github.com/takodotid/tack/internal/driver"
 	"github.com/takodotid/tack/internal/kube"
 	"github.com/takodotid/tack/internal/redact"
+	"github.com/takodotid/tack/internal/version"
 )
 
 // LabelWorkload carries the workload's name on its SiteFailover objects.
@@ -85,7 +86,7 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 			// An answer 5xx or 429 is an answer, also from a load balancer
 			// in front of a lost site: Tack does not count the site as lost
 			// (#38 item 8). The runbook has the way on.
-			return nil, fmt.Errorf("%w. A site whose API answers, even with an error, is not counted as lost. If the site is lost and something in front of it still answers, such as a load balancer, see docs/runbooks/site-loss.md#when-tack-refuses-the-lost-site", err)
+			return nil, fmt.Errorf("%w. A site whose API answers, even with an error, is not counted as lost. If the site is lost and something in front of it still answers, such as a load balancer, see %s", err, version.DocLink("docs/runbooks/site-loss.md#when-tack-refuses-the-lost-site"))
 		}
 		return nil, err
 	}
@@ -110,7 +111,7 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 	in := Inputs{Request: req, Topology: topo, Owners: map[string]map[failoverv1.ObjectRef]failoverv1.ObjectKey{}}
 	var notes []string
 	if req.Mode == failoverv1.ModeSiteLoss {
-		notes = append(notes, fmt.Sprintf("site loss: Tack cannot tell a lost site from one cut off from this host. If site %s still runs, it stays primary until Flux there applies the run's commit or Tack fences it. Confirm the loss and fence it first: docs/runbooks/site-loss.md", req.From))
+		notes = append(notes, fmt.Sprintf("site loss: Tack cannot tell a lost site from one cut off from this host. If site %s still runs, it stays primary until Flux there applies the run's commit or Tack fences it. Confirm the loss and fence it first: %s", req.From, version.DocLink("docs/runbooks/site-loss.md")))
 	}
 	seen := map[string]bool{}
 	if e.Runs != nil {
@@ -317,7 +318,7 @@ func checkRebuilt(req Request, to *driver.SiteState, runs []failoverv1.SiteFailo
 			}
 			msg := fmt.Sprintf("run %s left site %s to rebuild (%s), and its member was not created again since", r.Name, req.To, f.Reason)
 			if req.Mode == failoverv1.ModePlanned {
-				return fmt.Errorf("%s: rebuild it before a planned switchover (docs/runbooks/rebuild-old-primary.md)", msg)
+				return fmt.Errorf("%s: rebuild it before a planned switchover (%s)", msg, version.DocLink("docs/runbooks/rebuild-old-primary.md"))
 			}
 			*notes = append(*notes, msg)
 		}

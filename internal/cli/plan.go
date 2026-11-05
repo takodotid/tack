@@ -20,6 +20,7 @@ import (
 	"github.com/takodotid/tack/internal/engine"
 	"github.com/takodotid/tack/internal/kube"
 	"github.com/takodotid/tack/internal/ledger"
+	"github.com/takodotid/tack/internal/version"
 )
 
 type planFlags struct {
@@ -142,7 +143,8 @@ func (o *options) makePlan(ctx context.Context, p *planFlags, progress io.Writer
 	return plan, env, closeEnv, err
 }
 
-const runLong = `Run starts a run: it prints the plan, asks for confirmation, creates the
+func runLong() string {
+	return `Run starts a run: it prints the plan, asks for confirmation, creates the
 SiteFailover ledger at the target site, and takes the steps in order.
 
 Modes:
@@ -150,8 +152,10 @@ Modes:
   site-loss  the new site promotes without a token; the old primary then
              needs a rebuild. Use it only when the old site is lost:
              Tack cannot tell a lost site from one cut off from this
-             host. Confirm the loss and fence the old primary first
-             (docs/runbooks/site-loss.md).
+             host. Confirm the loss and fence the old primary first.
+
+Confirming a site loss and fencing the old primary:
+  ` + version.DocLink("docs/runbooks/site-loss.md") + `
 
 If Git cannot be reached (break-glass), the run still holds and switches the
 live objects, then waits with exit code 4; "tack resume" finishes it once Git
@@ -160,6 +164,7 @@ the ledger says why.
 
 An agent never starts "tack run" without an explicit instruction from a
 human for that run, and runs "tack plan" first.`
+}
 
 func newRun(o *options) *cobra.Command {
 	var p planFlags
@@ -168,7 +173,7 @@ func newRun(o *options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "run -f WORKLOAD --to SITE [--mode planned|site-loss]",
 		Short: "Start a run: hold Flux, switch the primary, commit to Git, release",
-		Long:  runLong,
+		Long:  runLong(),
 		Example: `  # A planned switchover to site b, after reviewing "tack plan"
   tack run -f workload.yaml --to b
 

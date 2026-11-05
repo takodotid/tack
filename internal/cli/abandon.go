@@ -10,16 +10,19 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
+	"github.com/takodotid/tack/internal/version"
 )
 
-const abandonLong = `Abandon marks a run that must never go on, such as one whose old primary
+func abandonLong() string {
+	return `Abandon marks a run that must never go on, such as one whose old primary
 was promoted again by hand: it records status.abandoned in the run's
 ledger. tack resume then refuses the run, and a new run of the workload no
 longer waits for it.
 
 Abandon changes nothing else. The objects the run holds stay held: remove
-the holds once Git equals live (docs/runbooks/abandon-run.md), or start the
-next run with --take-over RUN, which takes them over.
+the holds once Git equals live, or start the next run with --take-over RUN,
+which takes them over. The runbook:
+  ` + version.DocLink("docs/runbooks/abandon-run.md") + `
 
 Abandon does not stop a tack process that runs the run: check first that
 none does. A step that runs, such as a promotion, still changes the
@@ -28,6 +31,7 @@ the run, and drops the mark.
 
 An agent never starts "tack abandon" without an explicit instruction from a
 human for that run.`
+}
 
 // defaultAbandonReason is the reason tack abandon records without --reason.
 const defaultAbandonReason = "abandoned by the operator with tack abandon"
@@ -39,7 +43,7 @@ func newAbandon(o *options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "abandon RUN (-f WORKLOAD | --context CONTEXT)",
 		Short: "Mark a run that must never go on",
-		Long:  abandonLong,
+		Long:  abandonLong(),
 		Example: `  # After the old primary was promoted again by hand
   tack abandon pg-main-20261027-101500 -f workload.yaml --reason "a promoted again by hand"`,
 		Args: cobra.ExactArgs(1),
@@ -82,7 +86,7 @@ func newAbandon(o *options) *cobra.Command {
 				for _, h := range held {
 					fmt.Fprintf(out, "  %s at site %s\n", ref(h.Object), h.Site)
 				}
-				fmt.Fprintf(out, "Remove them once Git equals live (docs/runbooks/abandon-run.md), or start the next run with --take-over %s.\n", sf.Name)
+				fmt.Fprintf(out, "Remove them once Git equals live (%s), or start the next run with --take-over %s.\n", version.DocLink("docs/runbooks/abandon-run.md"), sf.Name)
 			}
 			fmt.Fprintf(out, "Check that no tack process runs %s: abandon does not stop one. Only tack v1.3.0 and later honour the mark.\n", sf.Name)
 			if err := o.confirm(out, yes, sf.Spec.Workload.Name); err != nil {

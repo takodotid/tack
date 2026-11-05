@@ -13,6 +13,7 @@ import (
 	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/ledger"
 	"github.com/takodotid/tack/internal/testenv"
+	"github.com/takodotid/tack/internal/version"
 )
 
 // heldRun is a stopped run that still holds Cluster pg-a at site a.
@@ -48,7 +49,7 @@ func TestAbandon(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("abandon: exit %d:\n%s", code, out)
 	}
-	for _, want := range []string{"Cluster db/pg-a at site a", "--take-over pg-main-earlier", "run pg-main-earlier abandoned"} {
+	for _, want := range []string{"Cluster db/pg-a at site a", "(" + version.DocLink("docs/runbooks/abandon-run.md") + ")", "--take-over pg-main-earlier", "run pg-main-earlier abandoned"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("abandon: output lacks %q:\n%s", want, out)
 		}
