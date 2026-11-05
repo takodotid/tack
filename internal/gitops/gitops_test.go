@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -391,8 +392,9 @@ func TestCommit(t *testing.T) {
 	if msg := git(t, rm.url, "log", "-1", "--format=%B", commit); msg != "tack: switch pg to b\n\nTack-Run: run-1" {
 		t.Errorf("message %q", msg)
 	}
-	if a := git(t, rm.url, "log", "-1", "--format=%an <%ae>", commit); a != "Tack <tack@example.invalid>" {
-		t.Errorf("author %q", a)
+	// RFC0006 Requirement 11: spec.git.author is author and committer.
+	if a := git(t, rm.url, "log", "-1", "--format=%an <%ae>, %cn <%ce>", commit); a != "Tack <tack@example.invalid>, Tack <tack@example.invalid>" {
+		t.Errorf("author and committer %q", a)
 	}
 	for name, want := range map[string]string{
 		"helm/values-a.yaml":          strings.Replace(values, "primary: site-a #", "primary: site-b #", 1),
@@ -595,8 +597,11 @@ func TestCommitPushUnreachable(t *testing.T) {
 	}
 }
 
+// RFC0006 Requirement 11: without spec.git.author, git never guesses an
+// identity, here from EMAIL.
 func TestCommitNoIdentity(t *testing.T) {
 	isolate(t)
+	t.Setenv("EMAIL", "guessed@example.invalid")
 	rm := newRemote(t, fixture())
 	w := workload(rm.url)
 	w.Git.Author = nil
@@ -629,8 +634,68 @@ func TestCommitUsesGitIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
-	if a := git(t, rm.url, "log", "-1", "--format=%an", commit); a != "Operator" {
-		t.Errorf("author %q", a)
+	if a := git(t, rm.url, "log", "-1", "--format=%an, %cn", commit); a != "Operator, Operator" {
+		t.Errorf("author and committer %q", a)
+	}
+}
+
+// RFC0006 Requirement 1. A git on PATH records the environment of each
+// git command Tack runs: no prompt, English messages, and none of the
+// variables that point git at another repository, whatever the operator's
+// environment holds.
+func TestGitEnvironment(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the recording git is a shell script")
+	}
+	isolate(t)
+	rm := newRemote(t, fixture())
+	real, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	record := filepath.Join(t.TempDir(), "env")
+	script := "#!/bin/sh\nenv >> \"$TACK_TEST_GIT_ENV\"\necho ---- >> \"$TACK_TEST_GIT_ENV\"\nexec \"" + real + "\" \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TACK_TEST_GIT_ENV", record)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	elsewhere := t.TempDir()
+	for _, k := range repoVars {
+		t.Setenv(k, filepath.Join(elsewhere, k))
+	}
+	t.Setenv("GIT_TERMINAL_PROMPT", "1")
+	t.Setenv("LC_ALL", "de_DE.UTF-8")
+
+	head, err := newRepo(t).BranchHead(context.Background(), workload(rm.url))
+	if err != nil {
+		t.Fatalf("BranchHead: %v", err)
+	}
+	if !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(head) {
+		t.Errorf("head %q", head)
+	}
+	b, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs := strings.Split(strings.TrimSuffix(string(b), "----\n"), "----\n")
+	for i, run := range runs {
+		lines := strings.Split(run, "\n")
+		for _, want := range []string{"GIT_TERMINAL_PROMPT=0", "LC_ALL=C"} {
+			if !slices.Contains(lines, want) {
+				t.Errorf("git command %d: no %s", i+1, want)
+			}
+		}
+		for _, l := range lines {
+			k, _, _ := strings.Cut(l, "=")
+			if slices.Contains(repoVars, k) || k == "GIT_TERMINAL_PROMPT" && l != "GIT_TERMINAL_PROMPT=0" || k == "LC_ALL" && l != "LC_ALL=C" {
+				t.Errorf("git command %d: %s", i+1, l)
+			}
+		}
+	}
+	if len(runs) == 0 {
+		t.Error("no git command ran")
 	}
 }
 

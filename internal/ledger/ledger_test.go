@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -30,6 +31,12 @@ func TestNotServed(t *testing.T) {
 		List: func(context.Context, client.WithWatch, client.ObjectList, ...client.ListOption) error {
 			return noMatch
 		},
+		Create: func(context.Context, client.WithWatch, client.Object, ...client.CreateOption) error {
+			return noMatch
+		},
+		SubResourceUpdate: func(context.Context, client.Client, string, client.Object, ...client.SubResourceUpdateOption) error {
+			return noMatch
+		},
 	})
 	s := &Store{Client: c, Namespace: "tack-system"}
 	_, err := s.List(context.Background())
@@ -38,6 +45,39 @@ func TestNotServed(t *testing.T) {
 	}
 	if _, err := s.Get(context.Background(), "pg-main-20261027-101500"); !meta.IsNoMatchError(err) || !strings.Contains(err.Error(), "install or upgrade Tack's CRD") {
 		t.Errorf("Get: got %v", err)
+	}
+	// RFC0003 Requirement 16: the create and the status write say the same.
+	sf := &failoverv1.SiteFailover{ObjectMeta: metav1.ObjectMeta{Name: "pg-main-20261027-101500", ResourceVersion: "1"}}
+	if err := s.Create(context.Background(), sf.DeepCopy()); !meta.IsNoMatchError(err) || !strings.Contains(err.Error(), "install or upgrade Tack's CRD") {
+		t.Errorf("Create: got %v", err)
+	}
+	if err := s.UpdateStatus(context.Background(), sf.DeepCopy()); !meta.IsNoMatchError(err) || !strings.Contains(err.Error(), "install or upgrade Tack's CRD") {
+		t.Errorf("UpdateStatus: got %v", err)
+	}
+}
+
+// RFC0003 Requirement 7: creating a ledger never replaces one with the
+// same name.
+func TestCreateRefusesTakenName(t *testing.T) {
+	ctx := context.Background()
+	s := &Store{Client: fake.NewClientBuilder().WithScheme(kube.Scheme).Build(), Namespace: "tack-system"}
+	first := &failoverv1.SiteFailover{
+		ObjectMeta: metav1.ObjectMeta{Name: "run-1"},
+		Spec:       failoverv1.SiteFailoverSpec{Mode: failoverv1.ModePlanned, From: "a", To: "b"},
+	}
+	if err := s.Create(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	second := &failoverv1.SiteFailover{
+		ObjectMeta: metav1.ObjectMeta{Name: "run-1"},
+		Spec:       failoverv1.SiteFailoverSpec{Mode: failoverv1.ModeSiteLoss, From: "b", To: "a"},
+	}
+	if err := s.Create(ctx, second); !apierrors.IsAlreadyExists(err) {
+		t.Fatalf("Create on a taken name: got %v, want AlreadyExists", err)
+	}
+	got, err := s.Get(ctx, "run-1")
+	if err != nil || got.Spec.Mode != failoverv1.ModePlanned || got.Spec.To != "b" {
+		t.Errorf("the ledger was replaced: %v, %s to %s", err, got.Spec.Mode, got.Spec.To)
 	}
 }
 

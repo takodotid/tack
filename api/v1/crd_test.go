@@ -9,10 +9,8 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// TestCRDVersions checks the generated CRD: v1 is stored, and v1alpha1 is
-// served, deprecated, with the same schema, so the API server converts
-// between them without a webhook.
-func TestCRDVersions(t *testing.T) {
+func readCRD(t *testing.T) apiextensionsv1.CustomResourceDefinition {
+	t.Helper()
 	b, err := os.ReadFile("../../config/crd/failover.tako.id_sitefailovers.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -21,6 +19,29 @@ func TestCRDVersions(t *testing.T) {
 	if err := yaml.UnmarshalStrict(b, &crd); err != nil {
 		t.Fatal(err)
 	}
+	return crd
+}
+
+// RFC0003 Requirement 2: in every version, spec carries the CEL rule
+// self == oldSelf, so the API server refuses a change to a ledger's spec.
+func TestCRDSpecIsImmutable(t *testing.T) {
+	for _, v := range readCRD(t).Spec.Versions {
+		spec, ok := v.Schema.OpenAPIV3Schema.Properties["spec"]
+		found := false
+		for _, r := range spec.XValidations {
+			found = found || r.Rule == "self == oldSelf"
+		}
+		if !ok || !found {
+			t.Errorf("version %s: spec has no rule self == oldSelf: %+v", v.Name, spec.XValidations)
+		}
+	}
+}
+
+// TestCRDVersions checks the generated CRD: v1 is stored, and v1alpha1 is
+// served, deprecated, with the same schema, so the API server converts
+// between them without a webhook.
+func TestCRDVersions(t *testing.T) {
+	crd := readCRD(t)
 	if s := crd.Spec.Conversion; s != nil && s.Strategy != apiextensionsv1.NoneConverter {
 		t.Errorf("conversion strategy is %s, want None", s.Strategy)
 	}

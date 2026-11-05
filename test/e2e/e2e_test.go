@@ -811,3 +811,66 @@ func TestTakeOver(t *testing.T) {
 	}
 	assertPrimary(t, "b", "a")
 }
+
+// #35 row 19 (RFC0005 Requirement 8). A commit pushed after the run's
+// commit sets the Pooler's instances at site a, a field the run changed,
+// to another value. Once the operator accepts that head, the server-side
+// render and diff before release stops the run with GitDiffersFromLive,
+// before anything at site a is released. With Git fixed and its head
+// accepted, the run finishes. Site b is the primary before the run.
+func TestGitDiffersFromLive(t *testing.T) {
+	_, code := tack(t, []string{"TACK_FAULT=reconcile-git-a:before"}, "run", "-f", workload, "--to", "a", "--yes")
+	if code != exitFault {
+		t.Fatalf("exit %d, want the fault exit %d", code, exitFault)
+	}
+	run := runName(latestRun(t, "a"))
+	gitPull(t)
+	path := filepath.Join(gitDir, "clusters", "a", "pooler.yaml")
+	setInstances := func(from, to, msg string) string {
+		t.Helper()
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(b), "\n  instances: "+from+"\n") {
+			t.Fatalf("clusters/a/pooler.yaml does not set instances: %s:\n%s", from, b)
+		}
+		if err := os.WriteFile(path, []byte(strings.Replace(string(b), "\n  instances: "+from+"\n", "\n  instances: "+to+"\n", 1)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		gitCmd(t, gitDir, "commit", "-q", "-am", msg)
+		gitCmd(t, gitDir, "push", "-q", "origin", "HEAD:main")
+		return gitCmd(t, gitDir, "rev-parse", "HEAD")
+	}
+	wrong := setInstances("1", "2", "chore: two Pooler instances at site a")
+
+	out, code := tack(t, nil, "resume", run, "-f", workload, "--yes", "--accept-git-head", wrong)
+	if code != exitStopped || !strings.Contains(out, "GitDiffersFromLive") || !strings.Contains(out, "spec.instances") {
+		t.Fatalf("resume exit %d, want %d with GitDiffersFromLive naming spec.instances", code, exitStopped)
+	}
+	sf := latestRun(t, "a")
+	if state, reason := runStatus(sf); state != "Stopped" || reason != "GitDiffersFromLive" {
+		t.Errorf("run %s (%s), want Stopped (GitDiffersFromLive)", state, reason)
+	}
+	if got := stepState(sf, "verify-git-a"); got != "Failed" {
+		t.Errorf("verify-git-a is %q, want Failed", got)
+	}
+	for _, id := range []string{"release-a-cluster-pg-a", "release-a-pooler-pg-a-pooler-rw"} {
+		if got := stepState(sf, id); got != "Pending" {
+			t.Errorf("%s is %q, want Pending", id, got)
+		}
+	}
+	if ann := jsonpath(t, "a", "pooler", poolerName("a"), "{.metadata.annotations}"); !strings.Contains(ann, "failover.tako.id/held-by") {
+		t.Errorf("site a's Pooler is no longer held: %s", ann)
+	}
+	if got := jsonpath(t, "a", "pooler", poolerName("a"), "{.spec.instances}"); got != "1" {
+		t.Errorf("site a's Pooler has %s instances, want 1: Flux applied Git", got)
+	}
+
+	fixed := setInstances("2", "1", "fix: one Pooler instance at site a")
+	tackOK(t, "resume", run, "-f", workload, "--yes", "--accept-git-head", fixed)
+	assertPrimary(t, "a", "b")
+	if head := assertGitMatches(t, "a", "a", "b"); head != fixed {
+		t.Errorf("Git head %s, want %s", head, fixed)
+	}
+}

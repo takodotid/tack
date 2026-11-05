@@ -67,3 +67,31 @@ func TestParseGitURL(t *testing.T) {
 		}
 	}
 }
+
+// RFC0008 Requirement 2: each SiteService and member names a site of the
+// workload, and every site has a member.
+func TestParseRouting(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		routing string
+		err     string
+	}{
+		{name: "every site has a member", routing: `{services: [{site: a, namespace: apps, name: pg}], members: [{site: a, member: pg-a}, {site: b, member: pg-b}]}`},
+		{name: "a service at another site", routing: `{services: [{site: c, namespace: apps, name: pg}], members: [{site: a, member: pg-a}, {site: b, member: pg-b}]}`,
+			err: `spec.routing.strait.services[0].site "c" is not a site`},
+		{name: "a member at another site", routing: `{services: [{site: a, namespace: apps, name: pg}], members: [{site: a, member: pg-a}, {site: b, member: pg-b}, {site: c, member: pg-c}]}`,
+			err: `spec.routing.strait.members[2].site "c" is not a site`},
+		{name: "a site without a member", routing: `{services: [{site: a, namespace: apps, name: pg}], members: [{site: a, member: pg-a}]}`,
+			err: `spec.routing.strait.members has no member for site "b"`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Parse([]byte("apiVersion: failover.tako.id/v1\n" + workload + "  routing: {strait: " + tt.routing + "}\n"))
+			switch {
+			case tt.err == "" && err != nil:
+				t.Errorf("%v", err)
+			case tt.err != "" && (err == nil || !strings.Contains(err.Error(), tt.err)):
+				t.Errorf("got %v, want %q", err, tt.err)
+			}
+		})
+	}
+}

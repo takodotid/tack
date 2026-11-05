@@ -191,6 +191,21 @@ func TestPlanGolden(t *testing.T) {
 			args: []string{"plan", "-f", "testdata/workload.yaml", "--to", "a"},
 		},
 		{
+			// RFC0006 Requirement 6: without find, an optional removal
+			// without a mapping is left out of the commit and noted.
+			name:    "plan-planned-mapped",
+			objects: map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": testenv.Site("b", "a", 0)},
+			args:    []string{"plan", "-f", "testdata/workload-mapped.yaml", "--to", "b"},
+		},
+		{
+			// RFC0006 Requirement 6: a required field without a mapping
+			// fails the plan.
+			name:    "plan-planned-unmapped",
+			objects: map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": testenv.Site("b", "a", 0)},
+			args:    []string{"plan", "-f", "testdata/workload-unmapped.yaml", "--to", "b"},
+			code:    ExitError,
+		},
+		{
 			name:    "plan-bad-mode",
 			objects: map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": testenv.Site("b", "a", 0)},
 			args:    []string{"plan", "-f", "testdata/workload.yaml", "--to", "b", "--mode", "fast"},
@@ -332,8 +347,9 @@ func TestRunNeedsConfirmation(t *testing.T) {
 	if code != ExitUsage || !strings.Contains(out, "pass --yes once a human approved this run") {
 		t.Fatalf("exit %d, want %d with a refusal:\n%s", code, ExitUsage, out)
 	}
-	if len(f.flux.Held) != 0 {
-		t.Fatal("run held objects without confirmation")
+	// RFC0009 Requirement 3: nothing changed, the ledger included.
+	if f.clients.Writes != 0 || len(f.flux.Calls) != 0 || len(f.git.Commits) != 0 {
+		t.Errorf("run changed something without confirmation: %d cluster writes, Flux %v, %d commits", f.clients.Writes, f.flux.Calls, len(f.git.Commits))
 	}
 }
 
@@ -669,6 +685,154 @@ func TestStatusHidesCapturedValues(t *testing.T) {
 	for _, want := range []string{"Message: step hold-a-cluster-pg-a: wanted $(demotionToken)\n", `want Equals "$(demotionToken)"`, "Captured: demotionToken\n"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+// #35 row 22 (RFC0009 Requirement 4). tack resume asks like tack run.
+// Without a terminal and without --yes it refuses, and a wrong name
+// changes nothing: no cluster write, no Flux call, the ledger as it was.
+func TestResumeNeedsConfirmation(t *testing.T) {
+	t.Cleanup(func() { isTerminal, stdin = stdinIsTerminal, os.Stdin })
+	for _, tt := range []struct {
+		name     string
+		terminal bool
+		typed    string
+		code     int
+		want     string
+	}{
+		{name: "no terminal", code: ExitUsage, want: "no terminal to confirm on: pass --yes once a human approved this run"},
+		{name: "wrong name", terminal: true, typed: "yes\n", code: ExitError, want: "not confirmed; nothing was changed"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": append(testenv.Site("b", "a", 0), stoppedRun(t, "pg-main-earlier"))})
+			store := &ledger.Store{Client: f.clients.Sites["b"], Namespace: "tack-system"}
+			before, err := store.Get(context.Background(), "pg-main-earlier")
+			if err != nil {
+				t.Fatal(err)
+			}
+			isTerminal = func() bool { return tt.terminal }
+			stdin = strings.NewReader(tt.typed)
+			out, code := run(t, f, "resume", "pg-main-earlier", "-f", "testdata/workload.yaml")
+			if code != tt.code || !strings.Contains(out, tt.want) {
+				t.Fatalf("exit %d, want %d with %q:\n%s", code, tt.code, tt.want, out)
+			}
+			if f.clients.Writes != 0 || len(f.flux.Calls) != 0 {
+				t.Errorf("%d cluster writes, Flux %v", f.clients.Writes, f.flux.Calls)
+			}
+			after, err := store.Get(context.Background(), "pg-main-earlier")
+			if err != nil || after.ResourceVersion != before.ResourceVersion {
+				t.Errorf("the ledger was written: %v, resourceVersion %s, then %s", err, before.ResourceVersion, after.ResourceVersion)
+			}
+		})
+	}
+}
+
+// #35 row 52 (RFC0003 Requirement 8, RFC0009 Requirement 5). tack run
+// refuses while another run of the workload is not Succeeded, except a run
+// another run took over, by its status or by the other run's spec, and the
+// run it names with --take-over, which it records.
+func TestRunSearchForOtherRuns(t *testing.T) {
+	stopped := func(name string) *failoverv1.SiteFailover { return stoppedRun(t, name) }
+	for _, tt := range []struct {
+		name     string
+		runs     []*failoverv1.SiteFailover
+		takeOver string
+		code     int
+		want     string
+	}{
+		{name: "a Succeeded run", runs: []*failoverv1.SiteFailover{func() *failoverv1.SiteFailover {
+			r := stopped("pg-main-earlier")
+			r.Status.State, r.Status.Reason = failoverv1.RunSucceeded, ""
+			return r
+		}()}, code: ExitStopped},
+		{name: "a run taken over, by its status", runs: []*failoverv1.SiteFailover{func() *failoverv1.SiteFailover {
+			r := stopped("pg-main-earlier")
+			r.Status.SupersededBy = "pg-main-later"
+			return r
+		}()}, code: ExitStopped},
+		{name: "a run taken over, by the other run's spec", runs: []*failoverv1.SiteFailover{stopped("pg-main-earlier"), func() *failoverv1.SiteFailover {
+			r := stopped("pg-main-later")
+			r.Spec.TakeOver = "pg-main-earlier"
+			r.Status.State, r.Status.Reason = failoverv1.RunSucceeded, ""
+			return r
+		}()}, code: ExitStopped},
+		{name: "a Stopped run", runs: []*failoverv1.SiteFailover{stopped("pg-main-earlier")}, code: ExitError,
+			want: "run pg-main-earlier at site b is Stopped: resume it (tack resume pg-main-earlier) or take it over (--take-over pg-main-earlier)"},
+		{name: "a Stopped run, taken over", runs: []*failoverv1.SiteFailover{stopped("pg-main-earlier")}, takeOver: "pg-main-earlier", code: ExitStopped},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			objs := testenv.Site("b", "a", 0)
+			for _, r := range tt.runs {
+				objs = append(objs, r)
+			}
+			f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": objs})
+			f.flux.Fail["Hold"] = errors.New("stop at the first hold")
+			args := []string{"run", "-f", "testdata/workload.yaml", "--to", "b", "--yes"}
+			if tt.takeOver != "" {
+				args = append(args, "--take-over", tt.takeOver)
+			}
+			out, code := run(t, f, args...)
+			if code != tt.code || !strings.Contains(out, tt.want) {
+				t.Fatalf("exit %d, want %d with %q:\n%s", code, tt.code, tt.want, out)
+			}
+			if code != ExitStopped {
+				if len(f.flux.Calls) > 0 {
+					t.Errorf("the refused run called Flux: %v", f.flux.Calls)
+				}
+				return
+			}
+			store := &ledger.Store{Client: f.clients.Sites["b"], Namespace: "tack-system"}
+			sf, err := store.Get(context.Background(), "pg-main-20261027-101500")
+			if err != nil || sf.Spec.TakeOver != tt.takeOver {
+				t.Errorf("the new run: %v, spec.takeOver %q, want %q", err, sf.Spec.TakeOver, tt.takeOver)
+			}
+		})
+	}
+}
+
+// #35 row 54 (RFC0003 Requirement 6). The Workload file changes after a run
+// stopped: another Pooler size at b and another Git URL. tack resume with
+// the new file finds the run, then runs the ledger's plan with the
+// ledger's Workload: it does not plan again.
+func TestResumeIgnoresChangedWorkloadFile(t *testing.T) {
+	f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": testenv.Site("b", "a", 0)})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go (&testenv.Operator{Clients: f.clients, Sites: []string{"a", "b"}}).Run(ctx)
+	f.flux.Fail["Reconcile"] = errors.New("stop before the switch")
+	if out, code := run(t, f, "run", "-f", "testdata/workload.yaml", "--to", "b", "--yes"); code != ExitStopped {
+		t.Fatalf("run: exit %d, want %d:\n%s", code, ExitStopped, out)
+	}
+	delete(f.flux.Fail, "Reconcile")
+
+	b, err := os.ReadFile("testdata/workload.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := strings.Replace(string(b), "name: pg-b-pooler-rw, instances: 2", "name: pg-b-pooler-rw, instances: 5", 1)
+	changed = strings.Replace(changed, "https://git.example.com/gitops.git", "https://other.example.com/gitops.git", 1)
+	file := filepath.Join(t.TempDir(), "workload.yaml")
+	if err := os.WriteFile(file, []byte(changed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, code := run(t, f, "resume", "pg-main-20261027-101500", "-f", file, "--yes")
+	if code != ExitOK || !strings.Contains(out, "Git: https://git.example.com/gitops.git, branch main") {
+		t.Fatalf("resume: exit %d, want %d with the ledger's Git URL:\n%s", code, ExitOK, out)
+	}
+	p := testenv.Pooler("b", 0)
+	if err := f.clients.Sites["b"].Get(ctx, client.ObjectKeyFromObject(p), p); err != nil {
+		t.Fatal(err)
+	}
+	if n, _, _ := unstructured.NestedInt64(p.Object, "spec", "instances"); n != 2 {
+		t.Errorf("Pooler pg-b-pooler-rw has %d instances, want the ledger's 2", n)
+	}
+	if len(f.git.Commits) != 1 {
+		t.Fatalf("%d commits, want 1", len(f.git.Commits))
+	}
+	for _, c := range f.git.Commits[0].Changes {
+		if c.Site == "b" && c.Object.Kind == "Pooler" && (c.Value == nil || *c.Value != "2") {
+			t.Errorf("the commit sets Pooler instances at b to %v, want the ledger's 2", c.Value)
 		}
 	}
 }
