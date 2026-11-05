@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -110,19 +111,52 @@ func (c *Clients) counted(cl client.Client) client.Client {
 	})
 }
 
-// NewClient returns a fake client that knows the GVKs.
+// User is the user that a fake API server gives the operator's
+// credentials, in a SelfSubjectReview.
+const User = "operator@example.com"
+
+// NewClient returns a fake client that knows the GVKs, takes Events, and
+// answers a SelfSubjectReview with User, as an API server does, without
+// storing it.
 func NewClient(objs ...client.Object) client.Client {
 	mapper := meta.NewDefaultRESTMapper(nil)
 	for _, gvk := range GVKs {
 		mapper.Add(gvk, meta.RESTScopeNamespace)
 	}
 	mapper.Add(corev1.SchemeGroupVersion.WithKind("Namespace"), meta.RESTScopeRoot)
+	mapper.Add(corev1.SchemeGroupVersion.WithKind("Event"), meta.RESTScopeNamespace)
+	mapper.Add(authenticationv1.SchemeGroupVersion.WithKind("SelfSubjectReview"), meta.RESTScopeRoot)
 	return fake.NewClientBuilder().
 		WithScheme(kube.Scheme).
 		WithRESTMapper(mapper).
 		WithObjects(objs...).
 		WithStatusSubresource(&failoverv1.SiteFailover{}).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Create: func(ctx context.Context, c client.WithWatch, o client.Object, opts ...client.CreateOption) error {
+				if r, ok := o.(*authenticationv1.SelfSubjectReview); ok {
+					r.Status.UserInfo.Username = User
+					return nil
+				}
+				return c.Create(ctx, o, opts...)
+			},
+		}).
 		Build()
+}
+
+// Events returns the Events recorded on the ledger run at the client c,
+// each as "Type Reason: Message", in no particular order.
+func Events(c client.Client, namespace, run string) []string {
+	var l corev1.EventList
+	if err := c.List(context.Background(), &l, client.InNamespace(namespace)); err != nil {
+		return []string{err.Error()}
+	}
+	var out []string
+	for _, e := range l.Items {
+		if e.InvolvedObject.Kind == "SiteFailover" && e.InvolvedObject.Name == run {
+			out = append(out, e.Type+" "+e.Reason+": "+e.Message)
+		}
+	}
+	return out
 }
 
 // SetSite makes a site's client c, such as one for another cluster.

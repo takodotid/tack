@@ -168,6 +168,7 @@ func TestOutputRedactsOlderLedgers(t *testing.T) {
 	sf.Status.Message = "step hold-a-cluster-pg-a: fetch " + url + ": 403"
 	sf.Status.Steps[0].Message = "fetch " + url + ": 403"
 	sf.Status.Abandoned = &failoverv1.Abandonment{At: metav1.NewTime(fixedNow), Reason: "the search failed: Get " + url + ": EOF"}
+	sf.Status.History = []failoverv1.HistoryEntry{{Time: metav1.NewTime(fixedNow), State: failoverv1.HistoryAbandoned, Message: "the search failed: Get " + url + ": EOF"}}
 	for _, args := range [][]string{
 		{"status", "pg-main-earlier"},
 		{"status", "pg-main-earlier", "-o", "yaml"},

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/engine"
 	"github.com/takodotid/tack/internal/kube"
@@ -91,11 +93,17 @@ func printClusters(w io.Writer, sf *failoverv1.SiteFailover, c kube.Clients) {
 	fmt.Fprintf(w, "Git: %s, branch %s\n", redact.Text(spec.Git.URL), spec.Git.Branch)
 }
 
-// printSteps writes the steps by phase, with their state when withState.
+// printSteps writes the steps by phase, with their state when withState:
+// then each phase's and each step's start and end, and each step's
+// attempts and last result ([RFC#0009] Requirement 28).
 func printSteps(w io.Writer, sf *failoverv1.SiteFailover, withState bool) {
 	state := map[string]failoverv1.StepStatus{}
 	for _, st := range sf.Status.Steps {
 		state[st.ID] = st
+	}
+	phases := map[failoverv1.Phase]failoverv1.PhaseStatus{}
+	for _, p := range sf.Status.Phases {
+		phases[p.Name] = p
 	}
 	n := 0
 	for _, phase := range failoverv1.Phases {
@@ -105,7 +113,13 @@ func printSteps(w io.Writer, sf *failoverv1.SiteFailover, withState bool) {
 				continue
 			}
 			if !header {
-				fmt.Fprintf(w, "%s\n", phase)
+				fmt.Fprintf(w, "%s", phase)
+				if p, ok := phases[phase]; withState && ok {
+					if t := times(p.StartedAt, p.FinishedAt); t != "" {
+						fmt.Fprintf(w, "  (%s)", t)
+					}
+				}
+				fmt.Fprintln(w)
 				header = true
 			}
 			n++
@@ -128,7 +142,11 @@ func printSteps(w io.Writer, sf *failoverv1.SiteFailover, withState bool) {
 				fmt.Fprintf(w, "        %s\n", line)
 			}
 			if withState {
-				if st := state[s.ID]; st.Message != "" {
+				st := state[s.ID]
+				if t := times(st.StartedAt, st.FinishedAt); t != "" || st.Attempts > 0 {
+					fmt.Fprintf(w, "        %s\n", strings.TrimPrefix(t+fmt.Sprintf(", attempts %d", st.Attempts), ", "))
+				}
+				if st.Message != "" {
 					fmt.Fprintf(w, "        result: %s\n", engine.Clean(sf.Status.Captured, st.Message))
 				}
 			}
@@ -288,6 +306,54 @@ func printStatus(w io.Writer, sf *failoverv1.SiteFailover) {
 			fmt.Fprintf(w, "  site %s: %s: %s\n", f.Site, f.Action, f.Reason)
 		}
 	}
+	printHistory(w, sf)
+}
+
+// printHistory writes the run's history, oldest first: per entry, its
+// time, state and reason, the version, user and flags of the tack that
+// recorded it, then its message.
+func printHistory(w io.Writer, sf *failoverv1.SiteFailover) {
+	st := sf.Status
+	if len(st.History) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "\nHistory:")
+	for i, h := range st.History {
+		if i == 1 && st.HistoryDropped > 0 {
+			fmt.Fprintf(w, "  ... %d entries dropped to keep the history within %d entries\n", st.HistoryDropped, failoverv1.MaxHistory)
+		}
+		state := string(h.State)
+		if h.Reason != "" {
+			state += " (" + h.Reason + ")"
+		}
+		user := h.User
+		if user == "" {
+			user = "unknown"
+		}
+		fmt.Fprintf(w, "  %s  %s  tack %s, user %s", at(h.Time), state, orNone(h.Version), user)
+		if len(h.Flags) > 0 {
+			fmt.Fprintf(w, ", %s", strings.Join(h.Flags, " "))
+		}
+		fmt.Fprintln(w)
+		if h.Message != "" {
+			fmt.Fprintf(w, "      %s\n", engine.Clean(st.Captured, h.Message))
+		}
+	}
+}
+
+// at formats a time of the ledger in UTC.
+func at(t metav1.Time) string { return t.UTC().Format("2006-01-02 15:04:05Z") }
+
+// times says when something started and finished, as far as recorded.
+func times(started, finished *metav1.Time) string {
+	var parts []string
+	if started != nil {
+		parts = append(parts, "started "+at(*started))
+	}
+	if finished != nil {
+		parts = append(parts, "finished "+at(*finished))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func printRuns(w io.Writer, runs []foundRun) {

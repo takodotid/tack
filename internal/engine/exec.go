@@ -528,15 +528,21 @@ func Clean(captured map[string]string, msg string) string {
 	return HideCaptured(captured, redact.Text(msg))
 }
 
-// cleanStatus cleans every message of a status: the run's, each step's and
-// the reason it was abandoned.
-func cleanStatus(st *failoverv1.SiteFailoverStatus) {
+// CleanStatus cleans every message of a status: the run's, each step's,
+// the reason it was abandoned, and each history entry's, which it then
+// cuts to MaxHistoryMessage bytes ([RFC#0003] Requirement 22). Every
+// ledger write applies it.
+func CleanStatus(st *failoverv1.SiteFailoverStatus) {
 	st.Message = Clean(st.Captured, st.Message)
 	for i := range st.Steps {
 		st.Steps[i].Message = Clean(st.Captured, st.Steps[i].Message)
 	}
 	if a := st.Abandoned; a != nil {
 		a.Reason = Clean(st.Captured, a.Reason)
+	}
+	for i := range st.History {
+		h := &st.History[i]
+		h.Message = cut(Clean(st.Captured, h.Message), failoverv1.MaxHistoryMessage)
 	}
 }
 

@@ -1,5 +1,5 @@
-  retry     site c did not answer check 1 of 3 (site c is unreachable: connection refused); next check in 1ms
-  retry     site c did not answer check 2 of 3 (site c is unreachable: connection refused); next check in 1ms
+2026-10-27T10:15:00Z   retry     site c did not answer check 1 of 3 (site c is unreachable: connection refused); next check in 1ms
+2026-10-27T10:15:00Z   retry     site c did not answer check 2 of 3 (site c is unreachable: connection refused); next check in 1ms
 Plan for workload pg-main: Planned, site a to site b
 Ledger: SiteFailover tack-system/pg-main-20261027-101500 at site b
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"testing"
 
@@ -93,8 +94,14 @@ func TestResumeSucceededRunRunsWithItsFirstStep(t *testing.T) {
 	if sf := f.ledger("b"); sf.Status.State != failoverv1.RunSucceeded {
 		t.Errorf("the run is %s after the process died before its first step", sf.Status.State)
 	}
-	sf, err := f.resume("b", engine.Options{})
+	sf, err := f.resume("b", engine.Options{Fence: []string{"a"}})
 	if err != nil || sf.Status.State != failoverv1.RunSucceeded || stepState(sf, "fence-a") != failoverv1.StepSucceeded {
 		t.Fatalf("resume: %v %s %s, fence-a %s", err, sf.Status.State, sf.Status.Message, stepState(sf, "fence-a"))
+	}
+	// RFC0003 Requirement 22: the write that records the first step
+	// Running records the resume in the history; the process that died
+	// before it recorded nothing.
+	if got, want := entries(sf), []string{"Running", "Succeeded", "Running --fence=a", "Succeeded --fence=a"}; !slices.Equal(got, want) {
+		t.Errorf("history %v, want %v", got, want)
 	}
 }

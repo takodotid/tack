@@ -127,6 +127,18 @@ type Ledger interface {
 	List(ctx context.Context) ([]failoverv1.SiteFailover, error)
 }
 
+// Recorder is a Ledger that also records Kubernetes Events on a ledger,
+// and tells who runs this process at the ledger's site ([RFC#0003]
+// Requirement 23). ledger.Store is one.
+type Recorder interface {
+	// Event records an Event on the ledger sf: a Warning when warning is
+	// set, else Normal.
+	Event(ctx context.Context, sf *failoverv1.SiteFailover, warning bool, reason, message string, at time.Time) error
+	// User returns the user name that the site's API server gives this
+	// process's credentials.
+	User(ctx context.Context) (string, error)
+}
+
 // Env is what a run needs.
 type Env struct {
 	Clients kube.Clients
@@ -153,6 +165,9 @@ type Env struct {
 	// ReachWaits are the pauses between the checks of a site's API before
 	// it counts as unreachable. Nil uses DefaultReachWaits.
 	ReachWaits []time.Duration
+
+	// proc is what this process records of itself in a ledger's history.
+	proc process
 }
 
 func (e *Env) now() time.Time {

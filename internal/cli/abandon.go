@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
+	"github.com/takodotid/tack/internal/engine"
 	"github.com/takodotid/tack/internal/version"
 )
 
@@ -53,7 +54,8 @@ func newAbandon(o *options) *cobra.Command {
 			if reason == "" {
 				return usagef("--reason must not be empty")
 			}
-			runs, err := l.find(ctx, o, args[0], out)
+			progress := o.progress(out)
+			runs, err := l.find(ctx, o, args[0], progress)
 			if err != nil {
 				return err
 			}
@@ -62,7 +64,7 @@ func newAbandon(o *options) *cobra.Command {
 				return err
 			}
 			spec := &r.sf.Spec.Workload.Spec
-			env, closeEnv, err := o.factory.Env(ctx, o.kubeconfig, spec, r.sf.Spec.To, out)
+			env, closeEnv, err := o.factory.Env(ctx, o.kubeconfig, spec, r.sf.Spec.To, progress)
 			if err != nil {
 				return err
 			}
@@ -93,6 +95,14 @@ func newAbandon(o *options) *cobra.Command {
 				return err
 			}
 			sf.Status.Abandoned = &failoverv1.Abandonment{At: metav1.NewTime(o.now()), Reason: reason}
+			var flags []string
+			if yes {
+				flags = []string{"--yes"}
+			}
+			entry := env.Entry(ctx, sf, failoverv1.HistoryAbandoned, flags)
+			entry.Reason, entry.Message = "", reason
+			engine.AppendHistory(&sf.Status, entry)
+			engine.CleanStatus(&sf.Status)
 			if err := env.Ledger.UpdateStatus(ctx, sf); err != nil {
 				if apierrors.IsConflict(err) {
 					return fmt.Errorf("the ledger of run %s changed since it was read, so another tack process may be running it. Nothing was changed: check, then abandon it again: %w", sf.Name, err)
@@ -105,6 +115,9 @@ func newAbandon(o *options) *cobra.Command {
 			}
 			if back.Status.Abandoned == nil {
 				return errors.New("the ledger's site dropped status.abandoned, so its CRD is older than this tack: apply this version's CRD there, then abandon the run again")
+			}
+			if rec, ok := env.Ledger.(engine.Recorder); ok && len(back.Status.History) > 0 {
+				env.EventOn(ctx, rec, back, true, "Run"+string(failoverv1.HistoryAbandoned), engine.EntryText(back.Status.History[len(back.Status.History)-1]))
 			}
 			fmt.Fprintf(out, "run %s abandoned: tack resume refuses it, and a new run no longer waits for it\n", sf.Name)
 			return nil

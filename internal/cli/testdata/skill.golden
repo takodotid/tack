@@ -241,8 +241,10 @@ Show runs and their steps from the ledger.
 
 ```text
 Status shows runs from their ledgers. Without RUN it lists the runs of the
-workload at every reachable site. With RUN it shows that run's phases, steps,
-held objects, Git commits, captured values (by name only) and follow-ups.
+workload at every reachable site. With RUN it shows that run's phases and
+steps with their times and attempts, held objects, Git commits, captured
+values (by name only), follow-ups, and the history of the run's state: who
+started, stopped and resumed it, when, with which tack and flags.
 ```
 
 Usage: `tack status [RUN] (-f WORKLOAD | --context CONTEXT) [flags]`

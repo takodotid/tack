@@ -3,11 +3,16 @@ package ledger
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
+	"time"
 
+	authenticationv1 "k8s.io/api/authentication/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
@@ -69,6 +74,45 @@ func (s *Store) List(ctx context.Context) ([]failoverv1.SiteFailover, error) {
 		return l.Items[j].CreationTimestamp.Before(&l.Items[i].CreationTimestamp)
 	})
 	return l.Items, nil
+}
+
+// EventSource is the component that the ledger's Events name.
+const EventSource = "tack"
+
+// Event implements engine.Recorder: it records a Kubernetes Event on the
+// ledger sf, at time at, with a name the API server generates. A Warning
+// when warning is set, else Normal.
+func (s *Store) Event(ctx context.Context, sf *failoverv1.SiteFailover, warning bool, reason, message string, at time.Time) error {
+	t := metav1.NewTime(at)
+	typ := corev1.EventTypeNormal
+	if warning {
+		typ = corev1.EventTypeWarning
+	}
+	ev := &corev1.Event{
+		ObjectMeta: metav1.ObjectMeta{Namespace: sf.Namespace, GenerateName: sf.Name + "."},
+		InvolvedObject: corev1.ObjectReference{
+			APIVersion: failoverv1.GroupVersion.String(), Kind: "SiteFailover",
+			Namespace: sf.Namespace, Name: sf.Name, UID: sf.UID,
+		},
+		Reason: reason, Message: message, Type: typ,
+		FirstTimestamp: t, LastTimestamp: t, Count: 1,
+		Source: corev1.EventSource{Component: EventSource},
+	}
+	return s.Client.Create(ctx, ev)
+}
+
+// User implements engine.Recorder: the user name that the site's API
+// server gives the client's credentials, from a SelfSubjectReview. The
+// review is not stored.
+func (s *Store) User(ctx context.Context) (string, error) {
+	r := &authenticationv1.SelfSubjectReview{}
+	if err := s.Client.Create(ctx, r); err != nil {
+		return "", err
+	}
+	if r.Status.UserInfo.Username == "" {
+		return "", errors.New("its SelfSubjectReview names no user")
+	}
+	return r.Status.UserInfo.Username, nil
 }
 
 // served explains an error from a cluster whose CRD does not serve this
