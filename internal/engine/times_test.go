@@ -108,3 +108,40 @@ func TestDeferredStepsFinishTheirPhases(t *testing.T) {
 		t.Errorf("hold-b-cluster-pg-b: %s, finished %s, %d attempts", st.State, at(st.FinishedAt), st.Attempts)
 	}
 }
+
+// PR #42's finding (RFC0003 Requirement 12). v1.2.0 ended a phase only
+// after a step of it succeeded, so a site-loss run whose lost site's steps
+// came last in a phase left that phase unfinished. The ledger below is
+// such a run, as v1.2.0 wrote it: b lost, Hold, PromoteToGitOps and
+// Release unfinished. A resume while b stays down ends them.
+func TestResumeEndsPhasesLeftUnfinished(t *testing.T) {
+	f := newFixture(t)
+	f.clients.SetDown("b", true)
+	sf := loadLedger(t, "testdata/ledgers/v1.2.0/site-loss-lost-site-last.yaml")
+	sf.Status.State = failoverv1.RunSucceeded
+	unfinished := 0
+	for _, p := range sf.Status.Phases {
+		if p.FinishedAt == nil {
+			unfinished++
+		}
+	}
+	if unfinished != 3 {
+		t.Fatalf("the v1.2.0 ledger has %d unfinished phases, want 3", unfinished)
+	}
+	ledger := f.env("a").Ledger
+	if err := ledger.Create(context.Background(), sf); err != nil {
+		t.Fatal(err)
+	}
+	if err := ledger.UpdateStatus(context.Background(), sf); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.resume("a", engine.Options{})
+	if err != nil || got.Status.State != failoverv1.RunSucceeded {
+		t.Fatalf("err %v, %s: %s", err, got.Status.State, got.Status.Message)
+	}
+	for _, p := range got.Status.Phases {
+		if p.FinishedAt == nil {
+			t.Errorf("phase %s is unfinished", p.Name)
+		}
+	}
+}

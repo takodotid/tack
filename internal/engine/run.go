@@ -985,6 +985,11 @@ func (r *runner) finish(ctx context.Context) error {
 		}
 	}
 	now := metav1.NewTime(r.now())
+	// A ledger of v1.2.0 ended a phase only after a step of it succeeded,
+	// so a phase whose last steps were deferred stayed unfinished (PR #42).
+	for _, p := range r.sf.Status.Phases {
+		r.endPhase(p.Name, r.lastFinish(p.Name, now))
+	}
 	r.sf.Status.State = failoverv1.RunSucceeded
 	r.sf.Status.Reason = ""
 	r.sf.Status.Message = "every step ran"
@@ -1051,6 +1056,28 @@ func (r *runner) startPhase(p failoverv1.Phase, now metav1.Time) {
 		}
 	}
 	r.sf.Status.Phases = append(r.sf.Status.Phases, failoverv1.PhaseStatus{Name: p, StartedAt: &now})
+}
+
+// lastFinish returns when the last step of a phase finished, when each of
+// its steps records it; else now.
+func (r *runner) lastFinish(p failoverv1.Phase, now metav1.Time) metav1.Time {
+	var last metav1.Time
+	for _, s := range r.sf.Spec.Steps {
+		if s.Phase != p {
+			continue
+		}
+		st := r.stepStatus(s.ID)
+		if st.FinishedAt == nil {
+			return now
+		}
+		if st.FinishedAt.After(last.Time) {
+			last = *st.FinishedAt
+		}
+	}
+	if last.IsZero() {
+		return now
+	}
+	return last
 }
 
 // endPhase records a phase's end once each of its steps is Succeeded or
