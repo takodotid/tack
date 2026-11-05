@@ -12,7 +12,7 @@
 | `kubectl --context site-b -n tack-system get sfo` | the ledgers at one site, with workload, mode, from, to, state, reason and phase |
 | `kubectl --context site-b -n tack-system describe sfo RUN` | also the ledger's Events: each step's start and end, and each change of the run's state, for as long as the API server keeps Events (1 h by default) |
 
-Every `tack` command starts each progress line, such as a step or a retried check, with its time in UTC (`2026-10-27T10:15:00Z`), so a terminal's log lines up with the ledger and the API servers' audit logs ([RFC#0009](../rfcs/RFC0009.md#progress-and-status), Requirement 27). The history in `status.history` keeps at most 100 entries: the first, and the newest ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 22).
+Every `tack` command starts each progress line, such as a step or a retried check, with its time in UTC (`2026-10-27T10:15:00Z`), so a terminal's log lines up with the ledger and the API servers' audit logs ([RFC#0009](../rfcs/RFC0009.md#progress-and-status), Requirement 27). A read checks all its sites at once; the lines of its checks come grouped by site, in the order of the Workload's sites, each with the time it was printed, so a later site's lines can carry earlier times ([RFC#0007](../rfcs/RFC0007.md#requirements), Requirement 10). The credential plugins of the sites' contexts start at once too: when one prompts on the terminal, such as an OIDC login, log in to each context first, such as with `kubectl --context CTX get --raw /readyz` for each site ([RFC#0007](../rfcs/RFC0007.md#limitations)). The history in `status.history` keeps at most 100 entries: the first, and the newest ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 22).
 
 A run's state is `Running`, `Waiting`, `Stopped` or `Succeeded`; each step's state is `Pending`, `Running`, `Succeeded`, `Failed` or `Deferred` ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirements 9 and 11). A run left `Running` by a process that ended, such as a killed terminal, goes on with `tack resume`. A run shown as `NotStarted` never recorded its start: its process ended between creating the ledger and its first write, so none of its steps ran. It cannot resume; plan again and start a new run with `--take-over RUN`.
 
@@ -102,6 +102,38 @@ When the lost site answers again, `tack resume` runs its deferred steps: hold, t
 ## After a site loss
 
 The old primary may hold writes the new one lacks, and cannot follow it. Rebuild it with [docs/runbooks/rebuild-old-primary.md](runbooks/rebuild-old-primary.md). Until it is rebuilt, `tack plan` refuses a planned switchover back to it.
+
+## Old ledgers
+
+Tack never deletes a ledger. Each search for runs reads every ledger of the workload at each site that answers, in pages of 100 ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 26). `tack plan` and `tack status -f` search once, `tack resume` three times, `tack run` four times. The cost grows with the number of runs.
+
+| Measured for #35 row 47 | Size |
+|---|---|
+| A ledger as a planned run on 2 sites leaves it | 21 KB of JSON |
+| The same on 10 sites | 86 KB |
+| A ledger with a full history: 100 entries of 1024 bytes | 138 KB on 2 sites, 204 KB on 10 |
+| A search at one site with 1,000 ledgers of 13.5 KB | 13.5 MB, in 10 answers of 1.35 MB |
+| The list of `tack status -f` once its search is done, for 10,000 runs | 28 ms |
+
+Delete old ledgers by hand when their number slows the searches. Delete only what these rules allow:
+
+| Rule | Why |
+|---|---|
+| Every site of the workload answers, and every run of the workload at every site is finished: `Succeeded` with no `Deferred` step, `Abandoned` or `TakenOver`. | Deleting a newer run lets an older unfinished run resume on a plan that no longer fits the sites ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 18). |
+| Delete only a `Succeeded` run with no `Deferred` step. Keep `Abandoned` and `TakenOver` runs. | They record holds that may be left in the cluster, and the take-over that ended them ([runbooks/abandon-run.md](runbooks/abandon-run.md), step 6). A `TakenOver` run whose mark did not land counts as ended only through the spec of the run that took it over. |
+| Keep the newest run of the workload. | It records the last switch. |
+| Keep a run with a follow-up `Rebuild` until the site's member was created again after the run started. | `tack plan` refuses a planned switchover to that member while such a run says it diverged ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 14). Deleting the ledger lifts the refusal. |
+| Delete by name, one run at a time, never by label selector or `--all`. | A selector also matches the runs these rules keep. |
+
+```sh
+# At every site: every run of the workload, and its state
+kubectl --context "$ctx" -n tack-system get sfo -l failover.tako.id/workload=pg-main
+# One run: Succeeded, no Deferred step, no follow-up Rebuild
+tack status RUN -f workload.yaml
+kubectl --context "$ctx" -n tack-system delete sfo RUN
+```
+
+Deleting needs `delete` on `sitefailovers`, which the permissions table and the chart's roles do not grant: Tack itself never deletes.
 
 ## Permissions
 

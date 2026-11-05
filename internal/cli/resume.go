@@ -52,7 +52,7 @@ func (l *ledgerFlags) find(ctx context.Context, o *options, name string, progres
 		if err != nil {
 			return nil, err
 		}
-		checks := &engine.SiteChecks{Clients: o.factory.Clients(o.kubeconfig, kube.Contexts(&w.Spec)), Waits: o.reachWaits, Out: progress}
+		checks := &engine.SiteChecks{Clients: o.factory.Clients(o.kubeconfig, kube.Contexts(&w.Spec)), Waits: o.reachWaits, Out: progress, Now: o.now}
 		if name != "" {
 			checks.Once = func(string) bool { return true }
 			runs, err := findRuns(ctx, checks, &w.Spec, w.Name)
@@ -85,10 +85,13 @@ func (l *ledgerFlags) find(ctx context.Context, o *options, name string, progres
 	return nil, usagef("pass --file or --context")
 }
 
-// findRuns lists a workload's runs at every site that answers c. A site
-// that gives no answer is skipped; any other error of its check is
-// returned, so a refused credential never hides a site's runs.
+// findRuns lists a workload's runs at every site that answers c, in the
+// order of the Workload's sites. A site that gives no answer is skipped;
+// any other error of its check is returned, so a refused credential never
+// hides a site's runs.
 func findRuns(ctx context.Context, c kube.Clients, spec *failoverv1.WorkloadSpec, workload string) ([]foundRun, error) {
+	// The checks of every site run at once ([RFC#0007] Requirement 10).
+	defer engine.CheckAhead(ctx, c, spec)()
 	var out []foundRun
 	for _, s := range spec.Sites {
 		if err := c.Reachable(ctx, s.Name); err != nil {

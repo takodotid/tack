@@ -566,7 +566,7 @@ func (r *runner) switchStarted() bool {
 // before its steps and the read of the other sites decide on it, with or
 // without --fence ([RFC#0007] Requirements 6 and 9).
 func (r *runner) recheck(ctx context.Context) error {
-	topo, err := r.Driver.Discover(ctx, &r.sf.Spec.Workload.Spec, runChecks{r: r})
+	topo, err := r.discover(ctx, &r.sf.Spec.Workload.Spec, runChecks{r: r})
 	if err != nil {
 		return fmt.Errorf("the read before the first Failover step: %w", err)
 	}
@@ -624,7 +624,7 @@ func (r *runner) gate(ctx context.Context, site string) error {
 	}
 	checks := r.SiteChecks(r.sf.Spec.Mode, r.sf.Spec.To)
 	checks.Once = func(s string) bool { return s != site }
-	topo, err := r.Driver.Discover(ctx, &r.sf.Spec.Workload.Spec, checks)
+	topo, err := r.discover(ctx, &r.sf.Spec.Workload.Spec, checks)
 	if note := checks.Note(site); note != "" {
 		r.note(site, "the read before its steps: "+note)
 	}
@@ -733,7 +733,7 @@ func (r *runner) readOthers(ctx context.Context, i int) error {
 	if i == p {
 		read = "the read before the promotion"
 	}
-	topo, err := r.Driver.Discover(ctx, &r.sf.Spec.Workload.Spec, runChecks{r: r, skip: to})
+	topo, err := r.discover(ctx, &r.sf.Spec.Workload.Spec, runChecks{r: r, skip: to})
 	if err != nil {
 		return fmt.Errorf("%s: %w", read, err)
 	}
@@ -874,6 +874,13 @@ func (c runChecks) Reachable(ctx context.Context, site string) error {
 		return err
 	}
 	return c.r.checks.Reachable(ctx, site)
+}
+
+// ahead checks the sites at once through c ([RFC#0007] Requirement 10):
+// the site c skips and a site that gave no answer in this process get no
+// check, as in the read.
+func (c runChecks) ahead(ctx context.Context, sites []string) func() {
+	return c.r.checks.checkAhead(ctx, sites, c.Reachable)
 }
 
 // identify checks, once per process, that the site's context reaches the

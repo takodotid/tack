@@ -367,6 +367,7 @@ func times(started, finished *metav1.Time) string {
 func printRuns(w io.Writer, runs []foundRun) {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "SITE\tRUN\tMODE\tFROM\tTO\tSTATE\tREASON\tSTARTED")
+	takers := takers(runs)
 	for _, r := range runs {
 		sf := r.sf
 		started := ""
@@ -377,7 +378,7 @@ func printRuns(w io.Writer, runs []foundRun) {
 		switch {
 		case sf.Status.Abandoned != nil:
 			state = "Abandoned"
-		case takenOver(sf, runs):
+		case takenOver(sf, takers):
 			// Its own state is the one it stopped in; it can never go on.
 			state = "TakenOver"
 		}
@@ -386,14 +387,27 @@ func printRuns(w io.Writer, runs []foundRun) {
 	tw.Flush()
 }
 
+// takers maps each run that a listed run takes over to the runs that take
+// it over, so the list reads each run's spec once, not once per run (#35
+// row 47).
+func takers(runs []foundRun) map[string][]string {
+	out := map[string][]string{}
+	for _, r := range runs {
+		for _, old := range r.sf.TakenOver() {
+			out[old] = append(out[old], r.sf.Name)
+		}
+	}
+	return out
+}
+
 // takenOver tells whether another run took sf over, as sf's status or the
-// spec of a listed run says.
-func takenOver(sf *failoverv1.SiteFailover, runs []foundRun) bool {
+// spec of a listed run says: takers holds those specs.
+func takenOver(sf *failoverv1.SiteFailover, takers map[string][]string) bool {
 	if sf.Status.SupersededBy != "" {
 		return true
 	}
-	for _, r := range runs {
-		if r.sf.Name != sf.Name && r.sf.TakesOver(sf.Name) {
+	for _, by := range takers[sf.Name] {
+		if by != sf.Name {
 			return true
 		}
 	}

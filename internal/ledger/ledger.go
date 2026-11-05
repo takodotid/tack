@@ -11,6 +11,7 @@ import (
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -62,20 +63,42 @@ func (s *Store) UpdateStatus(ctx context.Context, sf *failoverv1.SiteFailover) e
 	return served(s.Client.Status().Update(ctx, sf, client.FieldOwner(kube.FieldManager)))
 }
 
-// List implements engine.Ledger, newest first.
+// ListPage is the most ledgers List asks for in one request
+// ([RFC#0003] Requirement 26). The largest ledger of a run on 10 sites,
+// with a full history, is about 200 KB, so one answer holds at most about
+// 20 MB.
+const ListPage = 100
+
+// List implements engine.Ledger, newest first. It reads the ledgers in
+// pages of ListPage, each with the same namespace and selector. When the
+// API server no longer serves the pages' snapshot (410 Expired on a page
+// after the first), it lists them all again in one request, as client-go's
+// pager does.
 func (s *Store) List(ctx context.Context) ([]failoverv1.SiteFailover, error) {
-	var l failoverv1.SiteFailoverList
 	opts := []client.ListOption{client.InNamespace(s.Namespace)}
 	if len(s.Selector) > 0 {
 		opts = append(opts, client.MatchingLabels(s.Selector))
 	}
-	if err := s.Client.List(ctx, &l, opts...); err != nil {
-		return nil, served(err)
+	var items []failoverv1.SiteFailover
+	for next := ""; ; {
+		var l failoverv1.SiteFailoverList
+		err := s.Client.List(ctx, &l, append(opts, client.Limit(ListPage), client.Continue(next))...)
+		if err != nil && next != "" && apierrors.IsResourceExpired(err) {
+			l, items, next = failoverv1.SiteFailoverList{}, nil, ""
+			err = s.Client.List(ctx, &l, opts...)
+		}
+		if err != nil {
+			return nil, served(err)
+		}
+		items = append(items, l.Items...)
+		if next = l.Continue; next == "" {
+			break
+		}
 	}
-	sort.Slice(l.Items, func(i, j int) bool {
-		return l.Items[j].CreationTimestamp.Before(&l.Items[i].CreationTimestamp)
+	sort.Slice(items, func(i, j int) bool {
+		return items[j].CreationTimestamp.Before(&items[i].CreationTimestamp)
 	})
-	return l.Items, nil
+	return items, nil
 }
 
 // EventSource is the component that the ledger's Events name.
