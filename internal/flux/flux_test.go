@@ -2,6 +2,7 @@ package flux
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -251,7 +252,7 @@ func TestRelease(t *testing.T) {
 	ctx := context.Background()
 	t.Run("held by this run", func(t *testing.T) {
 		c := newClient(nil, liveCluster(map[string]string{AnnotationReconcile: "disabled", AnnotationHeldBy: "run-1", "keep": "me"}))
-		gen, err := New(fakeClients{c}).Release(ctx, "a", clusterRef, "run-1")
+		gen, err := New(fakeClients{c}).Release(ctx, "a", clusterRef, "run-1", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -269,13 +270,13 @@ func TestRelease(t *testing.T) {
 			t.Errorf("other annotation lost: %v", ann)
 		}
 		// Idempotent.
-		if gen, err = New(fakeClients{c}).Release(ctx, "a", clusterRef, "run-1"); err != nil || gen != 4 {
+		if gen, err = New(fakeClients{c}).Release(ctx, "a", clusterRef, "run-1", nil); err != nil || gen != 4 {
 			t.Fatalf("second release: %d, %v", gen, err)
 		}
 	})
 	t.Run("other run", func(t *testing.T) {
 		c := newClient(nil, liveCluster(map[string]string{AnnotationReconcile: "disabled", AnnotationHeldBy: "run-2"}))
-		_, err := New(fakeClients{c}).Release(ctx, "a", clusterRef, "run-1")
+		_, err := New(fakeClients{c}).Release(ctx, "a", clusterRef, "run-1", nil)
 		wantStop(t, err, failoverv1.ReasonHeldByAnotherRun, "run-2")
 		if v := get(t, c, clusterRef).GetAnnotations()[AnnotationReconcile]; v != "disabled" {
 			t.Error("hold removed")
@@ -283,8 +284,47 @@ func TestRelease(t *testing.T) {
 	})
 	t.Run("held outside Tack", func(t *testing.T) {
 		c := newClient(nil, liveCluster(map[string]string{AnnotationReconcile: "disabled"}))
-		_, err := New(fakeClients{c}).Release(ctx, "a", clusterRef, "run-1")
+		_, err := New(fakeClients{c}).Release(ctx, "a", clusterRef, "run-1", nil)
 		wantStop(t, err, failoverv1.ReasonHeldByAnotherRun, "held outside Tack")
+	})
+}
+
+// #35 row 36 (RFC0005 Requirement 9). Release records the generation
+// while the run holds the object, before the update that removes the
+// hold. A failed record keeps the hold. An object that is no longer held
+// is not recorded.
+func TestReleaseRecordsBeforeRemovingTheHold(t *testing.T) {
+	ctx := context.Background()
+	held := map[string]string{AnnotationReconcile: "disabled", AnnotationHeldBy: "run-1"}
+	t.Run("recorded while held", func(t *testing.T) {
+		c := newClient(nil, liveCluster(held))
+		var got []int64
+		gen, err := New(fakeClients{c}).Release(ctx, "a", clusterRef, "run-1", func(g int64) error {
+			if get(t, c, clusterRef).GetAnnotations()[AnnotationHeldBy] != "run-1" {
+				t.Error("record called after the hold was removed")
+			}
+			got = append(got, g)
+			return nil
+		})
+		if err != nil || gen != 4 || len(got) != 1 || got[0] != 4 {
+			t.Fatalf("generation %d, recorded %v, %v", gen, got, err)
+		}
+		if _, err := New(fakeClients{c}).Release(ctx, "a", clusterRef, "run-1", func(int64) error {
+			t.Error("record called for an object no longer held")
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("record fails", func(t *testing.T) {
+		c := newClient(nil, liveCluster(held))
+		_, err := New(fakeClients{c}).Release(ctx, "a", clusterRef, "run-1", func(int64) error { return errors.New("ledger write failed") })
+		if err == nil || !strings.Contains(err.Error(), "ledger write failed") {
+			t.Fatalf("got %v", err)
+		}
+		if get(t, c, clusterRef).GetAnnotations()[AnnotationHeldBy] != "run-1" {
+			t.Error("the hold was removed although the generation was not recorded")
+		}
 	})
 }
 

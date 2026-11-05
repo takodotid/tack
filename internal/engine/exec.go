@@ -69,20 +69,44 @@ func (r *runner) hold(ctx context.Context, s *failoverv1.Step) (string, error) {
 		r.sf.Status.Held = append(r.sf.Status.Held, failoverv1.HeldObject{Site: s.Site, Object: s.Hold.Object})
 		h = &r.sf.Status.Held[len(r.sf.Status.Held)-1]
 	}
-	h.Kustomization, h.HeldAt, h.ReleasedAt = ks, &now, nil
+	h.Kustomization, h.HeldAt, h.ReleasedAt, h.Generation = ks, &now, nil, 0
 	return fmt.Sprintf("held; applied by Kustomization %s/%s", ks.Namespace, ks.Name), nil
 }
 
+// release removes the run's hold on an object. The ledger records the
+// object's generation before the hold is removed, while Flux cannot change
+// the object ([RFC#0005] Requirement 9). A process that dies after the
+// removal, before it records the release, leaves that generation: the
+// next process finds no hold, and keeps it, so the check after release
+// sees what Flux changed in between (#35 row 36).
 func (r *runner) release(ctx context.Context, s *failoverv1.Step) (string, error) {
-	gen, err := r.Flux.Release(ctx, s.Site, s.Release.Object, r.sf.Name)
+	recorded := false
+	gen, err := r.Flux.Release(ctx, s.Site, s.Release.Object, r.sf.Name, func(gen int64) error {
+		h := r.held(s.Site, s.Release.Object)
+		if h == nil {
+			return nil
+		}
+		h.Generation, recorded = gen, true
+		return r.write(ctx, r.sf)
+	})
 	if err != nil {
 		return "", err
 	}
-	if h := r.held(s.Site, s.Release.Object); h != nil {
-		now := metav1.NewTime(r.now())
-		h.ReleasedAt, h.Generation = &now, gen
+	msg := fmt.Sprintf("released at generation %d", gen)
+	h := r.held(s.Site, s.Release.Object)
+	if h == nil {
+		return msg, nil
 	}
-	return fmt.Sprintf("released at generation %d", gen), nil
+	if !recorded {
+		msg += " (the hold was already gone)"
+		if h.Generation != 0 && h.Generation != gen {
+			msg = fmt.Sprintf("the hold was already gone: generation %d when the run removed it, %d now", h.Generation, gen)
+			gen = h.Generation
+		}
+	}
+	now := metav1.NewTime(r.now())
+	h.ReleasedAt, h.Generation = &now, gen
+	return msg, nil
 }
 
 func (r *runner) reconcile(ctx context.Context, s *failoverv1.Step) (string, error) {

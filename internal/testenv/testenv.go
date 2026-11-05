@@ -227,7 +227,11 @@ type Flux struct {
 	// Owners is how Flux applies an object, by <site>/<kind>/<name>.
 	Owners map[string]engine.Owner
 	Held   map[string]string
-	Calls  []string
+	// Generations is an object's generation, by <site>/<kind>/<name>,
+	// when it is not 1. VerifyNoop compares it with the one the ledger
+	// recorded.
+	Generations map[string]int64
+	Calls       []string
 	// Fail makes a method return an error, by method name.
 	Fail map[string]error
 	// GitDown makes a Git fetch hang for half the timeout, as a
@@ -280,17 +284,34 @@ func (f *Flux) HeldBy(_ context.Context, site string, obj failoverv1.ObjectRef) 
 	return f.Held[key(site, obj)], nil
 }
 
+func (f *Flux) generation(k string) int64 {
+	if g, ok := f.Generations[k]; ok {
+		return g
+	}
+	return 1
+}
+
 // Release implements engine.Flux.
-func (f *Flux) Release(_ context.Context, site string, obj failoverv1.ObjectRef, run string) (int64, error) {
+func (f *Flux) Release(_ context.Context, site string, obj failoverv1.ObjectRef, run string, record func(int64) error) (int64, error) {
 	if err := f.call("Release", site, " ", obj.Name); err != nil {
 		return 0, err
 	}
+	k := key(site, obj)
+	f.mu.Lock()
+	gen, held := f.generation(k), f.Held[k] == run
+	f.mu.Unlock()
+	if !held {
+		return gen, nil
+	}
+	if record != nil {
+		if err := record(gen); err != nil {
+			return 0, err
+		}
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.Held[key(site, obj)] == run {
-		delete(f.Held, key(site, obj))
-	}
-	return 1, nil
+	delete(f.Held, k)
+	return gen, nil
 }
 
 // Reconcile implements engine.Flux. Calls records "fetch" or "no-fetch"
@@ -331,9 +352,20 @@ func (f *Flux) VerifyGit(_ context.Context, site string, held []failoverv1.HeldO
 	return "Git equals live", f.call("VerifyGit", site)
 }
 
-// VerifyNoop implements engine.Flux.
-func (f *Flux) VerifyNoop(_ context.Context, site string, _ []failoverv1.HeldObject, _ []failoverv1.ObjectField, _ bool, _ time.Duration) (string, error) {
-	return "nothing changed", f.call("VerifyNoop", site)
+// VerifyNoop implements engine.Flux. A held object whose generation is not
+// the one recorded at release stops the run with FluxChanged when strict.
+func (f *Flux) VerifyNoop(_ context.Context, site string, held []failoverv1.HeldObject, _ []failoverv1.ObjectField, strict bool, _ time.Duration) (string, error) {
+	if err := f.call("VerifyNoop", site); err != nil {
+		return "", err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, h := range held {
+		if g := f.generation(key(site, h.Object)); h.Generation != 0 && g != h.Generation && strict {
+			return "", stop.Ask(failoverv1.ReasonFluxChanged, "%s generation %d at release, now %d", h.Object.Name, h.Generation, g)
+		}
+	}
+	return "nothing changed", nil
 }
 
 // Git is a fake engine.Git. It maps each field as spec.git.fields says,

@@ -34,7 +34,7 @@ func TestWritesUseFieldManagerTack(t *testing.T) {
 	if _, err := f.Hold(ctx, "a", clusterRef, "run-1", ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Release(ctx, "a", clusterRef, "run-1"); err != nil {
+	if _, err := f.Release(ctx, "a", clusterRef, "run-1", nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.request(ctx, c, ks); err != nil {
