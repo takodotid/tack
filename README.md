@@ -173,6 +173,26 @@ Tack also needs:
 | Git access | Through the operator's `git` configuration, such as an SSH agent or a credential helper. Tack runs `git` with `GIT_TERMINAL_PROMPT=0` and stores no credential. The branch must accept a push from those credentials. |
 | A Workload file | The sites, their contexts, the Git repository and where each field lives in it: [docs/workload.md](docs/workload.md). |
 
+## Upgrading within v1
+
+Upgrade in this order:
+
+1. **Finish or stop every run.** `tack status -f workload.yaml`, for each workload, lists every run `Succeeded`, or `Stopped` or `Waiting` with no `tack` process running it. A run that resumes after the upgrade runs its remaining steps by the new CLI's rules.
+2. **The CRD at every site,** the way it was installed: the `helm upgrade --install` above, or `kubectl apply --server-side` of the new CRD. Do this before any operator runs the new CLI against the site. A CRD older than the CLI drops the fields it does not know, without an error: `tack run` refuses to create a ledger at such a site, and status writes there lose those fields.
+3. **Every operator's CLI together,** and every script that runs `tack`. A CLI older than the one that last wrote a ledger drops the status fields it does not know when it writes that ledger ([RFC#0003](rfcs/RFC0003.md#limitations), Limitations). The ledger does not record which CLI wrote it.
+
+Each release also needs:
+
+| From | To | CRD | Also before the new CLI runs |
+|---|---|---|---|
+| v1.2.0 | v1.2.1 | unchanged | nothing |
+| v1.0.x or v1.1.x | v1.2.x | new optional fields: `spec.takeOver`, `spec.fingerprints`, `status.fingerprints`, `status.supersededBy`, `status.git.releaseRevision` | Grant `get` on the namespace `kube-system` at every site: the plan reads its UID to identify the site's cluster, and fails with `forbidden` without it. Move a user out of an `http` or `https` Git URL, such as `https://user@git.example.com/gitops.git`, into git's configuration (`credential.<url>.username`): Tack refuses such a URL. `ssh://git@git.example.com/gitops.git` and `git@git.example.com:gitops.git` still work. |
+
+| A ledger written by | Under v1.2.1 |
+|---|---|
+| v1.2.0 | `tack resume` continues it. |
+| v1.0.x or v1.1.x | `tack resume` continues it. Each site's cluster is recorded in `status.fingerprints` on its first read, and checked after. |
+
 ## Upgrading from v0.1.x
 
 1. At every site, upgrade the CRD the way it was installed: the `helm upgrade --install` above, or `kubectl apply --server-side` of the new CRD. Do this before running tack v1.0.0 against the site: tack v1.0.0 reads ledgers as `v1`, and against a site still on the v0.1.x CRD it stops and says to upgrade the CRD.
