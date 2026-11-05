@@ -923,3 +923,82 @@ func TestCommitRefusesAnotherTarget(t *testing.T) {
 		})
 	}
 }
+
+// PR #42's finding (RFC0006 Requirement 2). The operator's global
+// configuration is read on purpose, for credential helpers and ssh, but a
+// core.fsmonitor there ran a program in every clone of Tack's, and a
+// protocol.ext.allow there let a Workload's Git URL of the form ext::CMD
+// run CMD. A ledger's Workload snapshot, and so its URL, is as easy to
+// write as the ledger (#35 row 11). Neither runs; neither does automatic
+// gc or maintenance.
+func TestGitRunsNoProgramOfTheGlobalConfig(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the programs are shell scripts")
+	}
+	isolate(t)
+	rm := newRemote(t, fixture())
+	base := rm.head()
+	marks := t.TempDir()
+	fsmonitor := filepath.Join(t.TempDir(), "fsmonitor")
+	if err := os.WriteFile(fsmonitor, []byte("#!/bin/sh\ntouch '"+filepath.Join(marks, "fsmonitor")+"'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	global := filepath.Join(t.TempDir(), "gitconfig")
+	cfg := "[core]\n\tfsmonitor = " + fsmonitor + "\n[protocol \"ext\"]\n\tallow = always\n[gc]\n\tauto = 1\n\tautoDetach = false\n[maintenance]\n\tauto = true\n"
+	if err := os.WriteFile(global, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", global)
+	real, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("no git")
+	}
+	bin := t.TempDir()
+	argsLog := filepath.Join(t.TempDir(), "args")
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte("#!/bin/sh\necho \"$@\" >> '"+argsLog+"'\nexec '"+real+"' \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	w := workload(rm.url)
+	r := newRepo(t)
+	changes, err := r.Resolve(context.Background(), w, switchover())
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	commit, err := r.Commit(context.Background(), w, engine.CommitRequest{Run: "run-1", Base: base, Changes: changes, Message: "tack: switch pg to b"})
+	if err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if _, err := r.Checkout(context.Background(), w, commit); err != nil {
+		t.Fatalf("Checkout: %v", err)
+	}
+	ext := &failoverv1.WorkloadSpec{Git: failoverv1.GitSpec{URL: "ext::sh -c touch% " + filepath.Join(marks, "ext"), Branch: "main"}}
+	if _, err := newRepo(t).BranchHead(context.Background(), ext); err == nil {
+		t.Error("a fetch of an ext:: URL succeeded")
+	}
+	ran, err := os.ReadDir(marks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range ran {
+		t.Errorf("%s ran", e.Name())
+	}
+	// Automatic gc and maintenance run after a commit or a fetch, with
+	// what the configuration names: every command turns them off.
+	b, err := os.ReadFile(argsLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		if strings.HasPrefix(line, "config --get ") {
+			// The read of core.sshCommand runs no program.
+			continue
+		}
+		for _, want := range []string{"-c core.fsmonitor=false", "-c protocol.ext.allow=never", "-c gc.auto=0", "-c maintenance.auto=false"} {
+			if !strings.Contains(line, want) {
+				t.Errorf("git %s lacks %s", line, want)
+			}
+		}
+	}
+}

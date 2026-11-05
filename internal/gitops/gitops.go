@@ -81,8 +81,15 @@ const CommandTimeout = 2 * time.Minute
 // byte a second for 30 s ends before the deadline. SSH gives up on a
 // connection after 15 s, and on a link that stops answering after 3
 // keepalives 15 s apart.
+//
+// noPrograms turns off what the operator's configuration could make git
+// run that access does not need (PR #42): a file system monitor, the ext::
+// transport, whose URL is a command, and automatic gc and maintenance.
+// The empty hooks path is set beside them. Credential helpers, askpass,
+// the ssh command, proxies and commit signing stay as configured.
 var (
 	lowSpeed   = []string{"-c", "http.lowSpeedLimit=1", "-c", "http.lowSpeedTime=30"}
+	noPrograms = []string{"-c", "core.fsmonitor=false", "-c", "protocol.ext.allow=never", "-c", "gc.auto=0", "-c", "maintenance.auto=false"}
 	sshOptions = "ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3"
 )
 
@@ -321,7 +328,7 @@ func (r *Repo) git(ctx context.Context, dir string, env []string, stdin string, 
 	}
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	args = append(append([]string{"-c", "core.hooksPath=" + r.hooks}, lowSpeed...), args...)
+	args = append(append(append([]string{"-c", "core.hooksPath=" + r.hooks}, noPrograms...), lowSpeed...), args...)
 	cmd := exec.CommandContext(cctx, "git", args...)
 	cmd.Dir = dir
 	cmd.Env = gitEnv(append(r.sshEnv(ctx), env...))
