@@ -14,7 +14,7 @@ all: verify test build
 build: tools-go
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags '$(LDFLAGS)' -o bin/tack ./cmd/tack
 
-## dist: static binaries for Linux, macOS and Windows, with the man pages and the CRD, in dist/; lists each archive to check it
+## dist: static binaries for Linux, macOS and Windows, with the man pages and the CRD, in dist/; the same bytes for the same commit; lists each archive to check it
 dist: tools-go
 	rm -rf dist && mkdir -p dist/man
 	SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) $(GO) run -ldflags '$(LDFLAGS)' ./hack/genman dist/man
@@ -25,13 +25,11 @@ dist: tools-go
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $$dir/tack$$exe ./cmd/tack; \
 		cp dist/man/*.1 $$dir/man/man1/; \
 		cp config/crd/*.yaml LICENSE README.md $$dir/; \
-		case $$os in \
-			windows) $(GO) run ./hack/zipdir $$dir.zip $$dir;; \
-			*) tar -C dist -czf $$dir.tar.gz $$(basename $$dir);; \
-		esac; \
+		case $$os in windows) ext=.zip;; *) ext=.tar.gz;; esac; \
+		SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) $(GO) run ./hack/archive $$dir$$ext $$dir; \
 	done
 	cd dist && sha256sum *.tar.gz *.zip > SHA256SUMS
-	$(GO) run ./hack/distcheck dist $(VERSION) $(PLATFORMS)
+	SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) $(GO) run ./hack/distcheck dist $(VERSION) $(PLATFORMS)
 
 ## generate: deepcopy code and the CRD, from api/, and the chart's copy of the CRD
 generate: tools-go

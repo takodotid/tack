@@ -1,11 +1,13 @@
 // Command distcheck lists each release archive that `make dist` wrote and
 // checks its contents ([RFC#0009] Requirement 12): one directory named
 // after the archive, with the binary, every man page in dist/man under
-// man/man1/, the CRD, LICENSE and README.md, and nothing else. Each link
+// man/man1/, the CRD, LICENSE and README.md, and nothing else. Each entry
+// has the time SOURCE_DATE_EPOCH, owner 0, and mode 0755 or 0644, and a
+// gzip header holds no name or time ([RFC#0009] Requirement 18). Each link
 // to the docs in the man pages names the ref of the version
 // ([RFC#0009] Requirement 17).
 //
-//	go run ./hack/distcheck <dist> <version> <os/arch>...
+//	SOURCE_DATE_EPOCH=<seconds> go run ./hack/distcheck <dist> <version> <os/arch>...
 package main
 
 import (
@@ -20,23 +22,30 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	tackversion "github.com/takodotid/tack/internal/version"
 )
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
+	if err := run(os.Args[1:], os.Getenv("SOURCE_DATE_EPOCH")); err != nil {
 		fmt.Fprintln(os.Stderr, "distcheck:", err)
 		os.Exit(1)
 	}
 }
 
-func run(args []string) error {
+func run(args []string, epoch string) error {
 	if len(args) < 3 {
-		return errors.New("usage: distcheck <dist> <version> <os/arch>...")
+		return errors.New("usage: SOURCE_DATE_EPOCH=<seconds> distcheck <dist> <version> <os/arch>...")
 	}
 	dist, version, platforms := args[0], args[1], args[2:]
+	secs, err := strconv.ParseInt(epoch, 10, 64)
+	if err != nil {
+		return fmt.Errorf("SOURCE_DATE_EPOCH %q is not a number of seconds", epoch)
+	}
+	mtime := time.Unix(secs, 0).UTC()
 	man, err := filepath.Glob(filepath.Join(dist, "man", "*.1"))
 	if err != nil {
 		return err
@@ -57,7 +66,7 @@ func run(args []string) error {
 		if !ok {
 			return fmt.Errorf("platform %q is not os/arch", p)
 		}
-		if err := check(dist, version, goos, goarch, pages); err != nil {
+		if err := check(dist, version, goos, goarch, pages, mtime); err != nil {
 			errs = append(errs, err)
 			continue
 		}
@@ -105,14 +114,14 @@ func expected(name, goos string, pages map[string]bool) []string {
 	return out
 }
 
-func check(dist, version, goos, goarch string, pages map[string]bool) error {
+func check(dist, version, goos, goarch string, pages map[string]bool, mtime time.Time) error {
 	name := fmt.Sprintf("tack-%s-%s-%s", version, goos, goarch)
 	archive := filepath.Join(dist, name+".tar.gz")
 	list := listTar
 	if goos == "windows" {
 		archive, list = filepath.Join(dist, name+".zip"), listZip
 	}
-	files, err := list(archive)
+	files, err := list(archive, mtime)
 	if err != nil {
 		return fmt.Errorf("%s: %w", archive, err)
 	}
@@ -136,8 +145,9 @@ func check(dist, version, goos, goarch string, pages map[string]bool) error {
 }
 
 // listTar returns the regular files of a .tar.gz, and fails on an entry
-// outside one top directory.
-func listTar(archive string) ([]string, error) {
+// outside one top directory, or one that the build's time, owner or umask
+// would change.
+func listTar(archive string, mtime time.Time) ([]string, error) {
 	f, err := os.Open(archive)
 	if err != nil {
 		return nil, err
@@ -146,6 +156,9 @@ func listTar(archive string) ([]string, error) {
 	gz, err := gzip.NewReader(f)
 	if err != nil {
 		return nil, err
+	}
+	if gz.Name != "" || !gz.ModTime.IsZero() {
+		return nil, fmt.Errorf("the gzip header holds the name %q and the time %v, want neither", gz.Name, gz.ModTime)
 	}
 	tr := tar.NewReader(gz)
 	var out []string
@@ -160,6 +173,15 @@ func listTar(archive string) ([]string, error) {
 		if err := inOneDir(archive, h.Name); err != nil {
 			return nil, err
 		}
+		if err := fixedMode(h.Name, h.Mode); err != nil {
+			return nil, err
+		}
+		if !h.ModTime.Equal(mtime) {
+			return nil, fmt.Errorf("entry %s has the time %v, want SOURCE_DATE_EPOCH, %v", h.Name, h.ModTime.UTC(), mtime)
+		}
+		if h.Uid != 0 || h.Gid != 0 || h.Uname != "" || h.Gname != "" {
+			return nil, fmt.Errorf("entry %s has the owner %d:%d (%q:%q), want 0:0 with no names", h.Name, h.Uid, h.Gid, h.Uname, h.Gname)
+		}
 		switch h.Typeflag {
 		case tar.TypeReg:
 			out = append(out, path.Clean(h.Name))
@@ -171,8 +193,9 @@ func listTar(archive string) ([]string, error) {
 }
 
 // listZip returns the files of a .zip, and fails on an entry outside one
-// top directory.
-func listZip(archive string) ([]string, error) {
+// top directory, or one that the build's time, time zone or umask would
+// change.
+func listZip(archive string, mtime time.Time) ([]string, error) {
 	r, err := zip.OpenReader(archive)
 	if err != nil {
 		return nil, err
@@ -183,11 +206,38 @@ func listZip(archive string) ([]string, error) {
 		if err := inOneDir(archive, f.Name); err != nil {
 			return nil, err
 		}
+		if err := fixedMode(f.Name, int64(f.Mode().Perm())); err != nil {
+			return nil, err
+		}
+		// The MS-DOS time holds no zone: it must be the UTC one too.
+		date, clock := msDosTime(mtime)
+		if !f.Modified.Equal(mtime) || f.ModifiedDate != date || f.ModifiedTime != clock {
+			return nil, fmt.Errorf("entry %s has the time %v (MS-DOS %#x %#x), want SOURCE_DATE_EPOCH, %v (MS-DOS %#x %#x)",
+				f.Name, f.Modified.UTC(), f.ModifiedDate, f.ModifiedTime, mtime, date, clock)
+		}
 		if !f.FileInfo().IsDir() {
 			out = append(out, path.Clean(f.Name))
 		}
 	}
 	return out, nil
+}
+
+// msDosTime returns the MS-DOS date and time of t in UTC, as a zip entry
+// stores them.
+func msDosTime(t time.Time) (date, clock uint16) {
+	t = t.UTC()
+	date = uint16(t.Day() + int(t.Month())<<5 + (t.Year()-1980)<<9)
+	clock = uint16(t.Second()/2 + t.Minute()<<5 + t.Hour()<<11)
+	return date, clock
+}
+
+// fixedMode fails on a mode other than 0755 or 0644, which the umask of the
+// build would change.
+func fixedMode(name string, mode int64) error {
+	if mode != 0o755 && mode != 0o644 {
+		return fmt.Errorf("entry %s has the mode %o, want 755 or 644", name, mode)
+	}
+	return nil
 }
 
 // inOneDir checks that an entry lies under the directory named after the
