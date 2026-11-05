@@ -29,7 +29,7 @@ Until then there are two primaries. Confirm the loss, and fence the old primary,
 
 ## When Tack refuses the lost site
 
-A site whose API answers with an error, such as a load balancer that answers 503, is not counted as lost; neither is a site whose kube context needs a credential plugin that fails because of the loss. The plan refuses.
+A site whose API answers with an error, such as a load balancer that answers 503, is not counted as lost; neither is a site whose kube context needs a credential plugin that fails because of the loss. The plan refuses; for a 5xx or 429, its message names this section. Tack cannot tell a 503 from a lost site from a 503 from a live API server that restarts ([RFC#0007](../../rfcs/RFC0007.md), Motivation).
 
 Only once the loss is confirmed and the old primary fenced, as above:
 

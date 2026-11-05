@@ -81,6 +81,12 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 	checks := e.SiteChecks(req.Mode, req.To)
 	topo, err := e.Driver.Discover(ctx, req.Spec, checks)
 	if err != nil {
+		if req.Mode == failoverv1.ModeSiteLoss && kube.Retryable(err) && !kube.IsUnreachable(err) {
+			// An answer 5xx or 429 is an answer, also from a load balancer
+			// in front of a lost site: Tack does not count the site as lost
+			// (#38 item 8). The runbook has the way on.
+			return nil, fmt.Errorf("%w. A site whose API answers, even with an error, is not counted as lost. If the site is lost and something in front of it still answers, such as a load balancer, see docs/runbooks/site-loss.md#when-tack-refuses-the-lost-site", err)
+		}
 		return nil, err
 	}
 	to, _ := topo.Site(req.To)
