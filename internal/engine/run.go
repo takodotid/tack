@@ -390,6 +390,12 @@ func (r *runner) run(ctx context.Context) error {
 			}
 			if step.Deferrable {
 				if err := r.gate(ctx, step.Site); err != nil {
+					if ctx.Err() != nil {
+						// An interrupt during the read is no answer from
+						// the site: the run stops before the step, which
+						// keeps its state (#35 row 34).
+						return r.stopBefore(ctx, step, ctx.Err())
+					}
 					if !errors.Is(err, errUnread) {
 						return r.stopBefore(ctx, step, err)
 					}
