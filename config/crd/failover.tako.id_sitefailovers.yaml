@@ -32,6 +32,9 @@ spec:
     - jsonPath: .status.state
       name: State
       type: string
+    - jsonPath: .status.reason
+      name: Reason
+      type: string
     - jsonPath: .status.phase
       name: Phase
       type: string
@@ -1028,6 +1031,71 @@ spec:
                   - site
                   type: object
                 type: array
+              history:
+                description: |-
+                  History records the run's timeline, oldest first: each start of a
+                  tack process that runs it, each stop, wait and success, its
+                  abandonment and its take-over. Tack only appends to it. At
+                  MaxHistory entries, it drops the oldest entry but the first, and
+                  counts it in HistoryDropped.
+                items:
+                  description: HistoryEntry is one change of a run's state, and who
+                    made it.
+                  properties:
+                    flags:
+                      description: |-
+                        Flags are the operator's decision flags of that tack process, such
+                        as --fence=a, --accept-git-head=<commit>, --take-over=<run> and
+                        --yes.
+                      items:
+                        type: string
+                      type: array
+                    message:
+                      description: Message is the run's message then, cut to MaxHistoryMessage
+                        bytes.
+                      maxLength: 1024
+                      type: string
+                    reason:
+                      description: Reason says why the run stopped or waits, as status.reason
+                        did.
+                      type: string
+                    state:
+                      description: State is the run's state from then on, or Abandoned,
+                        or TakenOver.
+                      enum:
+                      - Running
+                      - Waiting
+                      - Stopped
+                      - Succeeded
+                      - Abandoned
+                      - TakenOver
+                      type: string
+                    time:
+                      description: Time is when tack recorded the entry.
+                      format: date-time
+                      type: string
+                    user:
+                      description: |-
+                        User is the operator, as the API server of the ledger's site
+                        authenticated the credentials of that tack process. Empty when that
+                        API server did not say.
+                      type: string
+                    version:
+                      description: Version is the version of the tack that recorded
+                        the entry.
+                      type: string
+                  required:
+                  - state
+                  - time
+                  type: object
+                maxItems: 100
+                type: array
+              historyDropped:
+                description: |-
+                  HistoryDropped counts the entries dropped from History to keep it
+                  within MaxHistory. They came after the first entry.
+                format: int32
+                type: integer
               message:
                 description: Message explains the state to the operator.
                 type: string
@@ -1122,6 +1190,13 @@ spec:
                   SupersededBy is the later run that took this run over. That run
                   writes it when this ledger answers; its spec.takeOver is the record.
                 type: string
+              writtenBy:
+                description: |-
+                  WrittenBy is the version of the tack that last wrote this status. A
+                  tack of an older release refuses to write the ledger: it would drop
+                  the status fields it does not know. Unset in a ledger that a tack
+                  older than v1.3.0 wrote last.
+                type: string
             type: object
         required:
         - spec
@@ -1145,6 +1220,9 @@ spec:
       type: string
     - jsonPath: .status.state
       name: State
+      type: string
+    - jsonPath: .status.reason
+      name: Reason
       type: string
     - jsonPath: .status.phase
       name: Phase
@@ -2145,6 +2223,71 @@ spec:
                   - site
                   type: object
                 type: array
+              history:
+                description: |-
+                  History records the run's timeline, oldest first: each start of a
+                  tack process that runs it, each stop, wait and success, its
+                  abandonment and its take-over. Tack only appends to it. At
+                  MaxHistory entries, it drops the oldest entry but the first, and
+                  counts it in HistoryDropped.
+                items:
+                  description: HistoryEntry is one change of a run's state, and who
+                    made it.
+                  properties:
+                    flags:
+                      description: |-
+                        Flags are the operator's decision flags of that tack process, such
+                        as --fence=a, --accept-git-head=<commit>, --take-over=<run> and
+                        --yes.
+                      items:
+                        type: string
+                      type: array
+                    message:
+                      description: Message is the run's message then, cut to MaxHistoryMessage
+                        bytes.
+                      maxLength: 1024
+                      type: string
+                    reason:
+                      description: Reason says why the run stopped or waits, as status.reason
+                        did.
+                      type: string
+                    state:
+                      description: State is the run's state from then on, or Abandoned,
+                        or TakenOver.
+                      enum:
+                      - Running
+                      - Waiting
+                      - Stopped
+                      - Succeeded
+                      - Abandoned
+                      - TakenOver
+                      type: string
+                    time:
+                      description: Time is when tack recorded the entry.
+                      format: date-time
+                      type: string
+                    user:
+                      description: |-
+                        User is the operator, as the API server of the ledger's site
+                        authenticated the credentials of that tack process. Empty when that
+                        API server did not say.
+                      type: string
+                    version:
+                      description: Version is the version of the tack that recorded
+                        the entry.
+                      type: string
+                  required:
+                  - state
+                  - time
+                  type: object
+                maxItems: 100
+                type: array
+              historyDropped:
+                description: |-
+                  HistoryDropped counts the entries dropped from History to keep it
+                  within MaxHistory. They came after the first entry.
+                format: int32
+                type: integer
               message:
                 description: Message explains the state to the operator.
                 type: string
@@ -2238,6 +2381,13 @@ spec:
                 description: |-
                   SupersededBy is the later run that took this run over. That run
                   writes it when this ledger answers; its spec.takeOver is the record.
+                type: string
+              writtenBy:
+                description: |-
+                  WrittenBy is the version of the tack that last wrote this status. A
+                  tack of an older release refuses to write the ledger: it would drop
+                  the status fields it does not know. Unset in a ledger that a tack
+                  older than v1.3.0 wrote last.
                 type: string
             type: object
         required:

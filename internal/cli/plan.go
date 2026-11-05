@@ -18,7 +18,6 @@ import (
 	"github.com/takodotid/tack/internal/config"
 	"github.com/takodotid/tack/internal/driver"
 	"github.com/takodotid/tack/internal/engine"
-	"github.com/takodotid/tack/internal/kube"
 	"github.com/takodotid/tack/internal/ledger"
 	"github.com/takodotid/tack/internal/version"
 )
@@ -92,7 +91,7 @@ func newPlan(o *options) *cobra.Command {
 			if p.output != "text" && p.output != "yaml" {
 				return usagef("--output must be text or yaml")
 			}
-			plan, env, cleanup, err := o.makePlan(cmd.Context(), &p, cmd.ErrOrStderr())
+			plan, env, cleanup, err := o.makePlan(cmd.Context(), &p, o.progress(cmd.ErrOrStderr()))
 			if cleanup != nil {
 				defer cleanup()
 			}
@@ -182,7 +181,7 @@ func newRun(o *options) *cobra.Command {
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			out := cmd.OutOrStdout()
-			plan, env, cleanup, err := o.makePlan(cmd.Context(), &p, out)
+			plan, env, cleanup, err := o.makePlan(cmd.Context(), &p, o.progress(out))
 			if cleanup != nil {
 				defer cleanup()
 			}
@@ -201,9 +200,9 @@ func newRun(o *options) *cobra.Command {
 				return err
 			}
 			if len(old) > 0 {
-				env.Supersede = supersede(env.Clients, old)
+				env.Supersede = supersede(env, old)
 			}
-			return env.Start(cmd.Context(), plan.SiteFailover, engine.Options{TakeOver: takeOver})
+			return env.Start(cmd.Context(), plan.SiteFailover, engine.Options{TakeOver: takeOver, Yes: yes})
 		},
 	}
 	p.add(cmd, false)
@@ -269,15 +268,16 @@ func checkNoActiveRun(ctx context.Context, env *engine.Env, sf *failoverv1.SiteF
 
 // supersede returns the Supersede of a run that takes over the runs old:
 // it writes the new run's name into the status of the run named, at its
-// site, through c, the clients that found it.
-func supersede(c kube.Clients, old []foundRun) func(ctx context.Context, run, by string) error {
+// site, through env's clients, which found it, with an entry TakenOver in
+// its history and the entry's Event.
+func supersede(env *engine.Env, old []foundRun) func(ctx context.Context, run, by string) error {
 	return func(ctx context.Context, run, by string) error {
 		i := slices.IndexFunc(old, func(r foundRun) bool { return r.sf.Name == run })
 		if i < 0 {
 			return fmt.Errorf("run %s was not found", run)
 		}
 		old := old[i]
-		cl, err := c.Client(old.site)
+		cl, err := env.Clients.Client(old.site)
 		if err != nil {
 			return err
 		}
@@ -286,7 +286,18 @@ func supersede(c kube.Clients, old []foundRun) func(ctx context.Context, run, by
 		if err != nil {
 			return err
 		}
+		if err := engine.CheckWriter(sf); err != nil {
+			return err
+		}
 		sf.Status.SupersededBy = by
-		return store.UpdateStatus(ctx, sf)
+		entry := env.Entry(ctx, sf, failoverv1.HistoryTakenOver, []string{"--take-over=" + run})
+		entry.Reason, entry.Message = "", "run "+by+" took this run over"
+		engine.AppendHistory(&sf.Status, entry)
+		engine.Stamp(&sf.Status)
+		if err := store.UpdateStatus(ctx, sf); err != nil {
+			return err
+		}
+		env.EventOn(ctx, store, sf, false, "Run"+string(failoverv1.HistoryTakenOver), engine.EntryText(sf.Status.History[len(sf.Status.History)-1]))
+		return nil
 	}
 }

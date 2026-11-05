@@ -5,11 +5,14 @@
 | Command | Shows |
 |---|---|
 | `tack status -f workload.yaml` | the workload's runs at every reachable site: site, run, mode, from, to, state, reason, start. The state is `Abandoned` for an abandoned run, and `TakenOver` for a run another run took over |
-| `tack status RUN -f workload.yaml` | one run: state and reason, message, Git base and commit, captured values by name, held objects, each step with its state and last result, follow-ups |
+| `tack status RUN -f workload.yaml` | one run: state and reason, message, the version of the `tack` that last wrote it, Git base and commit, captured values by name, held objects, each phase and step with its state, start, end, attempts and last result, follow-ups, and the history: each start, stop, wait and success of the run, with the version, the user and the flags of the `tack` that recorded it |
 | `tack status [RUN] --context site-b` | the same from one context, without the Workload file; `--namespace` when the ledger namespace is not `tack-system` |
 | `tack status RUN -f workload.yaml -o yaml` | the whole `SiteFailover` object |
 | `tack abandon RUN -f workload.yaml --reason TEXT` | marks a run that must never go on: [runbooks/abandon-run.md](runbooks/abandon-run.md) |
-| `kubectl --context site-b -n tack-system get sfo` | the ledgers at one site, with workload, mode, from, to, state and phase |
+| `kubectl --context site-b -n tack-system get sfo` | the ledgers at one site, with workload, mode, from, to, state, reason and phase |
+| `kubectl --context site-b -n tack-system describe sfo RUN` | also the ledger's Events: each step's start and end, and each change of the run's state, for as long as the API server keeps Events (1 h by default) |
+
+Every `tack` command starts each progress line, such as a step or a retried check, with its time in UTC (`2026-10-27T10:15:00Z`), so a terminal's log lines up with the ledger and the API servers' audit logs ([RFC#0009](../rfcs/RFC0009.md#progress-and-status), Requirement 27). The history in `status.history` keeps at most 100 entries: the first, and the newest ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 22).
 
 A run's state is `Running`, `Waiting`, `Stopped` or `Succeeded`; each step's state is `Pending`, `Running`, `Succeeded`, `Failed` or `Deferred` ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirements 9 and 11). A run left `Running` by a process that ended, such as a killed terminal, goes on with `tack resume`. A run shown as `NotStarted` never recorded its start: its process ended between creating the ledger and its first write, so none of its steps ran. It cannot resume; plan again and start a new run with `--take-over RUN`.
 
@@ -33,13 +36,19 @@ Held objects:
   site b: Cluster db/pg-b (held)
   site b: Pooler db/pg-b-pooler-rw (held)
 ...
-PromoteToGitOps
+PromoteToGitOps  (started 2026-10-27 10:16:40Z)
   18. [Failed] git-commit  Git
       commit the live state to ssh://***@git.example.com/gitops.git branch main
 ...
+        started 2026-10-27 10:16:40Z, finished 2026-10-27 10:16:42Z, attempts 1
         result: branch main of ssh://***@git.example.com/gitops.git is at a2c8b964f945fe157a56c4f87f8b0b2a3176e7a3, but the run's base is 6dd30f74794e7c2d1ef0405918b9b92bb00a4a11: Git changed during the run
   19. [Pending] reconcile-git-a  site a
 ...
+
+History:
+  2026-10-27 10:15:00Z  Running  tack v1.3.0, user operator@example.com
+  2026-10-27 10:16:42Z  Stopped (GitChanged)  tack v1.3.0, user operator@example.com
+      step git-commit: branch main of ssh://***@git.example.com/gitops.git is at a2c8b964f945fe157a56c4f87f8b0b2a3176e7a3, but the run's base is 6dd30f74794e7c2d1ef0405918b9b92bb00a4a11: Git changed during the run
 ```
 
 Here the switch is done live and the objects are still held. Flux applies nothing to them until the run releases them.
@@ -74,7 +83,7 @@ After `--accept-git-head`, the check before release reports differences outside 
 
 ## Interrupting a run
 
-The first Ctrl-C, SIGTERM or SIGHUP stops the run: the step in flight ends, and the ledger records the stop, which can take up to 30 s when the ledger's site is slow. A second signal ends `tack` at once, without that record: the ledger then shows the step `Running`, and `tack resume` runs it again. SIGHUP comes when the terminal or SSH session ends; run `tack` in `tmux` or `screen` on a remote host, so a dropped connection does not stop the run.
+The first Ctrl-C, SIGTERM or SIGHUP stops the run: the step in flight ends, and the ledger records the stop, which can take up to 30 s when the ledger's site is slow, then its Event, up to 5 s more. A second signal ends `tack` at once, without that record; once the ledger holds the stop, it loses only the Event: the ledger then shows the step `Running`, and `tack resume` runs it again. SIGHUP comes when the terminal or SSH session ends; run `tack` in `tmux` or `screen` on a remote host, so a dropped connection does not stop the run.
 
 ## Break-glass
 
@@ -113,13 +122,15 @@ Tack acts with the operator's credentials for each site's kube context. Every si
 | 11 | `gitrepositories` (`source.toolkit.fluxcd.io`) of those Kustomizations | get, patch | Flux's | `run`, `resume` | the reconcile request; the render reads `spec.ignore` and `spec.include` |
 | 12 | `configmaps`, `secrets` named in those Kustomizations' `spec.postBuild.substituteFrom` | get | the Kustomization's | `run`, `resume` | the render's variables |
 | 13 | `siteservices` (`strait.tako.id`) named in `spec.routing` | get | the SiteService's | `run`, `resume` | the routing check |
+| 14 | `events` | create | the ledger's | `run`, `resume`, `abandon` | the ledger's Events. Optional: without it, a run goes on without Events, and says so once ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 23) |
+| 15 | `selfsubjectreviews` (`authentication.k8s.io`) | create | | `run`, `resume`, `abandon` | the user in the ledger's history. Without it, the history names no user, and the run says so once |
 
 | Fact | Detail |
 |---|---|
 | A read-only role | Rows 1 to 4 and the `get` of row 7 are enough for `tack plan` and `tack status`. |
-| Rows 1 and 2 | Kubernetes grants them to every authenticated user through the default ClusterRoleBindings `system:public-info-viewer` and `system:discovery`. A cluster without those bindings must grant them. |
+| Rows 1, 2 and 15 | Kubernetes grants them to every authenticated user through the default ClusterRoleBindings `system:public-info-viewer`, `system:discovery` and `system:basic-user`. A cluster without those bindings must grant them. |
 | `resourceNames` | Rows 3 and 7 to 13 can name their objects. Rows 4 to 6 cannot: run names are generated, and `list` and `create` take no name. |
-| Checked | On the e2e's kind clusters, a ServiceAccount with exactly these rows, each named where the table allows, ran `tack plan`, `tack status`, a planned run with the routing check and a Kustomization with `postBuild`, a resume, a run with `--take-over`, and a site-loss run. Without row 3, `tack plan` fails with `namespaces "kube-system" is forbidden`; without the ConfigMap of row 12, the check before release stops with `StepFailed`. |
+| Checked | On the e2e's kind clusters, a ServiceAccount with exactly these rows, each named where the table allows, ran `tack plan`, `tack status`, a planned run with the routing check and a Kustomization with `postBuild`, a resume, a run with `--take-over`, and a site-loss run. Without row 3, `tack plan` fails with `namespaces "kube-system" is forbidden`; without the ConfigMap of row 12, the check before release stops with `StepFailed`. Rows 14 and 15 came after that check, with v1.3.0, and were not part of it. |
 
 The runbooks' own `kubectl` commands need more, such as `patch` on `sitefailovers/status`; each runbook says so.
 

@@ -1,0 +1,51 @@
+package cli
+
+import (
+	"bytes"
+	"io"
+	"sync"
+	"time"
+)
+
+// stamped writes progress lines: it starts each line with the time, in
+// UTC, to the second ([RFC#0009] Requirement 27).
+type stamped struct {
+	mu  sync.Mutex
+	w   io.Writer
+	now func() time.Time
+	// mid is set while a line has started and not ended.
+	mid bool
+}
+
+// progress returns the writer of the progress lines that go to w: the
+// engine's, the site checks' and Flux's. The plan, the status and the
+// prompts go to w as they are.
+func (o *options) progress(w io.Writer) io.Writer {
+	return &stamped{w: w, now: o.now}
+}
+
+func (s *stamped) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := len(p)
+	var b []byte
+	for len(p) > 0 {
+		if !s.mid {
+			b = s.now().UTC().AppendFormat(b, time.RFC3339)
+			b = append(b, ' ')
+		}
+		i := bytes.IndexByte(p, '\n')
+		if i < 0 {
+			b = append(b, p...)
+			s.mid = true
+			break
+		}
+		b = append(b, p[:i+1]...)
+		p = p[i+1:]
+		s.mid = false
+	}
+	if _, err := s.w.Write(b); err != nil {
+		return 0, err
+	}
+	return n, nil
+}

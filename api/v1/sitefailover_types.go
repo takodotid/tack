@@ -40,6 +40,7 @@ var Phases = []Phase{PhaseHold, PhaseFailover, PhasePromoteToGitOps, PhaseReleas
 // +kubebuilder:printcolumn:name="From",type=string,JSONPath=`.spec.from`
 // +kubebuilder:printcolumn:name="To",type=string,JSONPath=`.spec.to`
 // +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
+// +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.reason`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 type SiteFailover struct {
@@ -481,6 +482,74 @@ type SiteFailoverStatus struct {
 	// and it does not block a new run. Unset for most runs.
 	// +optional
 	Abandoned *Abandonment `json:"abandoned,omitempty"`
+
+	// WrittenBy is the version of the tack that last wrote this status. A
+	// tack of an older release refuses to write the ledger: it would drop
+	// the status fields it does not know. Unset in a ledger that a tack
+	// older than v1.3.0 wrote last.
+	// +optional
+	WrittenBy string `json:"writtenBy,omitempty"`
+
+	// History records the run's timeline, oldest first: each start of a
+	// tack process that runs it, each stop, wait and success, its
+	// abandonment and its take-over. Tack only appends to it. At
+	// MaxHistory entries, it drops the oldest entry but the first, and
+	// counts it in HistoryDropped.
+	// +optional
+	// +kubebuilder:validation:MaxItems=100
+	History []HistoryEntry `json:"history,omitempty"`
+
+	// HistoryDropped counts the entries dropped from History to keep it
+	// within MaxHistory. They came after the first entry.
+	// +optional
+	HistoryDropped int32 `json:"historyDropped,omitempty"`
+}
+
+// MaxHistory is the most entries status.history holds. The CRD's
+// maxItems is the same number.
+const MaxHistory = 100
+
+// MaxHistoryMessage is the most bytes of a history entry's message. Tack
+// cuts a longer message. The CRD's maxLength is the same number.
+const MaxHistoryMessage = 1024
+
+// HistoryState is the run's state that a history entry records.
+// +kubebuilder:validation:Enum=Running;Waiting;Stopped;Succeeded;Abandoned;TakenOver
+type HistoryState string
+
+const (
+	// HistoryAbandoned records that the run was abandoned.
+	HistoryAbandoned HistoryState = "Abandoned"
+	// HistoryTakenOver records that another run took the run over.
+	HistoryTakenOver HistoryState = "TakenOver"
+)
+
+// HistoryEntry is one change of a run's state, and who made it.
+type HistoryEntry struct {
+	// Time is when tack recorded the entry.
+	Time metav1.Time `json:"time"`
+	// State is the run's state from then on, or Abandoned, or TakenOver.
+	State HistoryState `json:"state"`
+	// Reason says why the run stopped or waits, as status.reason did.
+	// +optional
+	Reason string `json:"reason,omitempty"`
+	// Message is the run's message then, cut to MaxHistoryMessage bytes.
+	// +optional
+	// +kubebuilder:validation:MaxLength=1024
+	Message string `json:"message,omitempty"`
+	// Version is the version of the tack that recorded the entry.
+	// +optional
+	Version string `json:"version,omitempty"`
+	// User is the operator, as the API server of the ledger's site
+	// authenticated the credentials of that tack process. Empty when that
+	// API server did not say.
+	// +optional
+	User string `json:"user,omitempty"`
+	// Flags are the operator's decision flags of that tack process, such
+	// as --fence=a, --accept-git-head=<commit>, --take-over=<run> and
+	// --yes.
+	// +optional
+	Flags []string `json:"flags,omitempty"`
 }
 
 // Abandonment says when and why a run was abandoned.

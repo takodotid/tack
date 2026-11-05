@@ -26,6 +26,10 @@ import (
 	failoverv1 "github.com/takodotid/tack/api/v1"
 )
 
+// FieldManager is the field manager of every write by Tack: to live
+// objects, to Flux's objects, to the ledger and its Events.
+const FieldManager = "tack"
+
 // RequestTimeout bounds every request to a site, so a lost site fails fast.
 const RequestTimeout = 15 * time.Second
 

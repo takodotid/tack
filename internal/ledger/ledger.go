@@ -3,17 +3,24 @@ package ledger
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
+	"time"
 
+	authenticationv1 "k8s.io/api/authentication/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
+	"github.com/takodotid/tack/internal/kube"
 )
 
-// Store keeps the SiteFailover objects of one namespace at one site.
+// Store keeps the SiteFailover objects of one namespace at one site. Its
+// writes name the field manager tack ([RFC#0003] Requirement 25).
 type Store struct {
 	Client    client.Client
 	Namespace string
@@ -28,13 +35,13 @@ type Store struct {
 func (s *Store) Create(ctx context.Context, sf *failoverv1.SiteFailover) error {
 	sf.Namespace = s.Namespace
 	dry := sf.DeepCopy()
-	if err := s.Client.Create(ctx, dry, client.DryRunAll); err != nil {
+	if err := s.Client.Create(ctx, dry, client.DryRunAll, client.FieldOwner(kube.FieldManager)); err != nil {
 		return served(err)
 	}
 	if !equality.Semantic.DeepEqual(dry.Spec, sf.Spec) {
 		return fmt.Errorf("the cluster's SiteFailover CRD drops fields of the ledger's spec: apply the CRD of this Tack version there; nothing was created")
 	}
-	return served(s.Client.Create(ctx, sf))
+	return served(s.Client.Create(ctx, sf, client.FieldOwner(kube.FieldManager)))
 }
 
 // Get implements engine.Ledger.
@@ -52,7 +59,7 @@ func (s *Store) UpdateStatus(ctx context.Context, sf *failoverv1.SiteFailover) e
 	if sf.ResourceVersion == "" {
 		return fmt.Errorf("ledger %s has no resourceVersion", sf.Name)
 	}
-	return served(s.Client.Status().Update(ctx, sf))
+	return served(s.Client.Status().Update(ctx, sf, client.FieldOwner(kube.FieldManager)))
 }
 
 // List implements engine.Ledger, newest first.
@@ -69,6 +76,45 @@ func (s *Store) List(ctx context.Context) ([]failoverv1.SiteFailover, error) {
 		return l.Items[j].CreationTimestamp.Before(&l.Items[i].CreationTimestamp)
 	})
 	return l.Items, nil
+}
+
+// EventSource is the component that the ledger's Events name.
+const EventSource = "tack"
+
+// Event implements engine.Recorder: it records a Kubernetes Event on the
+// ledger sf, at time at, with a name the API server generates. A Warning
+// when warning is set, else Normal.
+func (s *Store) Event(ctx context.Context, sf *failoverv1.SiteFailover, warning bool, reason, message string, at time.Time) error {
+	t := metav1.NewTime(at)
+	typ := corev1.EventTypeNormal
+	if warning {
+		typ = corev1.EventTypeWarning
+	}
+	ev := &corev1.Event{
+		ObjectMeta: metav1.ObjectMeta{Namespace: sf.Namespace, GenerateName: sf.Name + "."},
+		InvolvedObject: corev1.ObjectReference{
+			APIVersion: failoverv1.GroupVersion.String(), Kind: "SiteFailover",
+			Namespace: sf.Namespace, Name: sf.Name, UID: sf.UID,
+		},
+		Reason: reason, Message: message, Type: typ,
+		FirstTimestamp: t, LastTimestamp: t, Count: 1,
+		Source: corev1.EventSource{Component: EventSource},
+	}
+	return s.Client.Create(ctx, ev, client.FieldOwner(kube.FieldManager))
+}
+
+// User implements engine.Recorder: the user name that the site's API
+// server gives the client's credentials, from a SelfSubjectReview. The
+// review is not stored.
+func (s *Store) User(ctx context.Context) (string, error) {
+	r := &authenticationv1.SelfSubjectReview{}
+	if err := s.Client.Create(ctx, r); err != nil {
+		return "", err
+	}
+	if r.Status.UserInfo.Username == "" {
+		return "", errors.New("its SelfSubjectReview names no user")
+	}
+	return r.Status.UserInfo.Username, nil
 }
 
 // served explains an error from a cluster whose CRD does not serve this

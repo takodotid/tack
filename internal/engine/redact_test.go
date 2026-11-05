@@ -52,11 +52,16 @@ func TestOutsideMessagesAreRedacted(t *testing.T) {
 	for _, st := range sf.Status.Steps {
 		msgs = append(msgs, st.Message)
 	}
+	for _, h := range sf.Status.History {
+		msgs = append(msgs, h.Message)
+	}
+	msgs = append(msgs, testenv.Events(f.clients.Sites["b"], "tack-system", "run-1")...)
 	all := strings.Join(msgs, "\n")
 	if strings.Contains(all, "tok3n-secret") || strings.Contains(all, "user:") {
 		t.Errorf("a password is in the ledger or the output:\n%s", all)
 	}
-	for _, want := range []string{"step verify-noop-a: Kustomization flux-system/a is not Ready", "unable to clone 'https://***@git.example.invalid/gitops.git'"} {
+	for _, want := range []string{"step verify-noop-a: Kustomization flux-system/a is not Ready", "unable to clone 'https://***@git.example.invalid/gitops.git'",
+		"Warning RunStopped: StepFailed: step verify-noop-a: Kustomization flux-system/a is not Ready: kustomize build failed: fetch https://***@git.example.invalid/gitops.git"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("no %q in the ledger or the output:\n%s", want, all)
 		}

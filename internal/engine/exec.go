@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -19,13 +20,14 @@ import (
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/config"
+	"github.com/takodotid/tack/internal/kube"
 	"github.com/takodotid/tack/internal/redact"
 	"github.com/takodotid/tack/internal/stop"
 	"github.com/takodotid/tack/internal/version"
 )
 
 // FieldManager is the field manager of Tack's changes to live objects.
-const FieldManager = "tack"
+const FieldManager = kube.FieldManager
 
 func (r *runner) exec(ctx context.Context, s *failoverv1.Step) (string, error) {
 	switch s.Type {
@@ -528,15 +530,44 @@ func Clean(captured map[string]string, msg string) string {
 	return HideCaptured(captured, redact.Text(msg))
 }
 
-// cleanStatus cleans every message of a status: the run's, each step's and
-// the reason it was abandoned.
-func cleanStatus(st *failoverv1.SiteFailoverStatus) {
+// Stamp prepares a status for a write by this tack: it records this
+// tack's version in status.writtenBy ([RFC#0003] Requirement 24), and
+// cleans its messages (CleanStatus). Every ledger write applies it.
+func Stamp(st *failoverv1.SiteFailoverStatus) {
+	st.WrittenBy = version.Version
+	CleanStatus(st)
+}
+
+// ErrNewerLedger is wrapped by CheckWriter's refusal.
+var ErrNewerLedger = errors.New("a newer tack wrote the ledger")
+
+// CheckWriter refuses a ledger that a newer release of tack wrote last
+// ([RFC#0003] Requirement 24): this tack's writes would drop the status
+// fields that it does not know. A version that names no release, on
+// either side, is not compared (version.Newer).
+func CheckWriter(sf *failoverv1.SiteFailover) error {
+	if by := sf.Status.WrittenBy; version.Newer(by, version.Version) {
+		return fmt.Errorf("%w: run %s was last written by tack %s, and this tack is %s, which is older: its writes would drop the status fields that it does not know. Nothing was changed: use tack %s or later",
+			ErrNewerLedger, sf.Name, by, version.Version, by)
+	}
+	return nil
+}
+
+// CleanStatus cleans every message of a status: the run's, each step's,
+// the reason it was abandoned, and each history entry's, which it then
+// cuts to MaxHistoryMessage bytes ([RFC#0003] Requirement 22). Every
+// ledger write applies it.
+func CleanStatus(st *failoverv1.SiteFailoverStatus) {
 	st.Message = Clean(st.Captured, st.Message)
 	for i := range st.Steps {
 		st.Steps[i].Message = Clean(st.Captured, st.Steps[i].Message)
 	}
 	if a := st.Abandoned; a != nil {
 		a.Reason = Clean(st.Captured, a.Reason)
+	}
+	for i := range st.History {
+		h := &st.History[i]
+		h.Message = cut(Clean(st.Captured, h.Message), failoverv1.MaxHistoryMessage)
 	}
 }
 

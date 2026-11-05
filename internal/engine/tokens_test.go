@@ -155,9 +155,17 @@ func TestStepErrorHidesToken(t *testing.T) {
 	if msg != `the server rejected promotionToken "$(demotionToken)"` {
 		t.Errorf("step message %q, want the token named", msg)
 	}
-	for where, s := range map[string]string{"run message": sf.Status.Message, "output": out.String(), "error": err.Error()} {
+	where := map[string]string{"run message": sf.Status.Message, "output": out.String(), "error": err.Error(),
+		"Events": strings.Join(testenv.Events(f.clients.Sites["b"], "tack-system", "run-1"), "\n")}
+	for _, h := range sf.Status.History {
+		where["history"] += h.Message + "\n"
+	}
+	if !strings.Contains(where["history"], `promotionToken "$(demotionToken)"`) || !strings.Contains(where["Events"], `promotionToken "$(demotionToken)"`) {
+		t.Errorf("the history or the Events lack the stop, with the token named:\n%s\n%s", where["history"], where["Events"])
+	}
+	for w, s := range where {
 		if strings.Contains(s, "token-a-1") {
-			t.Errorf("%s prints the token: %s", where, s)
+			t.Errorf("%s prints the token: %s", w, s)
 		}
 	}
 }

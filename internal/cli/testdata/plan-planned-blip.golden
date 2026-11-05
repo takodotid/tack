@@ -1,5 +1,5 @@
-  retry     site b did not answer check 1 of 3 (site b is unreachable: context deadline exceeded); next check in 1ms
-  answered  site b on check 2 of 3
+2026-10-27T10:15:00Z   retry     site b did not answer check 1 of 3 (site b is unreachable: context deadline exceeded); next check in 1ms
+2026-10-27T10:15:00Z   answered  site b on check 2 of 3
 Plan for workload pg-main: Planned, site a to site b
 Ledger: SiteFailover tack-system/pg-main-20261027-101500 at site b
 

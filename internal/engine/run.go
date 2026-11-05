@@ -34,6 +34,8 @@ type Options struct {
 	// TakeOver lists the runs whose holds this run may take over, in the
 	// order the operator named them.
 	TakeOver []string
+	// Yes is set when the operator skipped the confirmation with --yes.
+	Yes bool
 }
 
 // ErrStopped is returned when the run stops for the operator.
@@ -59,6 +61,9 @@ func (e *Env) Start(ctx context.Context, sf *failoverv1.SiteFailover, opts Optio
 	if len(takeOver) > 1 {
 		sf.Spec.TakeOvers = takeOver
 	}
+	// Read who runs this process before the ledger exists, so the first
+	// status write follows the create without another request.
+	e.user(ctx)
 	now := metav1.NewTime(e.now())
 	sf.Status.State = failoverv1.RunRunning
 	sf.Status.StartedAt = &now
@@ -71,13 +76,13 @@ func (e *Env) Start(ctx context.Context, sf *failoverv1.SiteFailover, opts Optio
 		return fmt.Errorf("create the ledger: %w", err)
 	}
 	fault.Point("create-ledger", "after")
-	if err := e.checkStarted(ctx, sf); err != nil {
+	if err := e.checkStarted(ctx, sf, opts); err != nil {
 		return err
 	}
 	// The status subresource ignores status on create. The first write
 	// outlives a cancelled run: without it the ledger has no follow-ups.
 	sf.Status = *status
-	if err := e.write(ctx, sf); err != nil {
+	if err := e.record(ctx, sf, e.Entry(ctx, sf, failoverv1.HistoryState(failoverv1.RunRunning), opts.Flags())); err != nil {
 		return err
 	}
 	e.printf("ledger %s/%s created\n", sf.Namespace, sf.Name)
@@ -89,7 +94,7 @@ func (e *Env) Start(ctx context.Context, sf *failoverv1.SiteFailover, opts Optio
 			e.printf("  note      run %s is not marked as taken over (%v); the spec of this run records it\n", old, err)
 		}
 	}
-	return e.resume(ctx, sf, opts)
+	return e.resume(ctx, sf, opts, false)
 }
 
 // Ended tells whether run r no longer blocks a new run of its workload
@@ -114,7 +119,7 @@ func Ended(r *failoverv1.SiteFailover, runs []failoverv1.SiteFailover) bool {
 // (#35 row 35). Each searches after its create, so at most one goes on.
 // A run that finds another active run, or cannot search, is abandoned: it
 // changed nothing, and blocks no later run.
-func (e *Env) checkStarted(ctx context.Context, sf *failoverv1.SiteFailover) error {
+func (e *Env) checkStarted(ctx context.Context, sf *failoverv1.SiteFailover, opts Options) error {
 	if e.Runs == nil {
 		return nil
 	}
@@ -138,7 +143,9 @@ func (e *Env) checkStarted(ctx context.Context, sf *failoverv1.SiteFailover) err
 		return nil
 	}
 	sf.Status = failoverv1.SiteFailoverStatus{Abandoned: &failoverv1.Abandonment{At: metav1.NewTime(e.now()), Reason: reason}}
-	if werr := e.write(ctx, sf); werr != nil {
+	entry := e.Entry(ctx, sf, failoverv1.HistoryAbandoned, opts.Flags())
+	entry.Message = reason
+	if werr := e.record(ctx, sf, entry); werr != nil {
 		return fmt.Errorf("%s. Run %s ran no step and changed nothing, but its ledger could not be marked abandoned (%v): take it over with --take-over %s",
 			reason, sf.Name, werr, sf.Name)
 	}
@@ -223,7 +230,8 @@ type Resumption struct {
 }
 
 // CheckResume refuses a run that cannot resume: a ledger that never
-// recorded its start ([RFC#0003] Requirement 20), a run whose steps are not
+// recorded its start ([RFC#0003] Requirement 20), a ledger that a newer
+// tack wrote last (Requirement 24), a run whose steps are not
 // the plan its driver composes from its ledger (Requirement 21), a run
 // that another run took over, and a run older than another run of the
 // workload, whose plan may no longer match the sites (Requirement 18).
@@ -240,6 +248,9 @@ func (e *Env) CheckResume(ctx context.Context, sf *failoverv1.SiteFailover) (*Re
 	res := &Resumption{env: e, sf: sf, checks: e.SiteChecks(sf.Spec.Mode, sf.Spec.To)}
 	if res.done() {
 		return res, nil
+	}
+	if err := CheckWriter(sf); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrCannotResume, err)
 	}
 	if err := e.checkLatest(ctx, sf, res.checks); err != nil {
 		return nil, err
@@ -272,7 +283,7 @@ func (r *Resumption) run(ctx context.Context, opts Options) error {
 		r.env.printf("run %s already succeeded\n", r.sf.Name)
 		return nil
 	}
-	return r.env.resume(ctx, r.sf, opts)
+	return r.env.resume(ctx, r.sf, opts, true)
 }
 
 // AcceptHEAD is the value of --accept-git-head that names the head the
@@ -366,7 +377,9 @@ func (e *Env) checkLatest(ctx context.Context, sf *failoverv1.SiteFailover, chec
 // ClockSkew before this one may have started after it (#38 item 7).
 const ClockSkew = 10 * time.Second
 
-func (e *Env) resume(ctx context.Context, sf *failoverv1.SiteFailover, opts Options) error {
+// resume runs the remaining steps. A resume, as opposed to the start
+// that Start already recorded, appends its entry Running to the history.
+func (e *Env) resume(ctx context.Context, sf *failoverv1.SiteFailover, opts Options, resumed bool) error {
 	head, err := e.AcceptHead(ctx, sf, opts.AcceptGitHead)
 	if err != nil {
 		return err
@@ -387,7 +400,12 @@ func (e *Env) resume(ctx context.Context, sf *failoverv1.SiteFailover, opts Opti
 	// every new run (#35 row 31).
 	if sf.Status.State != failoverv1.RunSucceeded {
 		sf.Status.State, sf.Status.Reason, sf.Status.Message = failoverv1.RunRunning, "", ""
-		if err := e.write(ctx, sf); err != nil {
+		var entry *failoverv1.HistoryEntry
+		if resumed {
+			h := e.Entry(ctx, sf, failoverv1.HistoryState(failoverv1.RunRunning), opts.Flags())
+			entry = &h
+		}
+		if err := e.writeEntry(ctx, sf, entry); err != nil {
 			return err
 		}
 	}
@@ -443,6 +461,7 @@ func (r *runner) run(ctx context.Context) error {
 					if err := r.write(ctx, r.sf); err != nil {
 						return err
 					}
+					r.event(ctx, r.sf, true, "StepDeferred", step.ID+": "+r.stepStatus(step.ID).Message)
 					r.printf("  deferred  %s (site %s unreachable)\n", step.ID, step.Site)
 				}
 				continue
@@ -461,6 +480,7 @@ func (r *runner) run(ctx context.Context) error {
 				if err := r.write(ctx, r.sf); err != nil {
 					return err
 				}
+				r.event(ctx, r.sf, true, "StepDeferred", step.ID+": "+r.stepStatus(step.ID).Message)
 				r.printf("  deferred  %s (site %s did not answer the read of its cluster's identity)\n", step.ID, step.Site)
 				continue
 			}
@@ -498,6 +518,7 @@ func (r *runner) run(ctx context.Context) error {
 					if err := r.write(ctx, r.sf); err != nil {
 						return err
 					}
+					r.event(ctx, r.sf, true, "StepDeferred", step.ID+": "+r.stepStatus(step.ID).Message)
 					r.printf("  deferred  %s (site %s did not answer the read before its steps)\n", step.ID, step.Site)
 					continue
 				}
@@ -896,12 +917,16 @@ func (r *runner) runStep(ctx context.Context, step *failoverv1.Step) error {
 	st.FinishedAt = nil
 	st.Attempts++
 	st.Message = ""
+	var entry *failoverv1.HistoryEntry
 	if r.sf.Status.State == failoverv1.RunSucceeded {
 		r.sf.Status.State, r.sf.Status.Reason, r.sf.Status.Message = failoverv1.RunRunning, "", ""
+		h := r.Entry(ctx, r.sf, failoverv1.HistoryState(failoverv1.RunRunning), r.opts.Flags())
+		entry = &h
 	}
-	if err := r.write(ctx, r.sf); err != nil {
+	if err := r.writeEntry(ctx, r.sf, entry); err != nil {
 		return err
 	}
+	r.event(ctx, r.sf, false, "StepStarted", step.ID+": "+step.Description)
 	r.printf("  start     %s: %s\n", step.ID, step.Description)
 	fault.Point(step.ID, "before")
 	msg, err := r.exec(ctx, step)
@@ -927,6 +952,7 @@ func (r *runner) runStep(ctx context.Context, step *failoverv1.Step) error {
 	if err := r.write(ctx, r.sf); err != nil {
 		return err
 	}
+	r.event(ctx, r.sf, false, "StepSucceeded", joinMessage(step.ID, msg))
 	if msg != "" {
 		r.printf("  done      %s: %s\n", step.ID, msg)
 	} else {
@@ -980,7 +1006,7 @@ func (r *runner) halt(ctx context.Context, step *failoverv1.Step, err error, set
 	if se.Reason == failoverv1.ReasonGitChanged {
 		r.sf.Status.Git.ChangedRevision = se.Head
 	}
-	if werr := r.write(ctx, r.sf); werr != nil {
+	if werr := r.record(ctx, r.sf, r.Entry(ctx, r.sf, failoverv1.HistoryState(r.sf.Status.State), r.opts.Flags())); werr != nil {
 		return errors.Join(werr, errors.New(r.sf.Status.Message))
 	}
 	r.printf("  %-9s %s: %s: %s\n", strings.ToLower(string(r.sf.Status.State)), step.ID, se.Reason, se.Message)
@@ -1009,7 +1035,7 @@ func (r *runner) finish(ctx context.Context) error {
 	if r.sf.Status.FinishedAt == nil {
 		r.sf.Status.FinishedAt = &now
 	}
-	if err := r.write(ctx, r.sf); err != nil {
+	if err := r.record(ctx, r.sf, r.Entry(ctx, r.sf, failoverv1.HistoryState(failoverv1.RunSucceeded), r.opts.Flags())); err != nil {
 		return err
 	}
 	r.printf("run %s succeeded: %s\n", r.sf.Name, r.sf.Status.Message)
@@ -1120,9 +1146,43 @@ const writeTimeout = 30 * time.Second
 // and a status equal to the one sent is that write. Any other failure ends
 // the process, with a message by its kind (#35 row 32).
 func (e *Env) write(ctx context.Context, sf *failoverv1.SiteFailover) error {
+	return e.writeEntry(ctx, sf, nil)
+}
+
+// record writes the status with entry appended to its history, then
+// records entry's Event ([RFC#0003] Requirements 22 and 23).
+func (e *Env) record(ctx context.Context, sf *failoverv1.SiteFailover, entry failoverv1.HistoryEntry) error {
+	return e.writeEntry(ctx, sf, &entry)
+}
+
+// writeEntry writes the status as write does, with entry, when set,
+// appended to its history once, however often the write is repeated. Its
+// Event follows the write.
+func (e *Env) writeEntry(ctx context.Context, sf *failoverv1.SiteFailover, entry *failoverv1.HistoryEntry) error {
+	if entry != nil {
+		AppendHistory(&sf.Status, *entry)
+	}
+	if err := e.update(ctx, sf); err != nil {
+		return err
+	}
+	if rec, ok := e.Ledger.(Recorder); ok && entry != nil && len(sf.Status.History) > 0 {
+		e.entryEvent(ctx, rec, sf, sf.Status.History[len(sf.Status.History)-1])
+	}
+	return nil
+}
+
+// joinMessage returns "id: msg", or id alone when msg is empty.
+func joinMessage(id, msg string) string {
+	if msg == "" {
+		return id
+	}
+	return id + ": " + msg
+}
+
+func (e *Env) update(ctx context.Context, sf *failoverv1.SiteFailover) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
 	defer cancel()
-	cleanStatus(&sf.Status)
+	Stamp(&sf.Status)
 	sent := sf.DeepCopy()
 	start := e.now()
 	for attempt := 1; ; attempt++ {

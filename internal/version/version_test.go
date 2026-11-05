@@ -39,3 +39,39 @@ func TestDocLink(t *testing.T) {
 		}
 	}
 }
+
+// A ledger records the version of the tack that last wrote it, and an
+// older release refuses to write it ([RFC#0003] Requirement 24). Versions
+// that name no release are never newer.
+func TestNewer(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		want bool
+	}{
+		{"v1.3.1", "v1.3.0", true},
+		{"v1.4.0", "v1.3.9", true},
+		{"v2.0.0", "v1.99.99", true},
+		{"v1.10.0", "v1.9.0", true},
+		{"v1.3.0", "v1.3.0", false},
+		{"v1.3.0", "v1.3.1", false},
+		{"v1.2.9", "v1.3.0", false},
+		{"v1.3.0-5-g2961117", "v1.3.0", true},
+		{"v1.3.0", "v1.3.0-5-g2961117", false},
+		{"v1.3.1", "v1.3.0-5-g2961117", true},
+		{"v1.3.0-6-gabcdef0", "v1.3.0-5-g2961117", true},
+		{"v1.3.0-dirty", "v1.3.0", false},
+		{"v1.3.0-5-g2961117-dirty", "v1.3.0", true},
+		{"v1.4.0", "dev", false},
+		{"dev", "v1.3.0", false},
+		{"v1.4.0", "", false},
+		{"", "v1.3.0", false},
+		{"v1.4.0-rc.1", "v1.3.0", false},
+		{"v1.4.0", "v1.3.0-rc.1", false},
+		{"2961117", "v1.3.0", false},
+		{"v1.4.0\n", "v1.3.0", false},
+	} {
+		if got := Newer(c.a, c.b); got != c.want {
+			t.Errorf("Newer(%q, %q) = %v, want %v", c.a, c.b, got, c.want)
+		}
+	}
+}

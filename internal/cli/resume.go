@@ -189,7 +189,8 @@ func newResume(o *options) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			out := cmd.OutOrStdout()
-			runs, err := l.find(ctx, o, args[0], out)
+			progress := o.progress(out)
+			runs, err := l.find(ctx, o, args[0], progress)
 			if err != nil {
 				return err
 			}
@@ -199,7 +200,7 @@ func newResume(o *options) *cobra.Command {
 			}
 			spec := &r.sf.Spec.Workload.Spec
 			ledgerSite := r.sf.Spec.To
-			env, closeEnv, err := o.factory.Env(ctx, o.kubeconfig, spec, ledgerSite, out)
+			env, closeEnv, err := o.factory.Env(ctx, o.kubeconfig, spec, ledgerSite, progress)
 			if err != nil {
 				return err
 			}
@@ -230,7 +231,7 @@ func newResume(o *options) *cobra.Command {
 				}
 				fmt.Fprintf(out, "--accept-git-head HEAD is commit %s, the head of branch %s\n", head, spec.Git.Branch)
 			}
-			opts.AcceptGitHead = head
+			opts.AcceptGitHead, opts.Yes = head, yes
 			if err := o.confirm(out, yes, sf.Spec.Workload.Name); err != nil {
 				return err
 			}
@@ -245,8 +246,10 @@ func newResume(o *options) *cobra.Command {
 }
 
 const statusLong = `Status shows runs from their ledgers. Without RUN it lists the runs of the
-workload at every reachable site. With RUN it shows that run's phases, steps,
-held objects, Git commits, captured values (by name only) and follow-ups.`
+workload at every reachable site. With RUN it shows that run's phases and
+steps with their times and attempts, held objects, Git commits, captured
+values (by name only), follow-ups, and the history of the run's state: who
+started, stopped and resumed it, when, with which tack and flags.`
 
 func newStatus(o *options) *cobra.Command {
 	var l ledgerFlags
@@ -269,7 +272,7 @@ func newStatus(o *options) *cobra.Command {
 			if len(args) > 0 {
 				name = args[0]
 			}
-			runs, err := l.find(cmd.Context(), o, name, cmd.ErrOrStderr())
+			runs, err := l.find(cmd.Context(), o, name, o.progress(cmd.ErrOrStderr()))
 			if err != nil {
 				return err
 			}
@@ -311,6 +314,9 @@ func redacted(sf *failoverv1.SiteFailover) *failoverv1.SiteFailover {
 	}
 	if st.Abandoned != nil {
 		st.Abandoned.Reason = engine.Clean(st.Captured, st.Abandoned.Reason)
+	}
+	for i := range st.History {
+		st.History[i].Message = engine.Clean(st.Captured, st.History[i].Message)
 	}
 	return out
 }
