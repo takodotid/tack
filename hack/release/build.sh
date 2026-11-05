@@ -46,4 +46,5 @@ for f in *.tar.gz *.zip *.cdx.json *.tgz *.yaml; do
 	printf '%s\n' "${assets[@]}" | grep -qxF -- "$f" || refuse "dist/$f is not an asset of $version"
 done
 sha256sum "${assets[@]}" >SHA256SUMS
+cat SHA256SUMS
 echo "build.sh: ${#assets[@]} assets of $version and SHA256SUMS in dist/"
