@@ -1,7 +1,9 @@
 package engine
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -763,15 +765,58 @@ func (r *runner) endPhase(p failoverv1.Phase, now metav1.Time) {
 	}
 }
 
+// writeTimeout bounds a ledger write, its repeats included.
+const writeTimeout = 30 * time.Second
+
 // write records the status. It outlives a cancelled run, so an interrupt
-// is still recorded.
+// is still recorded. A write that got no answer, or an answer that the API
+// server cannot serve it now, is repeated with the same resourceVersion
+// until writeTimeout ([RFC#0003] Requirement 5). A repeat that conflicts
+// may follow a write that landed without its answer: the ledger is read,
+// and a status equal to the one sent is that write. Any other failure ends
+// the process, with a message by its kind (#35 row 32).
 func (e *Env) write(ctx context.Context, sf *failoverv1.SiteFailover) error {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
 	defer cancel()
-	if err := e.Ledger.UpdateStatus(ctx, sf); err != nil {
-		return fmt.Errorf("write the ledger (another tack process may be running this run): %w", err)
+	sent := sf.DeepCopy()
+	start := e.now()
+	for attempt := 1; ; attempt++ {
+		err := e.Ledger.UpdateStatus(ctx, sf)
+		switch {
+		case err == nil:
+			return nil
+		case apierrors.IsConflict(err) && attempt > 1:
+			if stored, gerr := e.Ledger.Get(ctx, sent.Name); gerr == nil && sameStatus(&stored.Status, &sent.Status) {
+				// An earlier attempt landed; its answer was lost.
+				*sf = *stored
+				return nil
+			}
+			return fmt.Errorf("write the ledger (another tack process may be running this run): %w", err)
+		case apierrors.IsConflict(err):
+			return fmt.Errorf("write the ledger (another tack process may be running this run): %w", err)
+		case apierrors.IsForbidden(err):
+			return fmt.Errorf("write the ledger: the operator may not update sitefailovers/status in namespace %s at the ledger's site: %w", sent.Namespace, err)
+		case apierrors.IsNotFound(err):
+			return fmt.Errorf("write the ledger: run %s is no longer in namespace %s at the ledger's site: %w", sent.Name, sent.Namespace, err)
+		case !kube.Transient(err) || ctx.Err() != nil:
+			return fmt.Errorf("write the ledger: %w", err)
+		}
+		e.printf("  retry     the ledger write got no answer (%v); next in %s\n", err, e.poll())
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("write the ledger: no answer to %d attempts over %s: %w", attempt, e.now().Sub(start).Round(time.Second), err)
+		case <-time.After(e.poll()):
+		}
+		*sf = *sent.DeepCopy()
 	}
-	return nil
+}
+
+// sameStatus compares two statuses as the API server stores them: times
+// in whole seconds.
+func sameStatus(a, b *failoverv1.SiteFailoverStatus) bool {
+	ja, aerr := json.Marshal(a)
+	jb, berr := json.Marshal(b)
+	return aerr == nil && berr == nil && bytes.Equal(ja, jb)
 }
 
 func (e *Env) printf(format string, a ...any) {
