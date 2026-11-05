@@ -319,7 +319,7 @@ func (f *Flux) VerifyGit(_ context.Context, site string, held []failoverv1.HeldO
 }
 
 // VerifyNoop implements engine.Flux.
-func (f *Flux) VerifyNoop(_ context.Context, site string, _ []failoverv1.HeldObject, _ []failoverv1.ObjectField, _ bool) (string, error) {
+func (f *Flux) VerifyNoop(_ context.Context, site string, _ []failoverv1.HeldObject, _ []failoverv1.ObjectField, _ bool, _ time.Duration) (string, error) {
 	return "nothing changed", f.call("VerifyNoop", site)
 }
 

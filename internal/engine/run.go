@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
@@ -50,7 +51,7 @@ func (e *Env) Start(ctx context.Context, sf *failoverv1.SiteFailover, opts Optio
 		sf.Status.Steps = append(sf.Status.Steps, failoverv1.StepStatus{ID: s.ID, State: failoverv1.StepPending})
 	}
 	status := sf.Status.DeepCopy()
-	if err := e.Ledger.Create(ctx, sf); err != nil {
+	if err := e.create(ctx, sf, opts.TakeOver); err != nil {
 		return fmt.Errorf("create the ledger: %w", err)
 	}
 	fault.Point("create-ledger", "after")
@@ -67,6 +68,64 @@ func (e *Env) Start(ctx context.Context, sf *failoverv1.SiteFailover, opts Optio
 		}
 	}
 	return e.resume(ctx, sf, opts)
+}
+
+// MaxRunNames is how many names Start tries for a run: the plan's name,
+// then the same name with -2 up to -9 appended.
+const MaxRunNames = 9
+
+// create creates the ledger. A run's name holds its plan's time to the
+// second, so two runs of a workload planned in one second get one name.
+// When the name is taken by a run that no longer blocks a new one (it
+// succeeded, another run took it over, or this run takes it over), create
+// tries the name with -2, -3 and so on appended ([RFC#0003] Requirement 7).
+// Any other run with the name refuses the run, as the search for active
+// runs does: it may be a second tack process starting the same switch.
+func (e *Env) create(ctx context.Context, sf *failoverv1.SiteFailover, takeOver string) error {
+	base := sf.Name
+	for n := 1; ; n++ {
+		err := e.Ledger.Create(ctx, sf)
+		if !apierrors.IsAlreadyExists(err) {
+			return err
+		}
+		other, gerr := e.Ledger.Get(ctx, sf.Name)
+		if gerr != nil {
+			return fmt.Errorf("the name %s is taken, and its ledger cannot be read: %w", sf.Name, gerr)
+		}
+		switch {
+		case other.Status.State == failoverv1.RunSucceeded, other.Status.SupersededBy != "", other.Name == takeOver:
+		case other.Status.State == "":
+			return fmt.Errorf("the name %s is taken by a run that has not recorded its start: another tack process may be starting it. Nothing was changed; check tack status %s, then plan again",
+				sf.Name, sf.Name)
+		default:
+			return fmt.Errorf("the name %s is taken by a run that is %s: another tack process may be running it. Nothing was changed; check tack status %s",
+				sf.Name, other.Status.State, sf.Name)
+		}
+		if n == MaxRunNames {
+			return fmt.Errorf("the names %s to %s-%d are all taken: %w", base, base, n, err)
+		}
+		name := fmt.Sprintf("%s-%d", base, n+1)
+		e.printf("  note      the name %s is taken by a run that is %s; this run is named %s\n", sf.Name, orPending(other.Status.State), name)
+		rename(sf, name)
+	}
+}
+
+// rename names a run that has no ledger yet. The run's commit message names
+// it too.
+func rename(sf *failoverv1.SiteFailover, name string) {
+	sf.Name = name
+	for i := range sf.Spec.Steps {
+		if g := sf.Spec.Steps[i].Git; g != nil {
+			g.Message = commitMessage(sf.Spec.Workload.Name, sf.Spec.From, sf.Spec.To, sf.Spec.Mode, name)
+		}
+	}
+}
+
+func orPending(s failoverv1.RunState) string {
+	if s == "" {
+		return "not started"
+	}
+	return string(s)
 }
 
 // Resume runs the remaining steps of a ledger. It refuses a ledger that
@@ -134,7 +193,8 @@ func (e *Env) resume(ctx context.Context, sf *failoverv1.SiteFailover, opts Opti
 		return err
 	}
 	r := &runner{Env: e, sf: sf, opts: opts, checks: e.SiteChecks(sf.Spec.Mode, sf.Spec.To),
-		reachable: map[string]error{}, retried: map[string]string{}, gated: map[string]bool{}, identified: map[string]bool{}}
+		reachable: map[string]error{}, retried: map[string]string{}, gated: map[string]bool{}, identified: map[string]bool{},
+		verified: map[string]bool{}}
 	return r.run(ctx)
 }
 
@@ -150,6 +210,8 @@ type runner struct {
 	retried    map[string]string
 	gated      map[string]bool
 	identified map[string]bool
+	// verified holds the sites whose VerifyGit succeeded in this process.
+	verified map[string]bool
 }
 
 func (r *runner) run(ctx context.Context) error {
@@ -173,7 +235,7 @@ func (r *runner) run(ctx context.Context) error {
 					return r.end(ctx, step, stop.Ask(failoverv1.ReasonStepFailed, "site %s is unreachable: %v", step.Site, err))
 				}
 				if st.State != failoverv1.StepDeferred {
-					st.State, st.Message = failoverv1.StepDeferred, fmt.Sprintf("site %s unreachable: %v", step.Site, err)
+					r.deferStep(step, fmt.Sprintf("site %s unreachable: %v", step.Site, err))
 					if err := r.write(ctx, r.sf); err != nil {
 						return err
 					}
@@ -192,7 +254,7 @@ func (r *runner) run(ctx context.Context) error {
 					// The site gave no answer to the read: it stays
 					// unreachable for this process.
 					r.reachable[step.Site] = &kube.UnreachableError{Err: err}
-					st.State, st.Message = failoverv1.StepDeferred, fmt.Sprintf("site %s unreachable: %v", step.Site, err)
+					r.deferStep(step, fmt.Sprintf("site %s unreachable: %v", step.Site, err))
 					if err := r.write(ctx, r.sf); err != nil {
 						return err
 					}
@@ -201,11 +263,40 @@ func (r *runner) run(ctx context.Context) error {
 				}
 			}
 		}
+		if step.Type == failoverv1.StepRelease && !r.verified[step.Site] {
+			// The check of Git against live ran in an earlier process,
+			// maybe hours ago: run it again before the site's first
+			// release ([RFC#0005] Requirement 8).
+			if v := r.verifyStep(step.Site); v != nil {
+				if err := r.runStep(ctx, v); err != nil {
+					return err
+				}
+			}
+		}
 		if err := r.runStep(ctx, step); err != nil {
 			return err
 		}
 	}
 	return r.finish(ctx)
+}
+
+// verifyStep returns the VerifyGit step of a site.
+func (r *runner) verifyStep(site string) *failoverv1.Step {
+	for i := range r.sf.Spec.Steps {
+		if s := &r.sf.Spec.Steps[i]; s.Type == failoverv1.StepVerifyGit && s.Site == site {
+			return s
+		}
+	}
+	return nil
+}
+
+// deferStep records a step Deferred, with the time, and ends its phase when
+// that was its last step that could run ([RFC#0003] Requirements 4 and 12).
+func (r *runner) deferStep(step *failoverv1.Step, msg string) {
+	now := metav1.NewTime(r.now())
+	st := r.stepStatus(step.ID)
+	st.State, st.FinishedAt, st.Message = failoverv1.StepDeferred, &now, msg
+	r.endPhase(step.Phase, now)
 }
 
 // errUnread is returned by gate when the site did not answer its read.
@@ -301,12 +392,16 @@ func (r *runner) runStep(ctx context.Context, step *failoverv1.Step) error {
 	if err != nil {
 		return r.end(ctx, step, err)
 	}
+	msg = r.hideCaptured(msg)
 	if note := r.retried[step.Site]; note != "" {
 		delete(r.retried, step.Site)
 		if msg != "" {
 			msg += "; "
 		}
 		msg += note
+	}
+	if step.Type == failoverv1.StepVerifyGit {
+		r.verified[step.Site] = true
 	}
 	done := metav1.NewTime(r.now())
 	st = r.stepStatus(step.ID)
@@ -339,6 +434,7 @@ func (r *runner) halt(ctx context.Context, step *failoverv1.Step, err error, set
 	if !ok {
 		se = &stop.Error{Reason: failoverv1.ReasonStepFailed, Message: err.Error()}
 	}
+	se = &stop.Error{Reason: se.Reason, Message: r.hideCaptured(se.Message), Wait: se.Wait}
 	st := r.stepStatus(step.ID)
 	st.Message = se.Message
 	if note := r.retried[step.Site]; note != "" {
@@ -356,11 +452,15 @@ func (r *runner) halt(ctx context.Context, step *failoverv1.Step, err error, set
 	}
 	if setState {
 		st.State = state
+		if state == failoverv1.StepFailed {
+			now := metav1.NewTime(r.now())
+			st.FinishedAt = &now
+		}
 	}
 	r.sf.Status.Reason = se.Reason
 	r.sf.Status.Message = fmt.Sprintf("step %s: %s", step.ID, se.Message)
 	if werr := r.write(ctx, r.sf); werr != nil {
-		return errors.Join(werr, err)
+		return errors.Join(werr, errors.New(r.sf.Status.Message))
 	}
 	r.printf("  %-9s %s: %s: %s\n", strings.ToLower(string(r.sf.Status.State)), step.ID, se.Reason, se.Message)
 	return fmt.Errorf("%w: %s", ret, r.sf.Status.Message)
@@ -428,17 +528,22 @@ func (r *runner) stepStatus(id string) *failoverv1.StepStatus {
 	return &r.sf.Status.Steps[len(r.sf.Status.Steps)-1]
 }
 
+// startPhase records a phase's start at its first step. A step of a phase
+// that already finished, such as a deferred step whose site came back,
+// makes it unfinished again until endPhase.
 func (r *runner) startPhase(p failoverv1.Phase, now metav1.Time) {
 	r.sf.Status.Phase = p
 	for i := range r.sf.Status.Phases {
 		if r.sf.Status.Phases[i].Name == p {
+			r.sf.Status.Phases[i].FinishedAt = nil
 			return
 		}
 	}
 	r.sf.Status.Phases = append(r.sf.Status.Phases, failoverv1.PhaseStatus{Name: p, StartedAt: &now})
 }
 
-// endPhase records a phase's end once its last step that can run has run.
+// endPhase records a phase's end once each of its steps is Succeeded or
+// Deferred.
 func (r *runner) endPhase(p failoverv1.Phase, now metav1.Time) {
 	for _, s := range r.sf.Spec.Steps {
 		if s.Phase != p {

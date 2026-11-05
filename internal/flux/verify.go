@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/fluxcd/pkg/ssa"
 	"github.com/fluxcd/pkg/ssa/jsondiff"
@@ -222,7 +223,8 @@ func classify(objs []checked, fields []failoverv1.ObjectField, mask *masker) (fi
 				_, gp := lookup(o.Git.Object, fp[:len(fp)-1])
 				_, lp := lookup(o.Live.Object, fp[:len(fp)-1])
 				if !gp && !lp {
-					return fs, fmt.Errorf("%s field %s: the path resolves in neither Git nor live; a key that holds a dot cannot be written in this form",
+					return fs, stop.Ask(failoverv1.ReasonGitDiffersFromLive,
+						"%s field %s: the path resolves in neither Git nor live; a key that holds a dot cannot be written in this form",
 						refString(o.Ref), names[id][i])
 				}
 			}
@@ -309,14 +311,16 @@ func body(u *unstructured.Unstructured) *unstructured.Unstructured {
 
 // VerifyNoop implements engine.Flux. The ledger keeps each object's
 // generation at release, not its field values. So it checks:
-//   - the generation is the one at release, which covers every field
-//     outside metadata;
-//   - the object is not held again;
-//   - each owning Kustomization is not failing, and at which revision it is.
+//   - each owning Kustomization is Ready with reason
+//     ReconciliationSucceeded, waiting up to timeout for a reconcile in
+//     flight to end ([RFC#0005] Requirement 10);
+//   - then, so that no apply in flight follows the check, the generation
+//     is the one at release, which covers every field outside metadata;
+//   - the object is not held again.
 //
 // A field under metadata, or an object without a recorded generation, is
 // not covered; the result says so.
-func (f *Flux) VerifyNoop(ctx context.Context, site string, held []failoverv1.HeldObject, fields []failoverv1.ObjectField, strict bool) (string, error) {
+func (f *Flux) VerifyNoop(ctx context.Context, site string, held []failoverv1.HeldObject, fields []failoverv1.ObjectField, strict bool, timeout time.Duration) (string, error) {
 	if len(held) == 0 {
 		return "no object is held at site " + site, nil
 	}
@@ -324,16 +328,26 @@ func (f *Flux) VerifyNoop(ctx context.Context, site string, held []failoverv1.He
 	if err != nil {
 		return "", err
 	}
-	var changed, notes []string
-	unchecked := 0
-	moved := map[objID]bool{}
-	known := map[objID]bool{}
 	var order []failoverv1.ObjectKey
 	seenKs := map[failoverv1.ObjectKey]bool{}
 	for _, h := range held {
 		if h.ReleasedAt == nil {
 			return "", fmt.Errorf("%s at site %s is not released", refString(h.Object), site)
 		}
+		if k := h.Kustomization; k.Name != "" && !seenKs[k] {
+			seenKs[k] = true
+			order = append(order, k)
+		}
+	}
+	revs, err := f.waitReady(ctx, c, site, order, timeout)
+	if err != nil {
+		return "", err
+	}
+	var changed, notes []string
+	unchecked := 0
+	moved := map[objID]bool{}
+	known := map[objID]bool{}
+	for _, h := range held {
 		u, err := getObject(ctx, c, h.Object)
 		if err != nil {
 			return "", err
@@ -351,10 +365,6 @@ func (f *Flux) VerifyNoop(ctx context.Context, site string, held []failoverv1.He
 		case u.GetGeneration() != h.Generation:
 			changed = append(changed, fmt.Sprintf("%s generation %d at release, now %d", refString(h.Object), h.Generation, u.GetGeneration()))
 			moved[id] = true
-		}
-		if k := h.Kustomization; k.Name != "" && !seenKs[k] {
-			seenKs[k] = true
-			order = append(order, k)
 		}
 	}
 	for _, fl := range fields {
@@ -374,22 +384,6 @@ func (f *Flux) VerifyNoop(ctx context.Context, site string, held []failoverv1.He
 			notes = append(notes, fmt.Sprintf("%s field %s may have changed", refString(fl.Object), fl.Field))
 		}
 	}
-	var revs []string
-	for _, k := range order {
-		u, err := getKind(ctx, c, KustomizationGVK, k)
-		if err != nil {
-			return "", err
-		}
-		st, reason, msg := ready(u)
-		switch {
-		case st == "False":
-			return "", fmt.Errorf("Kustomization %s at site %s is failing after release: %s: %s", keyString(k), site, reason, msg)
-		case st == "True" && reason == ReasonSucceeded:
-			revs = append(revs, keyString(k)+" at "+str(u, "status", "lastAppliedRevision"))
-		default:
-			notes = append(notes, fmt.Sprintf("Kustomization %s is reconciling (Ready=%s %s)", keyString(k), st, reason))
-		}
-	}
 	if len(changed) > 0 && strict {
 		return "", stop.Ask(failoverv1.ReasonFluxChanged, "at site %s, objects changed after release: %s", site, strings.Join(changed, "; "))
 	}
@@ -404,4 +398,45 @@ func (f *Flux) VerifyNoop(ctx context.Context, site string, held []failoverv1.He
 		msg += "; " + strings.Join(notes, "; ")
 	}
 	return msg, nil
+}
+
+// waitReady waits until each Kustomization is Ready with reason
+// ReconciliationSucceeded, and returns the revision each applied. Ready
+// False fails at once; any other state is waited on until timeout.
+func (f *Flux) waitReady(ctx context.Context, c client.Client, site string, ks []failoverv1.ObjectKey, timeout time.Duration) ([]string, error) {
+	deadline := f.now().Add(timeout)
+	for {
+		var revs, pending []string
+		for _, k := range ks {
+			u, err := getKind(ctx, c, KustomizationGVK, k)
+			if err != nil {
+				return nil, err
+			}
+			st, reason, msg := ready(u)
+			switch {
+			case st == "False":
+				return nil, fmt.Errorf("Kustomization %s at site %s is failing after release: %s: %s", keyString(k), site, reason, msg)
+			case st == "True" && reason == ReasonSucceeded:
+				revs = append(revs, keyString(k)+" at "+str(u, "status", "lastAppliedRevision"))
+			default:
+				pending = append(pending, fmt.Sprintf("Kustomization %s is not Ready (Ready=%s %s)", keyString(k), orUnset(st), reason))
+			}
+		}
+		if len(pending) == 0 {
+			return revs, nil
+		}
+		if !f.now().Before(deadline) {
+			return nil, fmt.Errorf("at site %s after release, after %s: %s", site, timeout, strings.Join(pending, "; "))
+		}
+		if err := f.sleep(ctx); err != nil {
+			return nil, err
+		}
+	}
+}
+
+func orUnset(s string) string {
+	if s == "" {
+		return "unset"
+	}
+	return s
 }

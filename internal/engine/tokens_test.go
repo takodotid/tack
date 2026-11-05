@@ -3,6 +3,7 @@ package engine_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -90,5 +91,73 @@ func mergePatchCluster(t *testing.T, c client.Client, name, patch string) {
 	}
 	if err := c.Patch(context.Background(), u, client.RawPatch("application/merge-patch+json", []byte(patch))); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// #35 row 41 (RFC0009 Requirement 10). A Wait on a captured value that
+// times out names the value, never prints it, nor the live value it
+// compared: tack status prints step messages, and captured values only by
+// name.
+func TestWaitTimeoutHidesToken(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	env := f.env("b")
+	env.Ledger = &diesBefore{Ledger: env.Ledger, step: "wait-promoted-b"}
+	if err := env.Start(ctx, f.plan("b", failoverv1.ModePlanned), engine.Options{}); err == nil {
+		t.Fatal("the run went on after its process died")
+	}
+	sf := f.ledger("b")
+	token := sf.Status.Captured["demotionToken"]
+	if len(token) < 8 {
+		t.Fatalf("captured token %q is too short for the test", token)
+	}
+	// The ledger's value no longer matches what b used, so the wait times out.
+	other := "b3RoZXItdG9rZW4tdGhhdC13YXMtbmV2ZXItdXNlZA=="
+	sf.Status.Captured["demotionToken"] = other
+	if err := f.env("b").Ledger.UpdateStatus(ctx, sf); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	env = f.env("b")
+	env.Out = &out
+	err := env.Resume(ctx, f.ledger("b"), engine.Options{})
+	sf = f.ledger("b")
+	if !errors.Is(err, engine.ErrStopped) || stepState(sf, "wait-promoted-b") != failoverv1.StepFailed {
+		t.Fatalf("resume: %v; wait-promoted-b %s", err, stepState(sf, "wait-promoted-b"))
+	}
+	msg := stepMessage(sf, "wait-promoted-b")
+	if !strings.Contains(msg, "$(demotionToken)") {
+		t.Errorf("step message %q does not name $(demotionToken)", msg)
+	}
+	for where, s := range map[string]string{"step message": msg, "run message": sf.Status.Message, "output": out.String(), "error": err.Error()} {
+		for name, v := range map[string]string{"captured": other, "live": token} {
+			if strings.Contains(s, v) {
+				t.Errorf("%s prints the %s token: %s", where, name, s)
+			}
+		}
+	}
+}
+
+// Any error that carries a captured value, such as an API server's answer
+// that repeats a patch, is recorded and printed with the value's name.
+func TestStepErrorHidesToken(t *testing.T) {
+	f := newFixture(t)
+	f.flux.Fail["VerifyNoop"] = errors.New(`the server rejected promotionToken "token-a-1"`)
+	var out strings.Builder
+	env := f.env("b")
+	env.Out = &out
+	err := env.Start(context.Background(), f.plan("b", failoverv1.ModePlanned), engine.Options{})
+	sf := f.ledger("b")
+	if sf.Status.Captured["demotionToken"] != "token-a-1" {
+		t.Fatalf("captured %q, want the fake operator's token-a-1", sf.Status.Captured["demotionToken"])
+	}
+	msg := stepMessage(sf, "verify-noop-a")
+	if msg != `the server rejected promotionToken "$(demotionToken)"` {
+		t.Errorf("step message %q, want the token named", msg)
+	}
+	for where, s := range map[string]string{"run message": sf.Status.Message, "output": out.String(), "error": err.Error()} {
+		if strings.Contains(s, "token-a-1") {
+			t.Errorf("%s prints the token: %s", where, s)
+		}
 	}
 }

@@ -405,6 +405,27 @@ func stoppedRun(t *testing.T, name string) *failoverv1.SiteFailover {
 	}
 }
 
+// tack resume with --context finds the run at one site, but searches every
+// site of the run's Workload snapshot for a newer run. Issue #27.
+func TestResumeContextSearchesEverySite(t *testing.T) {
+	older := stoppedRun(t, "pg-main-older")
+	newer := siteLossRun("a", fixedNow)
+	newer.Name, newer.CreationTimestamp = "pg-main-newer", metav1.NewTime(fixedNow)
+	f := newFactory(map[string][]client.Object{
+		"a": append(testenv.Site("a", "b", 0), newer),
+		"b": append(testenv.Site("b", "b", 2), older),
+	})
+	// The fakes ignore contexts: the context's site is site b's cluster.
+	f.clients.Sites[contextSite] = f.clients.Sites["b"]
+	out, code := run(t, f, "resume", "pg-main-older", "--context", "site-b", "--yes")
+	if code != ExitError || !strings.Contains(out, "run pg-main-newer started after run pg-main-older") {
+		t.Fatalf("exit %d, want %d with a refusal naming the newer run at site a:\n%s", code, ExitError, out)
+	}
+	if len(f.flux.Calls) > 0 {
+		t.Errorf("the refused resume changed something: %v", f.flux.Calls)
+	}
+}
+
 // A run started with --take-over records the run it took over, and marks
 // that run's ledger. The old run then cannot resume, and no longer blocks
 // a new run. Issue #27.
@@ -439,6 +460,29 @@ func TestTakeOverIsRecorded(t *testing.T) {
 	}
 	if len(f.flux.Calls) != calls {
 		t.Errorf("the refused commands changed something: %v", f.flux.Calls[calls:])
+	}
+}
+
+// Issue #37. A run that takes over a run planned in the same second gets
+// the next free name: the run it takes over never recorded its start, and
+// holds the name. The e2e's TestTakeOver hits this on a fast machine.
+func TestTakeOverInTheSameSecond(t *testing.T) {
+	never := stoppedRun(t, "pg-main-20261027-101500")
+	never.Status = failoverv1.SiteFailoverStatus{}
+	f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": append(testenv.Site("b", "a", 0), never)})
+	f.flux.Fail["Hold"] = errors.New("stop at the first hold")
+	out, code := run(t, f, "run", "-f", "testdata/workload.yaml", "--to", "b", "--take-over", "pg-main-20261027-101500", "--yes")
+	if code != ExitStopped || !strings.Contains(out, "this run is named pg-main-20261027-101500-2\n") ||
+		!strings.Contains(out, "ledger tack-system/pg-main-20261027-101500-2 created") {
+		t.Fatalf("exit %d, want %d with a run named pg-main-20261027-101500-2:\n%s", code, ExitStopped, out)
+	}
+	store := &ledger.Store{Client: f.clients.Sites["b"], Namespace: "tack-system"}
+	ctx := context.Background()
+	if sf, err := store.Get(ctx, "pg-main-20261027-101500-2"); err != nil || sf.Spec.TakeOver != "pg-main-20261027-101500" {
+		t.Fatalf("new run: %v, spec.takeOver %q", err, sf.Spec.TakeOver)
+	}
+	if sf, err := store.Get(ctx, "pg-main-20261027-101500"); err != nil || sf.Status.SupersededBy != "pg-main-20261027-101500-2" {
+		t.Fatalf("old run: %v, status.supersededBy %q", err, sf.Status.SupersededBy)
 	}
 }
 
@@ -605,5 +649,26 @@ func TestYAMLRedactsGitURL(t *testing.T) {
 	}
 	if out, _ := run(t, f, "status", "pg-main-earlier", "-f", "testdata/workload.yaml"); strings.Contains(out, "FAKE-TOKEN-123") {
 		t.Errorf("tack status prints the credential:\n%s", out)
+	}
+}
+
+// #35 row 41 (RFC0009 Requirement 10). A ledger whose messages an older
+// Tack wrote with a captured value in them: the text of tack status names
+// the value.
+func TestStatusHidesCapturedValues(t *testing.T) {
+	const token = "eyJsc24iOiIwLzMwMDAwMDAifQ=="
+	old := stoppedRun(t, "pg-main-earlier")
+	old.Status.Captured = map[string]string{"demotionToken": token}
+	old.Status.Message = "step hold-a-cluster-pg-a: wanted " + token
+	old.Status.Steps[0].Message = `{.status.lastPromotionToken} is "", want Equals "` + token + `"`
+	f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": append(testenv.Site("b", "a", 0), old)})
+	out, code := run(t, f, "status", "pg-main-earlier", "-f", "testdata/workload.yaml")
+	if code != ExitOK || strings.Contains(out, token) {
+		t.Fatalf("exit %d, tack status prints the captured value:\n%s", code, out)
+	}
+	for _, want := range []string{"Message: step hold-a-cluster-pg-a: wanted $(demotionToken)\n", `want Equals "$(demotionToken)"`, "Captured: demotionToken\n"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
 	}
 }

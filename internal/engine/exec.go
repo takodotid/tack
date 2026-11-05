@@ -18,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
+	"github.com/takodotid/tack/internal/config"
 	"github.com/takodotid/tack/internal/stop"
 )
 
@@ -43,7 +44,7 @@ func (r *runner) exec(ctx context.Context, s *failoverv1.Step) (string, error) {
 	case failoverv1.StepRelease:
 		return r.release(ctx, s)
 	case failoverv1.StepVerifyNoop:
-		return r.Flux.VerifyNoop(ctx, s.Site, r.siteHeld(s.Site), s.VerifyNoop.Fields, r.strict())
+		return r.Flux.VerifyNoop(ctx, s.Site, r.siteHeld(s.Site), s.VerifyNoop.Fields, r.strict(), r.fluxTimeout())
 	case failoverv1.StepRouting:
 		if r.Routing == nil {
 			return "", fmt.Errorf("routing is not available in this build")
@@ -128,17 +129,40 @@ func (r *runner) reconcile(ctx context.Context, s *failoverv1.Step) (string, err
 		msg += "; " + strings.Join(notes, "; ")
 	}
 	if s.Phase == failoverv1.PhaseHold {
-		g := &r.sf.Status.Git
-		switch {
-		case applied == "":
-		case g.BaseRevision == "":
-			g.BaseRevision = applied
-		case !SameRevision(g.BaseRevision, applied) && g.AcceptedRevision == "":
-			return "", stop.Ask(failoverv1.ReasonGitChanged,
-				"Flux at site %s applied %s, but the run's base is %s: Git changed during the run", s.Site, applied, g.BaseRevision)
+		if err := r.checkBase(s.Site, applied); err != nil {
+			return "", err
 		}
 	}
 	return msg, nil
+}
+
+// checkBase checks the revision Flux applied at a site in Hold against the
+// run's base. Once the run committed, a site that comes back may have
+// applied the run's commit, or the head the operator accepted after it:
+// Flux there follows Git, which already declares the switch. Both pass
+// without reading Git, which Hold must not need ([RFC#0007] Requirement 1);
+// the Release phase checks the branch before it releases the site.
+func (r *runner) checkBase(site, applied string) error {
+	g := &r.sf.Status.Git
+	switch {
+	case applied == "":
+		return nil
+	case g.BaseRevision == "":
+		g.BaseRevision = applied
+		return nil
+	case SameRevision(g.BaseRevision, applied) || g.AcceptedRevision != "":
+		return nil
+	case g.Commit == "":
+		return stop.Ask(failoverv1.ReasonGitChanged,
+			"Flux at site %s applied %s, but the run's base is %s: Git changed during the run", site, applied, g.BaseRevision)
+	}
+	sha := RevisionSHA(applied)
+	if sameCommit(sha, g.Commit) || g.ReleaseRevision != "" && sameCommit(sha, g.ReleaseRevision) {
+		return nil
+	}
+	return stop.Ask(failoverv1.ReasonGitChanged,
+		"Flux at site %s applied %s, which is neither the run's base %s nor its commit %s: Git changed during the run. Review it; if it contains the run's commit, resume with --accept-git-head %s",
+		site, applied, g.BaseRevision, g.Commit, sha)
 }
 
 func (r *runner) git(ctx context.Context, s *failoverv1.Step) (string, error) {
@@ -254,6 +278,15 @@ func (r *runner) verifyGit(ctx context.Context, s *failoverv1.Step) (string, err
 		return "", err
 	}
 	return r.Flux.VerifyGit(ctx, s.Site, r.siteHeld(s.Site), s.VerifyGit.Fields, dir, r.strict())
+}
+
+// fluxTimeout bounds a wait on Flux outside a Reconcile step, which
+// carries its own: the Workload's timeouts.flux, or its default.
+func (r *runner) fluxTimeout() time.Duration {
+	if t := r.sf.Spec.Workload.Spec.Timeouts.Flux; t != nil && t.Duration > 0 {
+		return t.Duration
+	}
+	return config.DefaultFlux
 }
 
 // strict is false once the operator accepted a Git commit made during the
@@ -400,6 +433,11 @@ func (r *runner) conditionsHold(u *unstructured.Unstructured, conds []failoverv1
 			return false, "", fmt.Errorf("unknown operator %q", cond.Operator)
 		}
 		if !ok {
+			if placeholder.MatchString(cond.Value) {
+				// The value is captured, such as a token: name it, and
+				// print neither it nor the live value it is compared with.
+				return false, fmt.Sprintf("%s is %s, want %s %s", cond.JSONPath, size(got), cond.Operator, cond.Value), nil
+			}
 			return false, fmt.Sprintf("%s is %q, want %s %q", cond.JSONPath, got, cond.Operator, want), nil
 		}
 	}
@@ -427,6 +465,42 @@ func (r *runner) capture(ctx context.Context, s *failoverv1.Step) (string, error
 	}
 	r.sf.Status.Captured[s.Capture.Into] = v
 	return fmt.Sprintf("captured %s (%d bytes)", s.Capture.Into, len(v)), nil
+}
+
+// size describes a value without printing it.
+func size(v string) string {
+	if v == "" {
+		return "empty"
+	}
+	return fmt.Sprintf("a value of %d bytes", len(v))
+}
+
+// minHidden is the shortest captured value hideCaptured replaces: a shorter
+// one is no token, and replacing it would garble the message.
+const minHidden = 8
+
+// hideCaptured replaces each captured value in a message with its name, so
+// the ledger and the output name captured values and never print them
+// ([RFC#0009] Requirement 10), whatever error carried one.
+func (r *runner) hideCaptured(msg string) string { return HideCaptured(r.sf.Status.Captured, msg) }
+
+// HideCaptured replaces each value of captured, of minHidden bytes or more,
+// in msg with $(name). tack status uses it too, for messages that an
+// older Tack wrote with a value in them.
+func HideCaptured(captured map[string]string, msg string) string {
+	names := make([]string, 0, len(captured))
+	for name := range captured {
+		names = append(names, name)
+	}
+	// The longest value first, so a value inside another is not replaced
+	// first.
+	slices.SortFunc(names, func(a, b string) int { return len(captured[b]) - len(captured[a]) })
+	for _, name := range names {
+		if v := captured[name]; len(v) >= minHidden {
+			msg = strings.ReplaceAll(msg, v, "$("+name+")")
+		}
+	}
+	return msg
 }
 
 var placeholder = regexp.MustCompile(`\$\(([a-zA-Z0-9_.-]+)\)`)

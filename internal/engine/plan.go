@@ -402,7 +402,7 @@ func Compose(in Inputs) (*failoverv1.SiteFailover, error) {
 		Description: fmt.Sprintf("commit the live state to %s branch %s", Redact(spec.Git.URL), spec.Git.Branch),
 		Git: &failoverv1.GitStep{
 			Changes: in.GitChanges,
-			Message: fmt.Sprintf("tack: %s primary %s to %s (%s)\n\nRun %s, mode %s.", in.Workload, in.From, in.To, strings.ToLower(string(in.Mode)), in.Run, in.Mode),
+			Message: commitMessage(in.Workload, in.From, in.To, in.Mode, in.Run),
 		},
 	})
 	for _, s := range sites {
@@ -500,6 +500,12 @@ func Compose(in Inputs) (*failoverv1.SiteFailover, error) {
 		Status: failoverv1.SiteFailoverStatus{FollowUps: in.FollowUps},
 	}
 	return sf, nil
+}
+
+// commitMessage is the message of the run's commit. It names the run, so a
+// renamed run gets a new one.
+func commitMessage(workload, from, to string, mode failoverv1.Mode, run string) string {
+	return fmt.Sprintf("tack: %s primary %s to %s (%s)\n\nRun %s, mode %s.", workload, from, to, strings.ToLower(string(mode)), run, mode)
 }
 
 var userinfo = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/\s]+@`)

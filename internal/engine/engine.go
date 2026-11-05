@@ -52,8 +52,9 @@ type Flux interface {
 	// as Flux would, and checks that applying them changes nothing live.
 	VerifyGit(ctx context.Context, site string, held []failoverv1.HeldObject, fields []failoverv1.ObjectField, dir string, strict bool) (string, error)
 
-	// VerifyNoop checks that Flux changed nothing in the released objects.
-	VerifyNoop(ctx context.Context, site string, held []failoverv1.HeldObject, fields []failoverv1.ObjectField, strict bool) (string, error)
+	// VerifyNoop checks that Flux changed nothing in the released objects,
+	// once their Kustomizations are Ready, waiting up to timeout for that.
+	VerifyNoop(ctx context.Context, site string, held []failoverv1.HeldObject, fields []failoverv1.ObjectField, strict bool, timeout time.Duration) (string, error)
 }
 
 // Git reads and writes the GitOps repository with the git binary.

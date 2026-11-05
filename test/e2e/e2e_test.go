@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -325,6 +326,17 @@ func latestRun(t *testing.T, site string) map[string]any {
 }
 
 func runName(sf map[string]any) string { return sf["metadata"].(map[string]any)["name"].(string) }
+
+// createdRun returns the name of the run whose ledger tack created, from
+// tack's output.
+func createdRun(t *testing.T, out string) string {
+	t.Helper()
+	m := regexp.MustCompile(`(?m)^ledger ` + ledgerNS + `/(\S+) created$`).FindStringSubmatch(out)
+	if m == nil {
+		t.Fatalf("tack created no ledger:\n%s", out)
+	}
+	return m[1]
+}
 
 func runStatus(sf map[string]any) (state, reason string) {
 	st, _ := sf["status"].(map[string]any)
@@ -749,14 +761,15 @@ func TestTakeOver(t *testing.T) {
 		t.Fatalf("resume of a ledger without a start: exit %d, want 1 with a refusal", code)
 	}
 
-	// A run's name holds its start to the second: start the next one in a
-	// later second.
-	time.Sleep(time.Second)
-	_, code = tack(t, []string{"TACK_FAULT=hold-a-cluster-pg-a:before"}, "run", "-f", workload, "--to", "b", "--take-over", runName(never), "--yes")
+	// When this run is planned in the same second as the run it takes
+	// over, it gets that run's name with -2 appended (issue #37). Two
+	// ledgers can then share a creation second, so the names come from
+	// tack's output.
+	out, code = tack(t, []string{"TACK_FAULT=hold-a-cluster-pg-a:before"}, "run", "-f", workload, "--to", "b", "--take-over", runName(never), "--yes")
 	if code != exitFault {
 		t.Fatalf("exit %d, want the fault exit %d", code, exitFault)
 	}
-	old := runName(latestRun(t, "b"))
+	old := createdRun(t, out)
 	out, code = tack(t, nil, "run", "-f", workload, "--to", "b", "--yes")
 	if code != 1 || !strings.Contains(out, "--take-over "+old) {
 		t.Fatalf("a run without --take-over: exit %d, want 1 naming %s", code, old)
@@ -782,10 +795,9 @@ func TestTakeOver(t *testing.T) {
 		t.Fatalf("site a was held: %s", ann)
 	}
 
-	tackOK(t, "run", "-f", workload, "--to", "b", "--take-over", old, "--yes")
+	run := createdRun(t, tackOK(t, "run", "-f", workload, "--to", "b", "--take-over", old, "--yes"))
 	assertPrimary(t, "b", "a")
 	assertGitMatches(t, "b", "a", "b")
-	run := runName(latestRun(t, "b"))
 	if got := strings.TrimSpace(kubectl(t, "b", "-n", ledgerNS, "get", "sitefailover", run, "-o", "jsonpath={.spec.takeOver}")); got != old {
 		t.Errorf("%s: spec.takeOver %q, want %s", run, got, old)
 	}
