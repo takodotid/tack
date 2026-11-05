@@ -10,6 +10,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/driver"
@@ -308,6 +309,11 @@ func (r *runner) run(ctx context.Context) error {
 				}
 			}
 		}
+		if step.ID == r.promotion() {
+			if err := r.beforePromotion(ctx); err != nil {
+				return r.stopBefore(ctx, step, err)
+			}
+		}
 		if step.Type == failoverv1.StepRelease && !r.verified[step.Site] {
 			// The check of Git against live ran in an earlier process,
 			// maybe hours ago: run it again before the site's first
@@ -384,6 +390,105 @@ func (r *runner) gate(ctx context.Context, site string) error {
 	}
 	r.gated[site] = true
 	return nil
+}
+
+// promotion returns the ID of the step that promotes to: the run's first
+// Failover step at to. A driver's steps before it act at other sites.
+func (r *runner) promotion() string {
+	for _, s := range r.sf.Spec.Steps {
+		if s.Phase == failoverv1.PhaseFailover && s.Site == r.sf.Spec.To {
+			return s.ID
+		}
+	}
+	return ""
+}
+
+// fencesAfter tells whether the run has a Failover step at site after the
+// promotion, such as the step that declares the new primary at a third
+// site. Only such a step can fence a site that is primary at the promotion.
+func (r *runner) fencesAfter(site string) bool {
+	promotion, after := r.promotion(), false
+	for _, s := range r.sf.Spec.Steps {
+		if s.ID == promotion {
+			after = true
+			continue
+		}
+		if after && s.Phase == failoverv1.PhaseFailover && s.Site == site {
+			return true
+		}
+	}
+	return false
+}
+
+// beforePromotion reads every site but to before the step that promotes
+// to, in each process, and stops the run when a site that answers is
+// primary, or declares itself primary: promoting to would give two
+// primaries ([RFC#0007] Requirement 9). The read before a site's steps
+// (gate) cannot see it: it skips to, and does not run for a site whose
+// steps are done, such as an old primary promoted again by hand after its
+// demotion (issue #45).
+//
+// A site that gave no answer in this process gives none here, without
+// another check; any other site gets the run's checks, so a site checked
+// before in this process is not checked again. A site that gives no answer
+// does not stop the run. --fence lets the run go on only for a site that
+// the run fences after the promotion.
+func (r *runner) beforePromotion(ctx context.Context) error {
+	to := r.sf.Spec.To
+	topo, err := r.Driver.Discover(ctx, &r.sf.Spec.Workload.Spec, runChecks{r: r, skip: to})
+	if err != nil {
+		return err
+	}
+	for _, s := range topo.Sites {
+		if s.Name == to || !s.Reachable {
+			continue
+		}
+		what := "answers as primary"
+		switch {
+		case s.Role == driver.RolePrimary:
+		case s.DeclaredPrimary == s.Name:
+			what = "declares itself primary"
+		default:
+			continue
+		}
+		if !r.fencesAfter(s.Name) {
+			return stop.Ask(failoverv1.ReasonFencedSiteIsPrimary,
+				"site %s %s (%s). Promoting %s now gives two primaries, and no step of this run is left to fence %s, so --fence cannot help. The workload was changed outside this run, such as by a recovery by hand, and the run's plan may be stale: see docs/runbooks/abandon-run.md",
+				s.Name, what, s.Summary, to, s.Name)
+		}
+		if !slices.Contains(r.opts.Fence, s.Name) {
+			return stop.Ask(failoverv1.ReasonFencedSiteIsPrimary,
+				"site %s %s (%s), and this run fences it only after it promotes %s. Check it, then resume with --fence %s: %s and %s are then both primary until the run fences %s",
+				s.Name, what, s.Summary, to, s.Name, to, s.Name, s.Name)
+		}
+	}
+	return nil
+}
+
+// runChecks are the kube.Clients of a read during a run. A site that gave
+// no answer in this process, to a check or to the read before its steps,
+// stays unreachable without another check. Any other site gets the run's
+// checks, which keep their result for the process.
+type runChecks struct {
+	r *runner
+	// skip is a site the read does not read: it reports no answer. Its
+	// step then fails on its own error, as without the read.
+	skip string
+}
+
+// errNotRead is the answer runChecks give for the site they skip.
+var errNotRead = &kube.UnreachableError{Err: errors.New("not read")}
+
+func (c runChecks) Client(site string) (client.Client, error) { return c.r.checks.Client(site) }
+
+func (c runChecks) Reachable(ctx context.Context, site string) error {
+	if site == c.skip {
+		return errNotRead
+	}
+	if err := c.r.reachable[site]; err != nil && kube.IsUnreachable(err) {
+		return err
+	}
+	return c.r.checks.Reachable(ctx, site)
 }
 
 // identify checks, once per process, that the site's context reaches the
