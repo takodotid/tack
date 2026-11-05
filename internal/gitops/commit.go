@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
+	"github.com/takodotid/tack/internal/driver"
 	"github.com/takodotid/tack/internal/engine"
+	"github.com/takodotid/tack/internal/redact"
 	"github.com/takodotid/tack/internal/stop"
 )
 
@@ -58,7 +61,7 @@ func (r *Repo) Commit(ctx context.Context, w *failoverv1.WorkloadSpec, req engin
 			return head, nil
 		}
 		return "", stop.AskHead(failoverv1.ReasonGitChanged, head,
-			"branch %s of %s is at %s, but the run's base is %s: Git changed during the run", c.branch, Redact(c.url), head, req.Base)
+			"branch %s of %s is at %s, but the run's base is %s: Git changed during the run", c.branch, redact.Text(c.url), head, req.Base)
 	}
 
 	if err := r.reset(ctx, c, base); err != nil {
@@ -69,6 +72,9 @@ func (r *Repo) Commit(ctx context.Context, w *failoverv1.WorkloadSpec, req engin
 	for i := range req.Changes {
 		changes[i] = *req.Changes[i].DeepCopy()
 		if changes[i].File != "" {
+			if err := r.checkTarget(ctx, c, base, g, &changes[i]); err != nil {
+				return "", err
+			}
 			continue
 		}
 		if f == nil {
@@ -103,6 +109,61 @@ func (r *Repo) Commit(ctx context.Context, w *failoverv1.WorkloadSpec, req engin
 		return "", err
 	}
 	return commit, nil
+}
+
+// checkTarget refuses a change whose file, path and document are not where
+// the Workload's mapping puts its field, or, without a mapping, not the
+// field's path in a document of commit that defines the change's object
+// ([RFC#0006] Requirement 15). The ledger records them, and anyone who may
+// write a ledger could point a removal or a value at any file (#35 row 11).
+func (r *Repo) checkTarget(ctx context.Context, c *clone, commit string, g *failoverv1.GitSpec, ch *failoverv1.GitChange) error {
+	refuse := func(format string, a ...any) error {
+		return fmt.Errorf("%s: the run would write %s%s at %s, but %s. The ledger's Git step does not match its Workload: do not resume the run, see docs/runbooks/abandon-run.md",
+			describeChange(ch), ch.File, docString(ch.Document), ch.Path, fmt.Sprintf(format, a...))
+	}
+	m, err := mapping(g.Fields, driver.FieldChange{Site: ch.Site, Object: ch.Object, Field: ch.Field})
+	if err != nil {
+		return err
+	}
+	if m != nil {
+		file, err := repoPath(m.File)
+		if err != nil {
+			return fmt.Errorf("spec.git.fields entry for %s: file %w", describeChange(ch), err)
+		}
+		if path.Clean(ch.File) != file || ch.Path != m.Path || !sameDocument(ch.Document, m.Document) {
+			return refuse("spec.git.fields maps it to %s%s at %s", file, docString(m.Document), m.Path)
+		}
+		return nil
+	}
+	if g.Find == nil {
+		return refuse("spec.git.fields has no entry for it, and spec.git.find is not set")
+	}
+	if ch.Path != ch.Field || ch.Document == nil {
+		return refuse("a manifest found by spec.git.find is written at the field's own path, %s, in its document", ch.Field)
+	}
+	name, err := repoPath(ch.File)
+	if err != nil {
+		return refuse("the file %v", err)
+	}
+	data, err := r.readFile(ctx, c, commit, name)
+	if err != nil {
+		return refuse("%v", err)
+	}
+	docs, err := documents(data)
+	if err != nil {
+		return refuse("the file is not valid YAML: %v", err)
+	}
+	if d := int(*ch.Document); d >= 0 && d < len(docs) {
+		if got, ok := manifestOf(docs[d]); ok && got.group == groupOf(ch.Object.APIVersion) && got.kind == ch.Object.Kind &&
+			got.name == ch.Object.Name && (!got.namespaced || got.namespace == ch.Object.Namespace) {
+			return nil
+		}
+	}
+	return refuse("that document does not define %s %s/%s in commit %s", ch.Object.Kind, ch.Object.Namespace, ch.Object.Name, commit)
+}
+
+func sameDocument(a, b *int32) bool {
+	return a == nil && b == nil || a != nil && b != nil && *a == *b
 }
 
 // apply writes the changes into the clone's working tree, which holds
@@ -196,10 +257,10 @@ func (r *Repo) push(ctx context.Context, c *clone, commit string) error {
 		if !strings.HasPrefix(l, "!") {
 			continue
 		}
-		status := Redact(strings.TrimSpace(l[1:]))
+		status := redact.Text(strings.TrimSpace(l[1:]))
 		if strings.Contains(l, "[rejected]") {
 			return stop.Ask(failoverv1.ReasonGitChanged,
-				"the push of %s to branch %s of %s was rejected because the branch moved: Git changed during the run (%s)", commit, c.branch, Redact(c.url), status)
+				"the push of %s to branch %s of %s was rejected because the branch moved: Git changed during the run (%s)", commit, c.branch, redact.Text(c.url), status)
 		}
 		return fmt.Errorf("the remote refused the push of %s to branch %s: %s", commit, c.branch, status)
 	}
@@ -249,7 +310,7 @@ func (r *Repo) find(ctx context.Context, c *clone, revision string) (string, err
 		}
 	}
 	if err != nil {
-		return "", fmt.Errorf("commit %s is not in branch %s of %s", revision, c.branch, Redact(c.url))
+		return "", fmt.Errorf("commit %s is not in branch %s of %s", revision, c.branch, redact.Text(c.url))
 	}
 	return commit, nil
 }

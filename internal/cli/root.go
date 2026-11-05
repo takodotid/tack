@@ -16,6 +16,7 @@ import (
 	"github.com/takodotid/tack/internal/config"
 	"github.com/takodotid/tack/internal/engine"
 	"github.com/takodotid/tack/internal/kube"
+	"github.com/takodotid/tack/internal/redact"
 )
 
 // Exit codes.
@@ -134,7 +135,7 @@ func Execute(ctx context.Context, f Factory, args []string, stdout, stderr io.Wr
 	if err == nil {
 		return ExitOK
 	}
-	fmt.Fprintf(stderr, "tack: %v\n", err)
+	fmt.Fprintf(stderr, "tack: %s\n", redact.Text(err.Error()))
 	var u usageError
 	switch {
 	case errors.As(err, &u):

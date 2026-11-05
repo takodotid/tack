@@ -9,6 +9,7 @@ import (
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/kube"
+	"github.com/takodotid/tack/internal/redact"
 )
 
 // DefaultReachWaits are the pauses between the checks of a site's API.
@@ -142,6 +143,6 @@ func (c *SiteChecks) now() time.Time {
 
 func (c *SiteChecks) printf(format string, a ...any) {
 	if c.Out != nil {
-		fmt.Fprintf(c.Out, format, a...)
+		fmt.Fprint(c.Out, redact.Text(fmt.Sprintf(format, a...)))
 	}
 }

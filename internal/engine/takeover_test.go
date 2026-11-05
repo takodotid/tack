@@ -143,8 +143,11 @@ func TestResumeRefusesRunTakenOver(t *testing.T) {
 	env := s.env("b")
 	env.Flux = &loseAfter{Flux: s.flux, clients: s.clients, after: "c", lost: "b"}
 	err := env.Start(ctx, s.plan("run-1", "a", "b"), engine.Options{})
-	if !errors.Is(err, engine.ErrStopped) || stepState(s.ledger("b", "run-1"), "promote-b") != failoverv1.StepFailed {
-		t.Fatalf("run-1: %v, promote-b %s", err, stepState(s.ledger("b", "run-1"), "promote-b"))
+	// b is lost before its promotion: the read before the first Failover
+	// step at b, or the promotion itself, stops run-1.
+	left := stepState(s.ledger("b", "run-1"), "promote-b")
+	if !errors.Is(err, engine.ErrStopped) || left == failoverv1.StepSucceeded {
+		t.Fatalf("run-1: %v, promote-b %s", err, left)
 	}
 
 	if err := s.env("c").Start(ctx, s.plan("run-2", "a", "c"), engine.Options{TakeOver: []string{"run-1"}}); err != nil {
@@ -162,8 +165,8 @@ func TestResumeRefusesRunTakenOver(t *testing.T) {
 	if s.isPrimary("b") {
 		t.Fatal("the resume of run-1 promoted b while c is primary")
 	}
-	if stepState(s.ledger("b", "run-1"), "promote-b") != failoverv1.StepFailed {
-		t.Errorf("promote-b is %s, want Failed as run-1 left it", stepState(s.ledger("b", "run-1"), "promote-b"))
+	if got := stepState(s.ledger("b", "run-1"), "promote-b"); got != left {
+		t.Errorf("promote-b is %s, want %s as run-1 left it", got, left)
 	}
 }
 

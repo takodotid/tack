@@ -412,6 +412,11 @@ func (f *Flux) waitReady(ctx context.Context, c client.Client, site string, ks [
 			if err != nil {
 				return nil, err
 			}
+			if suspended(u) {
+				// Its Ready condition is its last reconcile's: Flux applies
+				// nothing to the released objects (PR #42).
+				return nil, fmt.Errorf("Kustomization %s at site %s is suspended (spec.suspend): Flux applies nothing to the released objects, so the check after release cannot tell what Flux does with them. Resume the Kustomization, then resume the run", keyString(k), site)
+			}
 			st, reason, msg := ready(u)
 			switch {
 			case st == "False":

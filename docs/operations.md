@@ -58,7 +58,7 @@ Most reasons go on with a plain `tack resume RUN -f workload.yaml` once the caus
 
 | Flag | When | Example |
 |---|---|---|
-| `--accept-git-head SHA` | The run stopped with `GitChanged`; or with `GitDiffersFromLive` once Git is fixed, or `FluxChanged` for an expected change ([runbooks/stop-reasons.md](runbooks/stop-reasons.md)). | Review the commits between the base and the new head named in the message, such as `git log --oneline 6dd30f7..a2c8b96`, then `tack resume RUN -f workload.yaml --accept-git-head a2c8b96`. When the `GitChanged` message names one head, only that commit, or `HEAD` for it, is accepted; `tack status RUN` shows it. Before the run's commit, the accepted head becomes its base. After it, the release checks Git against the accepted head, which must contain the run's commit. |
+| `--accept-git-head SHA` | The run stopped with `GitChanged`; or with `GitDiffersFromLive` once Git is fixed, or `FluxChanged` for an expected change ([runbooks/stop-reasons.md](runbooks/stop-reasons.md)). | Review the commits between the base and the new head named in the message, such as `git log --oneline 6dd30f7..a2c8b96`, then `tack resume RUN -f workload.yaml --accept-git-head a2c8b96`. When the `GitChanged` message names one head, only that commit, or `HEAD` for it, is accepted; `tack status RUN` shows it. Otherwise `HEAD` is the branch head when `tack resume` starts: it prints that commit before it asks, and records it. Before the run's commit, the accepted head becomes its base. After it, the release checks Git against the accepted head, which must contain the run's commit. |
 | `--fence SITE` | The run stopped with `FencedSiteIsPrimary`, and its message offers the flag. | A lost site came back and answers as primary, or declares itself primary. Check it, then `tack resume RUN -f workload.yaml --fence a` declares the new primary there. When no step of the run is left to fence the site, such as an old primary promoted again by hand, the flag cannot help, and the message says so ([runbooks/stop-reasons.md](runbooks/stop-reasons.md#fencedsiteisprimary)). |
 | `--take-over RUN` | Another run of the workload can no longer finish, such as when its ledger is at a lost site. Without the flag, the new run is refused while that run is listed and not `Succeeded`, or stops on its holds. | Pass it when starting the new run: `tack run -f workload.yaml --to b --mode site-loss --take-over RUN` takes over the holds of `RUN`, and records it in its ledger. `RUN` can then never resume. Repeat the flag for each run to take over: `--take-over RUN1 --take-over RUN2`. |
 
@@ -122,5 +122,40 @@ Tack acts with the operator's credentials for each site's kube context. Every si
 | Checked | On the e2e's kind clusters, a ServiceAccount with exactly these rows, each named where the table allows, ran `tack plan`, `tack status`, a planned run with the routing check and a Kustomization with `postBuild`, a resume, a run with `--take-over`, and a site-loss run. Without row 3, `tack plan` fails with `namespaces "kube-system" is forbidden`; without the ConfigMap of row 12, the check before release stops with `StepFailed`. |
 
 The runbooks' own `kubectl` commands need more, such as `patch` on `sitefailovers/status`; each runbook says so.
+
+### Who may write ledgers
+
+Writing a ledger is privileged. A ledger names the steps, the kube contexts and the Git URL that `tack resume` uses with the operator's credentials, so anyone who may create `sitefailovers`, or update their status, can plant a run, or change one, for an operator to resume.
+
+| Rule | Why |
+|---|---|
+| Grant rows 5 and 6 to the operators only, in the ledger namespace at every site. | Rows 5 and 6 are the write access. |
+| Keep the ledger namespace out of every Flux path, and keep `SiteFailover` objects out of Git. | A Kustomization applies what Git holds with kustomize-controller's service account, or the one its `spec.serviceAccountName` names. |
+| Check who else may write: `kubectl --context CTX auth can-i create sitefailovers.failover.tako.id -n tack-system --as system:serviceaccount:NS:NAME`, and the same for `update` on `sitefailovers/status`. | A role with a wildcard resource or verb, such as `cluster-admin`, includes them. |
+
+A Role with rows 4 to 6, for a RoleBinding to the operators' group:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tack-ledger-writer
+  namespace: tack-system
+rules:
+- apiGroups: ["failover.tako.id"]
+  resources: ["sitefailovers"]
+  verbs: ["get", "list", "create"]
+- apiGroups: ["failover.tako.id"]
+  resources: ["sitefailovers/status"]
+  verbs: ["update"]
+```
+
+What `tack resume` checks of a ledger, and what it leaves to the operator:
+
+| Part of the ledger | Checked |
+|---|---|
+| `spec.steps` | Before the confirmation: they must be the plan that the driver composes from the ledger's Workload and request ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 21). At the Git step: each change's file and path must be where the Workload's mapping, or the manifest of its object, puts it ([RFC#0006](../rfcs/RFC0006.md#requirements), Requirement 15). |
+| `spec.workload`: contexts, Clusters, Git URL | Not checked: a planted Workload composes its own plan. The confirmation prints each site's context, API server and recorded cluster, and the Git URL: compare them with the Workload file. |
+| `status`: captured values, Git revisions, step states, holds, follow-ups | Not checked. |
 
 For Git, the operator's `git` configuration needs read access for `tack plan`, and push access to the branch for `tack run`. Tack pushes without force and skips client-side hooks; server-side rules still apply ([RFC#0006](../rfcs/RFC0006.md#requirements)).

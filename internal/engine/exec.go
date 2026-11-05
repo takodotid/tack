@@ -19,6 +19,7 @@ import (
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/config"
+	"github.com/takodotid/tack/internal/redact"
 	"github.com/takodotid/tack/internal/stop"
 )
 
@@ -261,7 +262,7 @@ func (r *runner) awaited(ctx context.Context) (rev, moved string, err error) {
 	case !ok:
 		return "", "", stop.Ask(failoverv1.ReasonGitChanged,
 			"branch %s of %s is at %s, which does not contain %s: Git was rewritten during the run. Review it, then resume with --accept-git-head on a commit that contains the switch",
-			w.Git.Branch, Redact(w.Git.URL), head, want)
+			w.Git.Branch, redact.Text(w.Git.URL), head, want)
 	}
 	return head, fmt.Sprintf("the branch moved past %s to %s", want, head), nil
 }
@@ -298,11 +299,11 @@ func (r *runner) verifyGit(ctx context.Context, s *failoverv1.Step) (string, err
 		if !ok {
 			return "", stop.Ask(failoverv1.ReasonGitChanged,
 				"branch %s of %s is at %s, which does not contain %s: Git was rewritten before the release at site %s. Review it, then resume with --accept-git-head on a commit that contains the switch",
-				w.Git.Branch, Redact(w.Git.URL), head, want, s.Site)
+				w.Git.Branch, redact.Text(w.Git.URL), head, want, s.Site)
 		}
 		return "", stop.AskHead(failoverv1.ReasonGitChanged, head,
 			"branch %s of %s moved past %s to %s before the release at site %s: Flux applies it once the objects are released. Review the commits (git log %s..%s), then resume with --accept-git-head %s",
-			w.Git.Branch, Redact(w.Git.URL), want, head, s.Site, want, head, head)
+			w.Git.Branch, redact.Text(w.Git.URL), want, head, s.Site, want, head, head)
 	}
 	dir, err := r.Git.Checkout(ctx, w, want)
 	if err != nil {
@@ -516,6 +517,27 @@ const minHidden = 8
 // the ledger and the output name captured values and never print them
 // ([RFC#0009] Requirement 10), whatever error carried one.
 func (r *runner) hideCaptured(msg string) string { return HideCaptured(r.sf.Status.Captured, msg) }
+
+// Clean is the one filter of a message that Tack records or prints: it
+// hides the user and password of every URL (redact.Text), and names each
+// captured value instead of printing it. A message from outside Tack, such
+// as Flux's, Strait's, git's or an API server's, may hold either (#35 row
+// 43). Every ledger write cleans the status's messages with it.
+func Clean(captured map[string]string, msg string) string {
+	return HideCaptured(captured, redact.Text(msg))
+}
+
+// cleanStatus cleans every message of a status: the run's, each step's and
+// the reason it was abandoned.
+func cleanStatus(st *failoverv1.SiteFailoverStatus) {
+	st.Message = Clean(st.Captured, st.Message)
+	for i := range st.Steps {
+		st.Steps[i].Message = Clean(st.Captured, st.Steps[i].Message)
+	}
+	if a := st.Abandoned; a != nil {
+		a.Reason = Clean(st.Captured, a.Reason)
+	}
+}
 
 // HideCaptured replaces each value of captured, of minHidden bytes or more,
 // in msg with $(name). tack status uses it too, for messages that an

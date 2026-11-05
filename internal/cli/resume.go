@@ -14,6 +14,7 @@ import (
 	"github.com/takodotid/tack/internal/engine"
 	"github.com/takodotid/tack/internal/kube"
 	"github.com/takodotid/tack/internal/ledger"
+	"github.com/takodotid/tack/internal/redact"
 )
 
 type ledgerFlags struct {
@@ -160,7 +161,9 @@ decide. Each decision has its own flag:
                        start a new run with --take-over.
 
 A run that another run took over, or that another run of the workload
-started after, cannot resume: its plan may no longer match the sites.
+started after, cannot resume: its plan may no longer match the sites. Nor
+can a run whose steps are not the plan its driver composes from the
+ledger's Workload: the ledger was written outside tack.
 
 An agent never starts "tack resume" without an explicit instruction from a
 human for that run, and never passes these flags unless that instruction
@@ -215,9 +218,19 @@ func newResume(o *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if _, err := engine.AcceptedHead(sf, opts.AcceptGitHead); err != nil {
+			head, err := engine.AcceptedHead(sf, opts.AcceptGitHead)
+			if err != nil {
 				return usageError{err}
 			}
+			if head == engine.AcceptHEAD {
+				// The stop named no commit: the operator accepts the
+				// branch head, and sees which commit before confirming.
+				if head, err = env.AcceptHead(ctx, sf, head); err != nil {
+					return err
+				}
+				fmt.Fprintf(out, "--accept-git-head HEAD is commit %s, the head of branch %s\n", head, spec.Git.Branch)
+			}
+			opts.AcceptGitHead = head
 			if err := o.confirm(out, yes, sf.Spec.Workload.Name); err != nil {
 				return err
 			}
@@ -284,12 +297,21 @@ func newStatus(o *options) *cobra.Command {
 	return cmd
 }
 
-// redacted returns a copy of a ledger whose Git URL holds no user or
-// password. A ledger written before Tack refused them may hold one.
+// redacted returns a copy of a ledger whose Git URL and messages hold no
+// URL's user or password, and name captured values. A ledger written
+// before Tack refused or cleaned them may hold one (#35 row 43).
 func redacted(sf *failoverv1.SiteFailover) *failoverv1.SiteFailover {
 	out := sf.DeepCopy()
 	g := &out.Spec.Workload.Spec.Git
-	g.URL = engine.Redact(g.URL)
+	g.URL = redact.Text(g.URL)
+	st := &out.Status
+	st.Message = engine.Clean(st.Captured, st.Message)
+	for i := range st.Steps {
+		st.Steps[i].Message = engine.Clean(st.Captured, st.Steps[i].Message)
+	}
+	if st.Abandoned != nil {
+		st.Abandoned.Reason = engine.Clean(st.Captured, st.Abandoned.Reason)
+	}
 	return out
 }
 

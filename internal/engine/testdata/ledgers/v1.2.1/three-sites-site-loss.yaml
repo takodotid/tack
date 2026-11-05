@@ -1,0 +1,589 @@
+apiVersion: failover.tako.id/v1
+kind: SiteFailover
+metadata:
+  labels:
+    failover.tako.id/workload: pg-main
+  name: pg-main-20261027-101500
+  namespace: tack-system
+spec:
+  fingerprints:
+  - kubeSystemUID: uid-b
+    site: b
+  - kubeSystemUID: uid-c
+    site: c
+  from: a
+  mode: SiteLoss
+  steps:
+  - deferrable: true
+    description: 'hold Cluster db/pg-a at site a: Flux stops applying it'
+    hold:
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-a
+        namespace: db
+    id: hold-a-cluster-pg-a
+    phase: Hold
+    site: a
+    type: Hold
+  - deferrable: true
+    description: reconcile Flux at site a, so no apply started before the hold is
+      still in flight
+    id: reconcile-hold-a
+    phase: Hold
+    reconcile:
+      timeout: 5m0s
+    site: a
+    type: Reconcile
+  - description: 'hold Cluster db/pg-b at site b: Flux stops applying it'
+    hold:
+      kustomization:
+        name: b
+        namespace: flux-system
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-b
+        namespace: db
+    id: hold-b-cluster-pg-b
+    phase: Hold
+    site: b
+    type: Hold
+  - description: reconcile Flux at site b, so no apply started before the hold is
+      still in flight
+    id: reconcile-hold-b
+    phase: Hold
+    reconcile:
+      kustomizations:
+      - name: b
+        namespace: flux-system
+      timeout: 5m0s
+    site: b
+    type: Reconcile
+  - deferrable: true
+    description: 'hold Cluster db/pg-c at site c: Flux stops applying it'
+    hold:
+      kustomization:
+        name: c
+        namespace: flux-system
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-c
+        namespace: db
+    id: hold-c-cluster-pg-c
+    phase: Hold
+    site: c
+    type: Hold
+  - deferrable: true
+    description: reconcile Flux at site c, so no apply started before the hold is
+      still in flight
+    id: reconcile-hold-c
+    phase: Hold
+    reconcile:
+      kustomizations:
+      - name: c
+        namespace: flux-system
+      timeout: 5m0s
+    site: c
+    type: Reconcile
+  - deferrable: true
+    description: 'fence Cluster pg-a: declare pg-b primary, so it never runs as primary
+      again'
+    id: fence-a
+    patch:
+      merge: '{"spec":{"replica":{"primary":"pg-b","promotionToken":null}}}'
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-a
+        namespace: db
+    phase: Failover
+    site: a
+    type: Patch
+  - description: promote Cluster pg-b without a token
+    id: promote-b
+    patch:
+      merge: '{"spec":{"replica":{"primary":"pg-b","promotionToken":null}}}'
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-b
+        namespace: db
+    phase: Failover
+    site: b
+    type: Patch
+  - description: wait until Cluster pg-b runs a healthy primary
+    id: wait-promoted-b
+    phase: Failover
+    site: b
+    type: Wait
+    wait:
+      conditions:
+      - jsonPath: '{.status.instancesReportedState.*.isPrimary}'
+        operator: Contains
+        value: "true"
+      - jsonPath: '{.status.phase}'
+        operator: Equals
+        value: Cluster in healthy state
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-b
+        namespace: db
+      timeout: 10m0s
+  - deferrable: true
+    description: make Cluster pg-c declare pg-b primary
+    id: declare-c
+    patch:
+      merge: '{"spec":{"replica":{"primary":"pg-b","promotionToken":null}}}'
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-c
+        namespace: db
+    phase: Failover
+    site: c
+    type: Patch
+  - description: verify that Cluster pg-b is a healthy primary and declares itself
+    id: verify-b
+    phase: Failover
+    site: b
+    type: Wait
+    wait:
+      conditions:
+      - jsonPath: '{.spec.replica.primary}'
+        operator: Equals
+        value: pg-b
+      - jsonPath: '{.status.instancesReportedState.*.isPrimary}'
+        operator: Contains
+        value: "true"
+      - jsonPath: '{.status.phase}'
+        operator: Equals
+        value: Cluster in healthy state
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-b
+        namespace: db
+      timeout: 10m0s
+  - description: commit the live state to https://git.example.com/gitops.git branch
+      main
+    git:
+      changes:
+      - field: spec.replica.primary
+        file: clusters/a/cluster.yaml
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-a
+          namespace: db
+        path: spec.replica.primary
+        site: a
+        value: '"pg-b"'
+      - field: spec.replica.promotionToken
+        file: clusters/a/cluster.yaml
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-a
+          namespace: db
+        path: spec.replica.promotionToken
+        site: a
+      - field: spec.replica.primary
+        file: clusters/b/cluster.yaml
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-b
+          namespace: db
+        path: spec.replica.primary
+        site: b
+        value: '"pg-b"'
+      - field: spec.replica.promotionToken
+        file: clusters/b/cluster.yaml
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-b
+          namespace: db
+        path: spec.replica.promotionToken
+        site: b
+      - field: spec.replica.primary
+        file: clusters/c/cluster.yaml
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-c
+          namespace: db
+        path: spec.replica.primary
+        site: c
+        value: '"pg-b"'
+      - field: spec.replica.promotionToken
+        file: clusters/c/cluster.yaml
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-c
+          namespace: db
+        path: spec.replica.promotionToken
+        site: c
+      message: |-
+        tack: pg-main primary a to b (siteloss)
+
+        Run pg-main-20261027-101500, mode SiteLoss.
+    id: git-commit
+    phase: PromoteToGitOps
+    type: Git
+  - deferrable: true
+    description: wait for Flux at site a to apply the run's commit (held objects stay
+      as they are)
+    id: reconcile-git-a
+    phase: PromoteToGitOps
+    reconcile:
+      revision: $(git.commit)
+      timeout: 5m0s
+    site: a
+    type: Reconcile
+  - description: wait for Flux at site b to apply the run's commit (held objects stay
+      as they are)
+    id: reconcile-git-b
+    phase: PromoteToGitOps
+    reconcile:
+      kustomizations:
+      - name: b
+        namespace: flux-system
+      revision: $(git.commit)
+      timeout: 5m0s
+    site: b
+    type: Reconcile
+  - deferrable: true
+    description: wait for Flux at site c to apply the run's commit (held objects stay
+      as they are)
+    id: reconcile-git-c
+    phase: PromoteToGitOps
+    reconcile:
+      kustomizations:
+      - name: c
+        namespace: flux-system
+      revision: $(git.commit)
+      timeout: 5m0s
+    site: c
+    type: Reconcile
+  - deferrable: true
+    description: check at site a that Git, as Flux renders it, equals live
+    id: verify-git-a
+    phase: Release
+    site: a
+    type: VerifyGit
+    verifyGit:
+      fields:
+      - field: spec.replica.primary
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-a
+          namespace: db
+      - field: spec.replica.promotionToken
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-a
+          namespace: db
+      objects:
+      - apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-a
+        namespace: db
+  - deferrable: true
+    description: 'release Cluster db/pg-a at site a: Flux applies it again'
+    id: release-a-cluster-pg-a
+    phase: Release
+    release:
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-a
+        namespace: db
+    site: a
+    type: Release
+  - deferrable: true
+    description: reconcile Flux at site a with the released objects
+    id: reconcile-release-a
+    phase: Release
+    reconcile:
+      revision: $(git.commit)
+      timeout: 5m0s
+    site: a
+    type: Reconcile
+  - deferrable: true
+    description: check at site a that Flux changed nothing
+    id: verify-noop-a
+    phase: Release
+    site: a
+    type: VerifyNoop
+    verifyNoop:
+      fields:
+      - field: spec.replica.primary
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-a
+          namespace: db
+      - field: spec.replica.promotionToken
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-a
+          namespace: db
+      objects:
+      - apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-a
+        namespace: db
+  - description: check at site b that Git, as Flux renders it, equals live
+    id: verify-git-b
+    phase: Release
+    site: b
+    type: VerifyGit
+    verifyGit:
+      fields:
+      - field: spec.replica.primary
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-b
+          namespace: db
+      - field: spec.replica.promotionToken
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-b
+          namespace: db
+      objects:
+      - apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-b
+        namespace: db
+  - description: 'release Cluster db/pg-b at site b: Flux applies it again'
+    id: release-b-cluster-pg-b
+    phase: Release
+    release:
+      kustomization:
+        name: b
+        namespace: flux-system
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-b
+        namespace: db
+    site: b
+    type: Release
+  - description: reconcile Flux at site b with the released objects
+    id: reconcile-release-b
+    phase: Release
+    reconcile:
+      kustomizations:
+      - name: b
+        namespace: flux-system
+      revision: $(git.commit)
+      timeout: 5m0s
+    site: b
+    type: Reconcile
+  - description: check at site b that Flux changed nothing
+    id: verify-noop-b
+    phase: Release
+    site: b
+    type: VerifyNoop
+    verifyNoop:
+      fields:
+      - field: spec.replica.primary
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-b
+          namespace: db
+      - field: spec.replica.promotionToken
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-b
+          namespace: db
+      objects:
+      - apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-b
+        namespace: db
+  - deferrable: true
+    description: check at site c that Git, as Flux renders it, equals live
+    id: verify-git-c
+    phase: Release
+    site: c
+    type: VerifyGit
+    verifyGit:
+      fields:
+      - field: spec.replica.primary
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-c
+          namespace: db
+      - field: spec.replica.promotionToken
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-c
+          namespace: db
+      objects:
+      - apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-c
+        namespace: db
+  - deferrable: true
+    description: 'release Cluster db/pg-c at site c: Flux applies it again'
+    id: release-c-cluster-pg-c
+    phase: Release
+    release:
+      kustomization:
+        name: c
+        namespace: flux-system
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-c
+        namespace: db
+    site: c
+    type: Release
+  - deferrable: true
+    description: reconcile Flux at site c with the released objects
+    id: reconcile-release-c
+    phase: Release
+    reconcile:
+      kustomizations:
+      - name: c
+        namespace: flux-system
+      revision: $(git.commit)
+      timeout: 5m0s
+    site: c
+    type: Reconcile
+  - deferrable: true
+    description: check at site c that Flux changed nothing
+    id: verify-noop-c
+    phase: Release
+    site: c
+    type: VerifyNoop
+    verifyNoop:
+      fields:
+      - field: spec.replica.primary
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-c
+          namespace: db
+      - field: spec.replica.promotionToken
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-c
+          namespace: db
+      objects:
+      - apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-c
+        namespace: db
+  - deferrable: true
+    description: wait for Strait at site a to route apps/postgres to member pg-b only
+    id: routing-a
+    phase: Release
+    routing:
+      expected: pg-b
+      service:
+        name: postgres
+        namespace: apps
+      timeout: 2m0s
+    site: a
+    type: Routing
+  - description: wait for Strait at site b to route apps/postgres to member pg-b only
+    id: routing-b
+    phase: Release
+    routing:
+      expected: pg-b
+      service:
+        name: postgres
+        namespace: apps
+      timeout: 2m0s
+    site: b
+    type: Routing
+  - deferrable: true
+    description: wait for Strait at site c to route apps/postgres to member pg-b only
+    id: routing-c
+    phase: Release
+    routing:
+      expected: pg-b
+      service:
+        name: postgres
+        namespace: apps
+      timeout: 2m0s
+    site: c
+    type: Routing
+  to: b
+  workload:
+    name: pg-main
+    spec:
+      driver: cnpg
+      git:
+        branch: main
+        find: {}
+        url: https://git.example.com/gitops.git
+      ledger:
+        namespace: tack-system
+      routing:
+        strait:
+          members:
+          - member: pg-a
+            site: a
+          - member: pg-b
+            site: b
+          - member: pg-c
+            site: c
+          services:
+          - name: postgres
+            namespace: apps
+            site: a
+          - name: postgres
+            namespace: apps
+            site: b
+          - name: postgres
+            namespace: apps
+            site: c
+      sites:
+      - cnpg:
+          cluster:
+            name: pg-a
+            namespace: db
+        kubeContext: site-a
+        name: a
+      - cnpg:
+          cluster:
+            name: pg-b
+            namespace: db
+        kubeContext: site-b
+        name: b
+      - cnpg:
+          cluster:
+            name: pg-c
+            namespace: db
+        kubeContext: site-c
+        name: c
+      timeouts:
+        demotion: 10m0s
+        flux: 5m0s
+        promotion: 10m0s
+        routing: 2m0s
+status:
+  followUps:
+  - action: Rebuild
+    reason: 'Cluster pg-b was promoted without a token, so Cluster pg-a may hold writes
+      that pg-b lacks and cannot follow it: recreate pg-a from pg-b (docs/runbooks/rebuild-old-primary.md)'
+    site: a
+  git: {}

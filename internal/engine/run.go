@@ -18,6 +18,7 @@ import (
 	"github.com/takodotid/tack/internal/driver"
 	"github.com/takodotid/tack/internal/fault"
 	"github.com/takodotid/tack/internal/kube"
+	"github.com/takodotid/tack/internal/redact"
 	"github.com/takodotid/tack/internal/stop"
 )
 
@@ -221,10 +222,12 @@ type Resumption struct {
 }
 
 // CheckResume refuses a run that cannot resume: a ledger that never
-// recorded its start ([RFC#0003] Requirement 20), a run that another run
-// took over, and a run older than another run of the workload, whose plan
-// may no longer match the sites (Requirement 18). tack resume calls it
-// before it asks the operator, then Resumption.Resume after.
+// recorded its start ([RFC#0003] Requirement 20), a run whose steps are not
+// the plan its driver composes from its ledger (Requirement 21), a run
+// that another run took over, and a run older than another run of the
+// workload, whose plan may no longer match the sites (Requirement 18).
+// tack resume calls it before it asks the operator, then
+// Resumption.Resume after.
 func (e *Env) CheckResume(ctx context.Context, sf *failoverv1.SiteFailover) (*Resumption, error) {
 	if a := sf.Status.Abandoned; a != nil {
 		return nil, fmt.Errorf("%w: run %s was abandoned at %s: %s", ErrCannotResume, sf.Name, a.At.UTC().Format(time.RFC3339), a.Reason)
@@ -238,6 +241,9 @@ func (e *Env) CheckResume(ctx context.Context, sf *failoverv1.SiteFailover) (*Re
 		return res, nil
 	}
 	if err := e.checkLatest(ctx, sf, res.checks); err != nil {
+		return nil, err
+	}
+	if err := e.checkPlan(sf); err != nil {
 		return nil, err
 	}
 	return res, nil
@@ -290,6 +296,27 @@ func AcceptedHead(sf *failoverv1.SiteFailover, head string) (string, error) {
 		head, changed, changed)
 }
 
+// AcceptHead returns the commit that --accept-git-head head accepts for
+// the run: AcceptedHead's, and for HEAD when the run's stop named no
+// commit, the branch head, read now. The ledger records a commit, never
+// HEAD, which names none (PR #49). It fails, changing nothing, when Git
+// cannot be read for HEAD.
+func (e *Env) AcceptHead(ctx context.Context, sf *failoverv1.SiteFailover, head string) (string, error) {
+	h, err := AcceptedHead(sf, head)
+	if err != nil || h != AcceptHEAD {
+		return h, err
+	}
+	w := &sf.Spec.Workload.Spec
+	commit, err := e.Git.BranchHead(ctx, w)
+	if err == nil && commit == "" {
+		err = errors.New("the branch has no head")
+	}
+	if err != nil {
+		return "", fmt.Errorf("--accept-git-head HEAD stands for the head of branch %s, and Git cannot be read (%v). Nothing was changed: resume once Git answers, or name the commit", w.Git.Branch, err)
+	}
+	return commit, nil
+}
+
 // ErrCannotResume is returned when a run cannot resume: it never recorded
 // its start, or another run took it over or started after it.
 var ErrCannotResume = errors.New("the run cannot resume")
@@ -339,7 +366,7 @@ func (e *Env) checkLatest(ctx context.Context, sf *failoverv1.SiteFailover, chec
 const ClockSkew = 10 * time.Second
 
 func (e *Env) resume(ctx context.Context, sf *failoverv1.SiteFailover, opts Options) error {
-	head, err := AcceptedHead(sf, opts.AcceptGitHead)
+	head, err := e.AcceptHead(ctx, sf, opts.AcceptGitHead)
 	if err != nil {
 		return err
 	}
@@ -383,6 +410,9 @@ type runner struct {
 	identified map[string]bool
 	// verified holds the sites whose VerifyGit succeeded in this process.
 	verified map[string]bool
+	// rechecked is set once the read before the first Failover step
+	// passed in this process.
+	rechecked bool
 }
 
 func (r *runner) run(ctx context.Context) error {
@@ -395,7 +425,9 @@ func (r *runner) run(ctx context.Context) error {
 		if step.Site != "" {
 			if err := r.siteReachable(ctx, step); err != nil {
 				if ctx.Err() != nil {
-					return r.end(ctx, step, ctx.Err())
+					// An interrupt during the check is no answer from the
+					// site: the step did not start, and keeps its state.
+					return r.stopBefore(ctx, step, ctx.Err())
 				}
 				if !kube.IsUnreachable(err) {
 					// The site answered, or could not be checked: it is not
@@ -430,6 +462,11 @@ func (r *runner) run(ctx context.Context) error {
 				}
 				r.printf("  deferred  %s (site %s did not answer the read of its cluster's identity)\n", step.ID, step.Site)
 				continue
+			}
+		}
+		if step.Phase == failoverv1.PhaseFailover && !r.rechecked && !r.switchStarted() {
+			if err := r.recheck(ctx); err != nil {
+				return r.stopBefore(ctx, step, err)
 			}
 		}
 		// The read of the other sites comes before the read before the
@@ -480,6 +517,49 @@ func (r *runner) run(ctx context.Context) error {
 		}
 	}
 	return r.finish(ctx)
+}
+
+// switchStarted tells whether a Failover step started in any process: it
+// is neither Pending nor Deferred, or it has an attempt.
+func (r *runner) switchStarted() bool {
+	for _, s := range r.sf.Spec.Steps {
+		if s.Phase != failoverv1.PhaseFailover {
+			continue
+		}
+		st := r.stepStatus(s.ID)
+		if st.Attempts > 0 || st.State != failoverv1.StepPending && st.State != failoverv1.StepDeferred {
+			return true
+		}
+	}
+	return false
+}
+
+// recheck reads every site again before the run's first Failover step,
+// while none started, and refuses a run that its driver no longer allows
+// on what it reads, as the read after the confirmation of tack run does
+// ([RFC#0009] Requirement 13). A run can wait between Hold and its switch
+// for hours, such as at a stop, and the operator may have switched the
+// primary meanwhile (#46). A site whose steps can wait for it and that
+// answers as primary, or declares itself primary, is left out: the read
+// before its steps and the read of the other sites decide on it, with or
+// without --fence ([RFC#0007] Requirements 6 and 9).
+func (r *runner) recheck(ctx context.Context) error {
+	topo, err := r.Driver.Discover(ctx, &r.sf.Spec.Workload.Spec, runChecks{r: r})
+	if err != nil {
+		return fmt.Errorf("the read before the first Failover step: %w", err)
+	}
+	req := r.request()
+	for i := range topo.Sites {
+		if s := &topo.Sites[i]; s.Reachable && deferrable(req, s.Name) && asPrimary(*s) != "" {
+			s.Reachable = false
+		}
+	}
+	if _, _, err := r.Driver.Plan(&r.sf.Spec.Workload.Spec, topo, req); err != nil {
+		return fmt.Errorf("the read before the first Failover step: driver %s no longer allows the run: %v. No Failover step of this run ran. When the sites are back as the plan read them, resume; else abandon the run (docs/runbooks/abandon-run.md) and plan again",
+			r.sf.Spec.Workload.Spec.Driver, err)
+	}
+	r.rechecked = true
+	return nil
 }
 
 // verifyStep returns the VerifyGit step of a site.
@@ -635,6 +715,9 @@ func (r *runner) readOthers(ctx context.Context, i int) error {
 	if err != nil {
 		return fmt.Errorf("%s: %w", read, err)
 	}
+	// fenced are the follow-ups of the sites --fence lets through, recorded
+	// once no site stops the run.
+	var fenced []failoverv1.FollowUp
 	for _, s := range topo.Sites {
 		if s.Name == to || !s.Reachable {
 			continue
@@ -662,11 +745,34 @@ func (r *runner) readOthers(ctx context.Context, i int) error {
 				"site %s %s (%s), and so does %s, which this run promoted, until this run fences %s. Check it, then resume with --fence %s",
 				s.Name, what, s.Summary, to, s.Name, s.Name)
 		}
+		// --fence lets the run promote to, or go on after it, while the
+		// site is primary: both may take writes until the run fences it
+		// (#46).
+		fenced = append(fenced, failoverv1.FollowUp{Site: s.Name, Action: FollowUpRebuild,
+			Reason: fmt.Sprintf("site %s %s while this run promoted %s, which the operator let go on with --fence %s, so %s may hold writes that %s lacks: recreate its member from %s (docs/runbooks/rebuild-old-primary.md)",
+				s.Name, what, to, s.Name, s.Name, to, to)})
 	}
 	if i == p {
-		return r.checkCaptured(ctx, i)
+		if err := r.checkCaptured(ctx, i); err != nil {
+			return err
+		}
+	}
+	for _, f := range fenced {
+		r.rebuild(f)
 	}
 	return nil
+}
+
+// rebuild records a follow-up Rebuild, once per site. The ledger's next
+// write carries it.
+func (r *runner) rebuild(f failoverv1.FollowUp) {
+	for _, o := range r.sf.Status.FollowUps {
+		if o.Site == f.Site && o.Action == f.Action {
+			return
+		}
+	}
+	r.sf.Status.FollowUps = append(r.sf.Status.FollowUps, f)
+	r.printf("  note      follow-up for site %s: %s (%s)\n", f.Site, f.Action, f.Reason)
 }
 
 // checkCaptured reads again, before the promotion, each value a Capture
@@ -888,6 +994,11 @@ func (r *runner) finish(ctx context.Context) error {
 		}
 	}
 	now := metav1.NewTime(r.now())
+	// A ledger of v1.2.0 ended a phase only after a step of it succeeded,
+	// so a phase whose last steps were deferred stayed unfinished (PR #42).
+	for _, p := range r.sf.Status.Phases {
+		r.endPhase(p.Name, r.lastFinish(p.Name, now))
+	}
 	r.sf.Status.State = failoverv1.RunSucceeded
 	r.sf.Status.Reason = ""
 	r.sf.Status.Message = "every step ran"
@@ -956,6 +1067,28 @@ func (r *runner) startPhase(p failoverv1.Phase, now metav1.Time) {
 	r.sf.Status.Phases = append(r.sf.Status.Phases, failoverv1.PhaseStatus{Name: p, StartedAt: &now})
 }
 
+// lastFinish returns when the last step of a phase finished, when each of
+// its steps records it; else now.
+func (r *runner) lastFinish(p failoverv1.Phase, now metav1.Time) metav1.Time {
+	var last metav1.Time
+	for _, s := range r.sf.Spec.Steps {
+		if s.Phase != p {
+			continue
+		}
+		st := r.stepStatus(s.ID)
+		if st.FinishedAt == nil {
+			return now
+		}
+		if st.FinishedAt.After(last.Time) {
+			last = *st.FinishedAt
+		}
+	}
+	if last.IsZero() {
+		return now
+	}
+	return last
+}
+
 // endPhase records a phase's end once each of its steps is Succeeded or
 // Deferred.
 func (r *runner) endPhase(p failoverv1.Phase, now metav1.Time) {
@@ -978,8 +1111,8 @@ func (r *runner) endPhase(p failoverv1.Phase, now metav1.Time) {
 // writeTimeout bounds a ledger write, its repeats included.
 const writeTimeout = 30 * time.Second
 
-// write records the status. It outlives a cancelled run, so an interrupt
-// is still recorded. A write that got no answer, or an answer that the API
+// write records the status, its messages cleaned (Clean). It outlives a
+// cancelled run, so an interrupt is still recorded. A write that got no answer, or an answer that the API
 // server cannot serve it now, is repeated with the same resourceVersion
 // until writeTimeout ([RFC#0003] Requirement 5). A repeat that conflicts
 // may follow a write that landed without its answer: the ledger is read,
@@ -988,6 +1121,7 @@ const writeTimeout = 30 * time.Second
 func (e *Env) write(ctx context.Context, sf *failoverv1.SiteFailover) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
 	defer cancel()
+	cleanStatus(&sf.Status)
 	sent := sf.DeepCopy()
 	start := e.now()
 	for attempt := 1; ; attempt++ {
@@ -1029,9 +1163,11 @@ func sameStatus(a, b *failoverv1.SiteFailoverStatus) bool {
 	return aerr == nil && berr == nil && bytes.Equal(ja, jb)
 }
 
+// printf prints a progress line, cleaned of URL credentials: it may carry
+// an outside error.
 func (e *Env) printf(format string, a ...any) {
 	if e.Out != nil {
-		fmt.Fprintf(e.Out, format, a...)
+		fmt.Fprint(e.Out, redact.Text(fmt.Sprintf(format, a...)))
 	}
 }
 

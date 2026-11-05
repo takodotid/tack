@@ -1,0 +1,723 @@
+metadata:
+  labels:
+    failover.tako.id/workload: pg-main
+  name: run-1
+  namespace: tack-system
+spec:
+  fingerprints:
+  - kubeSystemUID: uid-a
+    site: a
+  from: b
+  mode: SiteLoss
+  steps:
+  - description: 'hold Cluster db/pg-a at site a: Flux stops applying it'
+    hold:
+      kustomization:
+        name: a
+        namespace: flux-system
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-a
+        namespace: db
+    id: hold-a-cluster-pg-a
+    phase: Hold
+    site: a
+    type: Hold
+  - description: 'hold Pooler db/pg-a-pooler-rw at site a: Flux stops applying it'
+    hold:
+      kustomization:
+        name: a
+        namespace: flux-system
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Pooler
+        name: pg-a-pooler-rw
+        namespace: db
+    id: hold-a-pooler-pg-a-pooler-rw
+    phase: Hold
+    site: a
+    type: Hold
+  - description: reconcile Flux at site a, so no apply started before the hold is
+      still in flight
+    id: reconcile-hold-a
+    phase: Hold
+    reconcile:
+      kustomizations:
+      - name: a
+        namespace: flux-system
+      timeout: 5s
+    site: a
+    type: Reconcile
+  - deferrable: true
+    description: 'hold Cluster db/pg-b at site b: Flux stops applying it'
+    hold:
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-b
+        namespace: db
+    id: hold-b-cluster-pg-b
+    phase: Hold
+    site: b
+    type: Hold
+  - deferrable: true
+    description: 'hold Pooler db/pg-b-pooler-rw at site b: Flux stops applying it'
+    hold:
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Pooler
+        name: pg-b-pooler-rw
+        namespace: db
+    id: hold-b-pooler-pg-b-pooler-rw
+    phase: Hold
+    site: b
+    type: Hold
+  - deferrable: true
+    description: reconcile Flux at site b, so no apply started before the hold is
+      still in flight
+    id: reconcile-hold-b
+    phase: Hold
+    reconcile:
+      timeout: 5s
+    site: b
+    type: Reconcile
+  - deferrable: true
+    description: 'fence Cluster pg-b: declare pg-a primary, so it never runs as primary
+      again'
+    id: fence-b
+    patch:
+      merge: '{"spec":{"replica":{"primary":"pg-a","promotionToken":null}}}'
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-b
+        namespace: db
+    phase: Failover
+    site: b
+    type: Patch
+  - deferrable: true
+    description: set Pooler pg-b-pooler-rw to 0 instances
+    id: pooler-b
+    patch:
+      merge: '{"spec":{"instances":0}}'
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Pooler
+        name: pg-b-pooler-rw
+        namespace: db
+    phase: Failover
+    site: b
+    type: Patch
+  - deferrable: true
+    description: wait until the Pooler pg-b-pooler-rw runs no pod
+    id: wait-pooler-b
+    phase: Failover
+    site: b
+    type: Wait
+    wait:
+      conditions:
+      - jsonPath: '{.status.replicas}'
+        operator: Empty
+      object:
+        apiVersion: apps/v1
+        kind: Deployment
+        name: pg-b-pooler-rw
+        namespace: db
+      timeout: 5s
+  - description: promote Cluster pg-a without a token
+    id: promote-a
+    patch:
+      merge: '{"spec":{"replica":{"primary":"pg-a","promotionToken":null}}}'
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-a
+        namespace: db
+    phase: Failover
+    site: a
+    type: Patch
+  - description: wait until Cluster pg-a runs a healthy primary
+    id: wait-promoted-a
+    phase: Failover
+    site: a
+    type: Wait
+    wait:
+      conditions:
+      - jsonPath: '{.status.instancesReportedState.*.isPrimary}'
+        operator: Contains
+        value: "true"
+      - jsonPath: '{.status.phase}'
+        operator: Equals
+        value: Cluster in healthy state
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-a
+        namespace: db
+      timeout: 5s
+  - description: set Pooler pg-a-pooler-rw to 2 instances
+    id: pooler-a
+    patch:
+      merge: '{"spec":{"instances":2}}'
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Pooler
+        name: pg-a-pooler-rw
+        namespace: db
+    phase: Failover
+    site: a
+    type: Patch
+  - description: wait until the Pooler pg-a-pooler-rw has 2 ready pods
+    id: wait-pooler-a
+    phase: Failover
+    site: a
+    type: Wait
+    wait:
+      conditions:
+      - jsonPath: '{.status.readyReplicas}'
+        operator: Equals
+        value: "2"
+      object:
+        apiVersion: apps/v1
+        kind: Deployment
+        name: pg-a-pooler-rw
+        namespace: db
+      timeout: 5s
+  - description: verify that Cluster pg-a is a healthy primary and declares itself
+    id: verify-a
+    phase: Failover
+    site: a
+    type: Wait
+    wait:
+      conditions:
+      - jsonPath: '{.spec.replica.primary}'
+        operator: Equals
+        value: pg-a
+      - jsonPath: '{.status.instancesReportedState.*.isPrimary}'
+        operator: Contains
+        value: "true"
+      - jsonPath: '{.status.phase}'
+        operator: Equals
+        value: Cluster in healthy state
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-a
+        namespace: db
+      timeout: 5s
+  - description: commit the live state to https://git.example.com/gitops.git branch
+      main
+    git:
+      changes:
+      - field: spec.replica.primary
+        file: clusters/a/cluster.yaml
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-a
+          namespace: db
+        path: spec.replica.primary
+        site: a
+        value: '"pg-a"'
+      - field: spec.replica.promotionToken
+        file: clusters/a/cluster.yaml
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-a
+          namespace: db
+        path: spec.replica.promotionToken
+        site: a
+      - field: spec.instances
+        file: clusters/a/pooler.yaml
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Pooler
+          name: pg-a-pooler-rw
+          namespace: db
+        path: spec.instances
+        site: a
+        value: "2"
+      - field: spec.replica.primary
+        file: clusters/b/cluster.yaml
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-b
+          namespace: db
+        path: spec.replica.primary
+        site: b
+        value: '"pg-a"'
+      - field: spec.replica.promotionToken
+        file: clusters/b/cluster.yaml
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-b
+          namespace: db
+        path: spec.replica.promotionToken
+        site: b
+      - field: spec.instances
+        file: clusters/b/pooler.yaml
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Pooler
+          name: pg-b-pooler-rw
+          namespace: db
+        path: spec.instances
+        site: b
+        value: "0"
+      message: |-
+        tack: pg-main primary b to a (siteloss)
+
+        Run run-1, mode SiteLoss.
+    id: git-commit
+    phase: PromoteToGitOps
+    type: Git
+  - description: wait for Flux at site a to apply the run's commit (held objects stay
+      as they are)
+    id: reconcile-git-a
+    phase: PromoteToGitOps
+    reconcile:
+      kustomizations:
+      - name: a
+        namespace: flux-system
+      revision: $(git.commit)
+      timeout: 5s
+    site: a
+    type: Reconcile
+  - deferrable: true
+    description: wait for Flux at site b to apply the run's commit (held objects stay
+      as they are)
+    id: reconcile-git-b
+    phase: PromoteToGitOps
+    reconcile:
+      revision: $(git.commit)
+      timeout: 5s
+    site: b
+    type: Reconcile
+  - description: check at site a that Git, as Flux renders it, equals live
+    id: verify-git-a
+    phase: Release
+    site: a
+    type: VerifyGit
+    verifyGit:
+      fields:
+      - field: spec.replica.primary
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-a
+          namespace: db
+      - field: spec.replica.promotionToken
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-a
+          namespace: db
+      - field: spec.instances
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Pooler
+          name: pg-a-pooler-rw
+          namespace: db
+      objects:
+      - apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-a
+        namespace: db
+      - apiVersion: postgresql.cnpg.io/v1
+        kind: Pooler
+        name: pg-a-pooler-rw
+        namespace: db
+  - description: 'release Cluster db/pg-a at site a: Flux applies it again'
+    id: release-a-cluster-pg-a
+    phase: Release
+    release:
+      kustomization:
+        name: a
+        namespace: flux-system
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-a
+        namespace: db
+    site: a
+    type: Release
+  - description: 'release Pooler db/pg-a-pooler-rw at site a: Flux applies it again'
+    id: release-a-pooler-pg-a-pooler-rw
+    phase: Release
+    release:
+      kustomization:
+        name: a
+        namespace: flux-system
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Pooler
+        name: pg-a-pooler-rw
+        namespace: db
+    site: a
+    type: Release
+  - description: reconcile Flux at site a with the released objects
+    id: reconcile-release-a
+    phase: Release
+    reconcile:
+      kustomizations:
+      - name: a
+        namespace: flux-system
+      revision: $(git.commit)
+      timeout: 5s
+    site: a
+    type: Reconcile
+  - description: check at site a that Flux changed nothing
+    id: verify-noop-a
+    phase: Release
+    site: a
+    type: VerifyNoop
+    verifyNoop:
+      fields:
+      - field: spec.replica.primary
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-a
+          namespace: db
+      - field: spec.replica.promotionToken
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-a
+          namespace: db
+      - field: spec.instances
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Pooler
+          name: pg-a-pooler-rw
+          namespace: db
+      objects:
+      - apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-a
+        namespace: db
+      - apiVersion: postgresql.cnpg.io/v1
+        kind: Pooler
+        name: pg-a-pooler-rw
+        namespace: db
+  - deferrable: true
+    description: check at site b that Git, as Flux renders it, equals live
+    id: verify-git-b
+    phase: Release
+    site: b
+    type: VerifyGit
+    verifyGit:
+      fields:
+      - field: spec.replica.primary
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-b
+          namespace: db
+      - field: spec.replica.promotionToken
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-b
+          namespace: db
+      - field: spec.instances
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Pooler
+          name: pg-b-pooler-rw
+          namespace: db
+      objects:
+      - apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-b
+        namespace: db
+      - apiVersion: postgresql.cnpg.io/v1
+        kind: Pooler
+        name: pg-b-pooler-rw
+        namespace: db
+  - deferrable: true
+    description: 'release Cluster db/pg-b at site b: Flux applies it again'
+    id: release-b-cluster-pg-b
+    phase: Release
+    release:
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-b
+        namespace: db
+    site: b
+    type: Release
+  - deferrable: true
+    description: 'release Pooler db/pg-b-pooler-rw at site b: Flux applies it again'
+    id: release-b-pooler-pg-b-pooler-rw
+    phase: Release
+    release:
+      object:
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Pooler
+        name: pg-b-pooler-rw
+        namespace: db
+    site: b
+    type: Release
+  - deferrable: true
+    description: reconcile Flux at site b with the released objects
+    id: reconcile-release-b
+    phase: Release
+    reconcile:
+      revision: $(git.commit)
+      timeout: 5s
+    site: b
+    type: Reconcile
+  - deferrable: true
+    description: check at site b that Flux changed nothing
+    id: verify-noop-b
+    phase: Release
+    site: b
+    type: VerifyNoop
+    verifyNoop:
+      fields:
+      - field: spec.replica.primary
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-b
+          namespace: db
+      - field: spec.replica.promotionToken
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          name: pg-b
+          namespace: db
+      - field: spec.instances
+        object:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Pooler
+          name: pg-b-pooler-rw
+          namespace: db
+      objects:
+      - apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg-b
+        namespace: db
+      - apiVersion: postgresql.cnpg.io/v1
+        kind: Pooler
+        name: pg-b-pooler-rw
+        namespace: db
+  to: a
+  workload:
+    name: pg-main
+    spec:
+      driver: cnpg
+      git:
+        branch: main
+        find: {}
+        url: https://git.example.com/gitops.git
+      ledger:
+        namespace: tack-system
+      sites:
+      - cnpg:
+          cluster:
+            name: pg-a
+            namespace: db
+          pooler:
+            instances: 2
+            name: pg-a-pooler-rw
+            namespace: db
+        kubeContext: site-a
+        name: a
+      - cnpg:
+          cluster:
+            name: pg-b
+            namespace: db
+          pooler:
+            instances: 2
+            name: pg-b-pooler-rw
+            namespace: db
+        kubeContext: site-b
+        name: b
+      timeouts:
+        demotion: 5s
+        flux: 5s
+        promotion: 5s
+        routing: 2m0s
+status:
+  finishedAt: "2026-11-05T08:00:16Z"
+  followUps:
+  - action: Rebuild
+    reason: 'Cluster pg-a was promoted without a token, so Cluster pg-b may hold writes
+      that pg-a lacks and cannot follow it: recreate pg-b from pg-a (docs/runbooks/rebuild-old-primary.md)'
+    site: b
+  git:
+    baseRevision: main@sha1:c000000000000000000000000000000000000001
+    commit: c000000000000000000000000000000000000002
+  held:
+  - generation: 1
+    heldAt: "2026-11-05T08:00:16Z"
+    kustomization:
+      name: a
+      namespace: flux-system
+    object:
+      apiVersion: postgresql.cnpg.io/v1
+      kind: Cluster
+      name: pg-a
+      namespace: db
+    releasedAt: "2026-11-05T08:00:16Z"
+    site: a
+  - generation: 1
+    heldAt: "2026-11-05T08:00:16Z"
+    kustomization:
+      name: a
+      namespace: flux-system
+    object:
+      apiVersion: postgresql.cnpg.io/v1
+      kind: Pooler
+      name: pg-a-pooler-rw
+      namespace: db
+    releasedAt: "2026-11-05T08:00:16Z"
+    site: a
+  message: every reachable step ran; 12 steps wait for their site to come back
+  phase: Release
+  phases:
+  - name: Hold
+    startedAt: "2026-11-05T08:00:16Z"
+  - finishedAt: "2026-11-05T08:00:16Z"
+    name: Failover
+    startedAt: "2026-11-05T08:00:16Z"
+  - name: PromoteToGitOps
+    startedAt: "2026-11-05T08:00:16Z"
+  - name: Release
+    startedAt: "2026-11-05T08:00:16Z"
+  startedAt: "2026-11-05T08:00:16Z"
+  state: Succeeded
+  steps:
+  - attempts: 1
+    finishedAt: "2026-11-05T08:00:16Z"
+    id: hold-a-cluster-pg-a
+    message: held; applied by Kustomization flux-system/a
+    startedAt: "2026-11-05T08:00:16Z"
+    state: Succeeded
+  - attempts: 1
+    finishedAt: "2026-11-05T08:00:16Z"
+    id: hold-a-pooler-pg-a-pooler-rw
+    message: held; applied by Kustomization flux-system/a
+    startedAt: "2026-11-05T08:00:16Z"
+    state: Succeeded
+  - attempts: 1
+    finishedAt: "2026-11-05T08:00:16Z"
+    id: reconcile-hold-a
+    message: 'Flux applied main@sha1:c000000000000000000000000000000000000001; Git
+      not fetched: a site-loss run holds without Git'
+    startedAt: "2026-11-05T08:00:16Z"
+    state: Succeeded
+  - id: hold-b-cluster-pg-b
+    message: 'site b unreachable: site b is unreachable: connection refused'
+    state: Deferred
+  - id: hold-b-pooler-pg-b-pooler-rw
+    message: 'site b unreachable: site b is unreachable: connection refused'
+    state: Deferred
+  - id: reconcile-hold-b
+    message: 'site b unreachable: site b is unreachable: connection refused'
+    state: Deferred
+  - id: fence-b
+    message: 'site b unreachable: site b is unreachable: connection refused'
+    state: Deferred
+  - id: pooler-b
+    message: 'site b unreachable: site b is unreachable: connection refused'
+    state: Deferred
+  - id: wait-pooler-b
+    message: 'site b unreachable: site b is unreachable: connection refused'
+    state: Deferred
+  - attempts: 1
+    finishedAt: "2026-11-05T08:00:16Z"
+    id: promote-a
+    message: patched; generation 0
+    startedAt: "2026-11-05T08:00:16Z"
+    state: Succeeded
+  - attempts: 1
+    finishedAt: "2026-11-05T08:00:16Z"
+    id: wait-promoted-a
+    message: conditions hold
+    startedAt: "2026-11-05T08:00:16Z"
+    state: Succeeded
+  - attempts: 1
+    finishedAt: "2026-11-05T08:00:16Z"
+    id: pooler-a
+    message: patched; generation 0
+    startedAt: "2026-11-05T08:00:16Z"
+    state: Succeeded
+  - attempts: 1
+    finishedAt: "2026-11-05T08:00:16Z"
+    id: wait-pooler-a
+    message: conditions hold
+    startedAt: "2026-11-05T08:00:16Z"
+    state: Succeeded
+  - attempts: 1
+    finishedAt: "2026-11-05T08:00:16Z"
+    id: verify-a
+    message: conditions hold
+    startedAt: "2026-11-05T08:00:16Z"
+    state: Succeeded
+  - attempts: 1
+    finishedAt: "2026-11-05T08:00:16Z"
+    id: git-commit
+    message: committed c000000000000000000000000000000000000002
+    startedAt: "2026-11-05T08:00:16Z"
+    state: Succeeded
+  - attempts: 1
+    finishedAt: "2026-11-05T08:00:16Z"
+    id: reconcile-git-a
+    message: Flux applied main@sha1:c000000000000000000000000000000000000002
+    startedAt: "2026-11-05T08:00:16Z"
+    state: Succeeded
+  - id: reconcile-git-b
+    message: 'site b unreachable: site b is unreachable: connection refused'
+    state: Deferred
+  - attempts: 1
+    finishedAt: "2026-11-05T08:00:16Z"
+    id: verify-git-a
+    message: Git equals live
+    startedAt: "2026-11-05T08:00:16Z"
+    state: Succeeded
+  - attempts: 1
+    finishedAt: "2026-11-05T08:00:16Z"
+    id: release-a-cluster-pg-a
+    message: released at generation 1
+    startedAt: "2026-11-05T08:00:16Z"
+    state: Succeeded
+  - attempts: 1
+    finishedAt: "2026-11-05T08:00:16Z"
+    id: release-a-pooler-pg-a-pooler-rw
+    message: released at generation 1
+    startedAt: "2026-11-05T08:00:16Z"
+    state: Succeeded
+  - attempts: 1
+    finishedAt: "2026-11-05T08:00:16Z"
+    id: reconcile-release-a
+    message: Flux applied main@sha1:c000000000000000000000000000000000000002
+    startedAt: "2026-11-05T08:00:16Z"
+    state: Succeeded
+  - attempts: 1
+    finishedAt: "2026-11-05T08:00:16Z"
+    id: verify-noop-a
+    message: nothing changed
+    startedAt: "2026-11-05T08:00:16Z"
+    state: Succeeded
+  - id: verify-git-b
+    message: 'site b unreachable: site b is unreachable: connection refused'
+    state: Deferred
+  - id: release-b-cluster-pg-b
+    message: 'site b unreachable: site b is unreachable: connection refused'
+    state: Deferred
+  - id: release-b-pooler-pg-b-pooler-rw
+    message: 'site b unreachable: site b is unreachable: connection refused'
+    state: Deferred
+  - id: reconcile-release-b
+    message: 'site b unreachable: site b is unreachable: connection refused'
+    state: Deferred
+  - id: verify-noop-b
+    message: 'site b unreachable: site b is unreachable: connection refused'
+    state: Deferred

@@ -158,3 +158,60 @@ func TestResumeRefusesAnotherHeadBeforeAsking(t *testing.T) {
 		t.Errorf("%d cluster writes, Flux %v", f.clients.Writes, f.flux.Calls)
 	}
 }
+
+// #35 row 43. A ledger that an older Tack wrote may hold a URL's password
+// in its messages. tack status, its YAML and the error of tack resume
+// print none ([RFC#0009] Requirement 10).
+func TestOutputRedactsOlderLedgers(t *testing.T) {
+	const url = "https://user:tok3n-secret@git.example.invalid/gitops.git"
+	sf := stoppedRun(t, "pg-main-earlier")
+	sf.Status.Message = "step hold-a-cluster-pg-a: fetch " + url + ": 403"
+	sf.Status.Steps[0].Message = "fetch " + url + ": 403"
+	sf.Status.Abandoned = &failoverv1.Abandonment{At: metav1.NewTime(fixedNow), Reason: "the search failed: Get " + url + ": EOF"}
+	for _, args := range [][]string{
+		{"status", "pg-main-earlier"},
+		{"status", "pg-main-earlier", "-o", "yaml"},
+		{"resume", "pg-main-earlier", "--yes"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": append(testenv.Site("b", "a", 0), sf.DeepCopy())})
+			out, _ := run(t, f, append(args, "-f", "testdata/workload.yaml")...)
+			if strings.Contains(out, "tok3n-secret") {
+				t.Errorf("the password is printed:\n%s", out)
+			}
+			if !strings.Contains(out, "https://***@git.example.invalid/gitops.git") {
+				t.Errorf("no redacted URL:\n%s", out)
+			}
+		})
+	}
+}
+
+// PR #49's finding. After a stop that names no commit, --accept-git-head
+// HEAD is the branch head: tack resume shows which commit before it asks,
+// and refuses, writing nothing, when Git cannot be read.
+func TestResumeShowsTheCommitOfHEAD(t *testing.T) {
+	head := "5555555555555555555555555555555555555555"
+	for _, tt := range []struct {
+		name    string
+		gitDown bool
+		code    int
+		want    string
+	}{
+		{name: "Git answers", code: ExitUsage, want: "--accept-git-head HEAD is commit " + head + ", the head of branch main"},
+		{name: "Git down", gitDown: true, code: ExitError, want: "--accept-git-head HEAD stands for the head of branch main, and Git cannot be read"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			sf := stoppedRun(t, "pg-main-earlier")
+			sf.Status.Reason = failoverv1.ReasonFluxChanged
+			f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": append(testenv.Site("b", "a", 0), sf)})
+			f.git.Head, f.git.Unreachable = head, tt.gitDown
+			out, code := run(t, f, "resume", "pg-main-earlier", "-f", "testdata/workload.yaml", "--accept-git-head", "HEAD")
+			if code != tt.code || !strings.Contains(out, tt.want) {
+				t.Fatalf("exit %d, want %d with %q:\n%s", code, tt.code, tt.want, out)
+			}
+			if f.clients.Writes != 0 || len(f.flux.Calls) != 0 {
+				t.Errorf("%d cluster writes, Flux %v", f.clients.Writes, f.flux.Calls)
+			}
+		})
+	}
+}

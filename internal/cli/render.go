@@ -10,6 +10,7 @@ import (
 	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/engine"
 	"github.com/takodotid/tack/internal/kube"
+	"github.com/takodotid/tack/internal/redact"
 )
 
 // The annotations of a hold, as the plan prints them.
@@ -29,14 +30,14 @@ func printPlan(w io.Writer, p *engine.Plan, c kube.Clients) {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	for _, s := range p.Topology.Sites {
 		if !s.Reachable {
-			fmt.Fprintf(tw, "  %s\tunreachable\t%s\n", s.Name, s.Error)
+			fmt.Fprintf(tw, "  %s\tunreachable\t%s\n", s.Name, redact.Text(s.Error))
 			continue
 		}
 		health := "unhealthy"
 		if s.Healthy {
 			health = "healthy"
 		}
-		fmt.Fprintf(tw, "  %s\t%s\tdeclares %s\t%s\t%s\n", s.Name, s.Role, orNone(s.DeclaredPrimary), health, s.Summary)
+		fmt.Fprintf(tw, "  %s\t%s\tdeclares %s\t%s\t%s\n", s.Name, s.Role, orNone(s.DeclaredPrimary), health, redact.Text(s.Summary))
 	}
 	tw.Flush()
 	fmt.Fprintln(w)
@@ -54,7 +55,7 @@ func printPlan(w io.Writer, p *engine.Plan, c kube.Clients) {
 	if len(p.Notes) > 0 {
 		fmt.Fprintln(w, "\nNotes:")
 		for _, n := range p.Notes {
-			fmt.Fprintf(w, "  %s\n", n)
+			fmt.Fprintf(w, "  %s\n", redact.Text(n))
 		}
 	}
 }
@@ -84,10 +85,10 @@ func printClusters(w io.Writer, sf *failoverv1.SiteFailover, c kube.Clients) {
 		if !ok {
 			fp = "not read yet"
 		}
-		fmt.Fprintf(tw, "  site %s\tcontext %s\tserver %s\tkube-system UID %s\n", s.Name, s.KubeContext, engine.Redact(server), fp)
+		fmt.Fprintf(tw, "  site %s\tcontext %s\tserver %s\tkube-system UID %s\n", s.Name, s.KubeContext, redact.Text(server), fp)
 	}
 	tw.Flush()
-	fmt.Fprintf(w, "Git: %s, branch %s\n", engine.Redact(spec.Git.URL), spec.Git.Branch)
+	fmt.Fprintf(w, "Git: %s, branch %s\n", redact.Text(spec.Git.URL), spec.Git.Branch)
 }
 
 // printSteps writes the steps by phase, with their state when withState.
@@ -128,7 +129,7 @@ func printSteps(w io.Writer, sf *failoverv1.SiteFailover, withState bool) {
 			}
 			if withState {
 				if st := state[s.ID]; st.Message != "" {
-					fmt.Fprintf(w, "        result: %s\n", engine.HideCaptured(sf.Status.Captured, st.Message))
+					fmt.Fprintf(w, "        result: %s\n", engine.Clean(sf.Status.Captured, st.Message))
 				}
 			}
 		}
@@ -226,7 +227,7 @@ func printStatus(w io.Writer, sf *failoverv1.SiteFailover) {
 	}
 	fmt.Fprintln(w)
 	if st.Message != "" {
-		fmt.Fprintf(w, "Message: %s\n", engine.HideCaptured(st.Captured, st.Message))
+		fmt.Fprintf(w, "Message: %s\n", engine.Clean(st.Captured, st.Message))
 	}
 	switch runs := sf.TakenOver(); len(runs) {
 	case 0:
@@ -239,7 +240,7 @@ func printStatus(w io.Writer, sf *failoverv1.SiteFailover) {
 		fmt.Fprintf(w, "Taken over by: run %s; this run cannot resume\n", st.SupersededBy)
 	}
 	if a := st.Abandoned; a != nil {
-		fmt.Fprintf(w, "Abandoned: %s, %s; this run cannot resume\n", a.At.UTC().Format("2006-01-02 15:04:05Z"), a.Reason)
+		fmt.Fprintf(w, "Abandoned: %s, %s; this run cannot resume\n", a.At.UTC().Format("2006-01-02 15:04:05Z"), engine.Clean(st.Captured, a.Reason))
 	}
 	if st.StartedAt != nil {
 		fmt.Fprintf(w, "Started: %s\n", st.StartedAt.UTC().Format("2006-01-02 15:04:05Z"))

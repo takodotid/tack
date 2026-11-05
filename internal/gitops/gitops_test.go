@@ -766,19 +766,9 @@ func TestClose(t *testing.T) {
 	}
 }
 
-func TestRedact(t *testing.T) {
-	for in, want := range map[string]string{
-		"fetch https://user:secret@git.example.invalid/r.git failed": "fetch https://***@git.example.invalid/r.git failed",
-		"https://tok3n@git.example.invalid/r.git":                    "https://***@git.example.invalid/r.git",
-		"https://user:p@ss@git.example.invalid/r.git":                "https://***@git.example.invalid/r.git",
-		"ssh://git@git.example.invalid/r.git":                        "ssh://***@git.example.invalid/r.git",
-		"git@git.example.invalid:r.git":                              "git@git.example.invalid:r.git",
-		"https://git.example.invalid/a@b":                            "https://git.example.invalid/a@b",
-	} {
-		if got := Redact(in); got != want {
-			t.Errorf("Redact(%q) = %q, want %q", in, got, want)
-		}
-	}
+// git's messages pass through the shared redact.Text: a failed command
+// never shows the URL's password.
+func TestGitErrorsAreRedacted(t *testing.T) {
 	e := &gitError{args: []string{"fetch"}, stderr: "fatal: unable to access 'https://user:secret@git.example.invalid/r.git/'"}
 	if strings.Contains(e.Error(), "secret") {
 		t.Errorf("gitError shows the password: %s", e)
@@ -884,5 +874,131 @@ func TestCommitRunsNoHooks(t *testing.T) {
 	}
 	for _, e := range ran {
 		t.Errorf("hook %s ran", e.Name())
+	}
+}
+
+// #35 row 11 (RFC0006 Requirement 15). The ledger records where each Git
+// change is written, and anyone who may write a ledger could point it
+// elsewhere: a value or a removal into any file. The commit refuses a
+// change that is not where the Workload's mapping, or the manifest that
+// defines its object, puts it, and pushes nothing.
+func TestCommitRefusesAnotherTarget(t *testing.T) {
+	isolate(t)
+	for _, tt := range []struct {
+		name   string
+		change func(c *failoverv1.GitChange)
+		index  int
+		want   string
+	}{
+		{name: "a mapped field in another file", index: 0, change: func(c *failoverv1.GitChange) {
+			c.File, c.Path = "deploy/site-a/cluster.yaml", "spec.replica.primary"
+		}, want: "spec.git.fields maps it to helm/values-a.yaml at cnpg.clusters[0].replica.primary"},
+		{name: "a found field in a document of another object", index: 3, change: func(c *failoverv1.GitChange) {
+			c.Document = i32(0)
+		}, want: "that document does not define Pooler db/pg-rw"},
+		{name: "a found field in a file of another object", index: 2, change: func(c *failoverv1.GitChange) {
+			c.File, c.Document = "deploy/site-a/pooler.yml", i32(1)
+		}, want: "that document does not define Cluster db/pg"},
+		{name: "a removal at another path", index: 4, change: func(c *failoverv1.GitChange) {
+			c.Path = "spec.replica.source"
+		}, want: "is written at the field's own path, spec.replica.promotionToken"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			rm := newRemote(t, fixture())
+			base := rm.head()
+			w := workload(rm.url)
+			r := newRepo(t)
+			changes, err := r.Resolve(context.Background(), w, switchover())
+			if err != nil {
+				t.Fatalf("Resolve: %v", err)
+			}
+			tt.change(&changes[tt.index])
+			_, err = r.Commit(context.Background(), w, engine.CommitRequest{Run: "run-1", Base: base, Changes: changes, Message: "m"})
+			if err == nil || !strings.Contains(err.Error(), tt.want) || !strings.Contains(err.Error(), "do not resume the run") {
+				t.Fatalf("Commit: %v, want a refusal with %q", err, tt.want)
+			}
+			if h := rm.head(); h != base {
+				t.Errorf("pushed %s", h)
+			}
+		})
+	}
+}
+
+// PR #42's finding (RFC0006 Requirement 2). The operator's global
+// configuration is read on purpose, for credential helpers and ssh, but a
+// core.fsmonitor there ran a program in every clone of Tack's, and a
+// protocol.ext.allow there let a Workload's Git URL of the form ext::CMD
+// run CMD. A ledger's Workload snapshot, and so its URL, is as easy to
+// write as the ledger (#35 row 11). Neither runs; neither does automatic
+// gc or maintenance.
+func TestGitRunsNoProgramOfTheGlobalConfig(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the programs are shell scripts")
+	}
+	isolate(t)
+	rm := newRemote(t, fixture())
+	base := rm.head()
+	marks := t.TempDir()
+	fsmonitor := filepath.Join(t.TempDir(), "fsmonitor")
+	if err := os.WriteFile(fsmonitor, []byte("#!/bin/sh\ntouch '"+filepath.Join(marks, "fsmonitor")+"'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	global := filepath.Join(t.TempDir(), "gitconfig")
+	cfg := "[core]\n\tfsmonitor = " + fsmonitor + "\n[protocol \"ext\"]\n\tallow = always\n[gc]\n\tauto = 1\n\tautoDetach = false\n[maintenance]\n\tauto = true\n"
+	if err := os.WriteFile(global, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", global)
+	real, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("no git")
+	}
+	bin := t.TempDir()
+	argsLog := filepath.Join(t.TempDir(), "args")
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte("#!/bin/sh\necho \"$@\" >> '"+argsLog+"'\nexec '"+real+"' \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	w := workload(rm.url)
+	r := newRepo(t)
+	changes, err := r.Resolve(context.Background(), w, switchover())
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	commit, err := r.Commit(context.Background(), w, engine.CommitRequest{Run: "run-1", Base: base, Changes: changes, Message: "tack: switch pg to b"})
+	if err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if _, err := r.Checkout(context.Background(), w, commit); err != nil {
+		t.Fatalf("Checkout: %v", err)
+	}
+	ext := &failoverv1.WorkloadSpec{Git: failoverv1.GitSpec{URL: "ext::sh -c touch% " + filepath.Join(marks, "ext"), Branch: "main"}}
+	if _, err := newRepo(t).BranchHead(context.Background(), ext); err == nil {
+		t.Error("a fetch of an ext:: URL succeeded")
+	}
+	ran, err := os.ReadDir(marks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range ran {
+		t.Errorf("%s ran", e.Name())
+	}
+	// Automatic gc and maintenance run after a commit or a fetch, with
+	// what the configuration names: every command turns them off.
+	b, err := os.ReadFile(argsLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		if strings.HasPrefix(line, "config --get ") {
+			// The read of core.sshCommand runs no program.
+			continue
+		}
+		for _, want := range []string{"-c core.fsmonitor=false", "-c protocol.ext.allow=never", "-c gc.auto=0", "-c maintenance.auto=false"} {
+			if !strings.Contains(line, want) {
+				t.Errorf("git %s lacks %s", line, want)
+			}
+		}
 	}
 }

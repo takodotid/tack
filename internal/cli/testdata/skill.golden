@@ -153,7 +153,9 @@ decide. Each decision has its own flag:
                        start a new run with --take-over.
 
 A run that another run took over, or that another run of the workload
-started after, cannot resume: its plan may no longer match the sites.
+started after, cannot resume: its plan may no longer match the sites. Nor
+can a run whose steps are not the plan its driver composes from the
+ledger's Workload: the ledger was written outside tack.
 
 An agent never starts "tack resume" without an explicit instruction from a
 human for that run, and never passes these flags unless that instruction
