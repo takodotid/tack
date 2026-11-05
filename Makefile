@@ -17,7 +17,7 @@ build: tools-go
 ## dist: static binaries for Linux, macOS and Windows, with the man pages and the CRD, in dist/; lists each archive to check it
 dist: tools-go
 	rm -rf dist && mkdir -p dist/man
-	SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) $(GO) run ./hack/genman dist/man
+	SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) $(GO) run -ldflags '$(LDFLAGS)' ./hack/genman dist/man
 	set -e; for p in $(PLATFORMS); do \
 		os=$${p%/*}; arch=$${p#*/}; dir=dist/tack-$(VERSION)-$$os-$$arch; \
 		case $$os in windows) exe=.exe;; *) exe=;; esac; \

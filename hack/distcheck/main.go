@@ -1,7 +1,9 @@
 // Command distcheck lists each release archive that `make dist` wrote and
 // checks its contents ([RFC#0009] Requirement 12): one directory named
 // after the archive, with the binary, every man page in dist/man under
-// man/man1/, the CRD, LICENSE and README.md, and nothing else.
+// man/man1/, the CRD, LICENSE and README.md, and nothing else. Each link
+// to the docs in the man pages names the ref of the version
+// ([RFC#0009] Requirement 17).
 //
 //	go run ./hack/distcheck <dist> <version> <os/arch>...
 package main
@@ -16,8 +18,11 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
+
+	tackversion "github.com/takodotid/tack/internal/version"
 )
 
 func main() {
@@ -43,6 +48,9 @@ func run(args []string) error {
 	if !pages["tack.1"] || len(pages) < 2 {
 		return fmt.Errorf("%s holds %d man pages; want tack.1 and one per subcommand", filepath.Join(dist, "man"), len(pages))
 	}
+	if err := checkLinks(man, version); err != nil {
+		return err
+	}
 	var errs []error
 	for _, p := range platforms {
 		goos, goarch, ok := strings.Cut(p, "/")
@@ -56,6 +64,28 @@ func run(args []string) error {
 		fmt.Printf("distcheck: %s-%s: ok\n", goos, goarch)
 	}
 	return errors.Join(errs...)
+}
+
+// docLink matches a link to the repository's files, and its ref.
+var docLink = regexp.MustCompile(`https://github\.com/takodotid/tack/blob/([^/\s]+)/`)
+
+// checkLinks checks that each link to the docs in the man pages names the
+// ref of version. genman writes them apart from the binary, with the
+// version of its own -ldflags.
+func checkLinks(man []string, version string) error {
+	want := tackversion.RefOf(version)
+	for _, m := range man {
+		b, err := os.ReadFile(m)
+		if err != nil {
+			return err
+		}
+		for _, l := range docLink.FindAllStringSubmatch(string(b), -1) {
+			if l[1] != want {
+				return fmt.Errorf("%s links the docs at %s, want %s for version %s: build the man pages with the binary's -ldflags", m, l[1], want, version)
+			}
+		}
+	}
+	return nil
 }
 
 // expected lists the files of an archive.
