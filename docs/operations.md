@@ -47,15 +47,21 @@ Here the switch is done live and the objects are still held. Flux applies nothin
 
 `tack run` and `tack resume` exit with code 3 when the run stops for the operator, and 4 when it waits for something outside it. The ledger's reason says why. Each reason and the operator's way on are in the table of [RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 10.
 
+| Runbook | For |
+|---|---|
+| [runbooks/stop-reasons.md](runbooks/stop-reasons.md) | each reason: what stopped, what to check, the way on |
+| [runbooks/no-primary-after-demotion.md](runbooks/no-primary-after-demotion.md) | a planned run that stopped after its demotion and before its promotion: no site takes writes |
+| [runbooks/abandon-run.md](runbooks/abandon-run.md) | a run that must not go on, and holds left behind |
+
 Most reasons go on with a plain `tack resume RUN -f workload.yaml` once the cause is fixed. Three decisions have their own flag:
 
 | Flag | When | Example |
 |---|---|---|
-| `--accept-git-head SHA` | The run stopped with `GitChanged`. | Review the commits between the base and the new head named in the message, such as `git log --oneline 6dd30f7..a2c8b96`, then `tack resume RUN -f workload.yaml --accept-git-head a2c8b96`. Before the run's commit, the accepted head becomes its base. After it, the release checks Git against the accepted head, which must contain the run's commit. |
+| `--accept-git-head SHA` | The run stopped with `GitChanged`; or with `GitDiffersFromLive` once Git is fixed, or `FluxChanged` for an expected change ([runbooks/stop-reasons.md](runbooks/stop-reasons.md)). | Review the commits between the base and the new head named in the message, such as `git log --oneline 6dd30f7..a2c8b96`, then `tack resume RUN -f workload.yaml --accept-git-head a2c8b96`. Before the run's commit, the accepted head becomes its base. After it, the release checks Git against the accepted head, which must contain the run's commit. |
 | `--fence SITE` | The run stopped with `FencedSiteIsPrimary`. | A lost site came back and answers as primary. Check it, then `tack resume RUN -f workload.yaml --fence a` declares the new primary there. |
 | `--take-over RUN` | Another run of the workload can no longer finish, such as when its ledger is at a lost site. Without the flag, the new run is refused while that run is listed and not `Succeeded`, or stops on its holds. | Pass it when starting the new run: `tack run -f workload.yaml --to b --mode site-loss --take-over RUN` takes over the holds of `RUN`, and records it in its ledger. `RUN` can then never resume. |
 
-A hold set outside Tack, which stops a run with `HeldByAnotherRun`, stays until the operator removes it: Tack never removes a hold it did not set.
+A hold set outside Tack, which stops a run with `HeldByAnotherRun`, stays until the operator removes it: Tack never removes a hold it did not set ([runbooks/abandon-run.md](runbooks/abandon-run.md#remove-a-hold-left-behind)).
 
 After `--accept-git-head`, the check before release reports differences outside the run's own fields instead of stopping, and the check after release does not stop on a changed generation ([RFC#0005](../rfcs/RFC0005.md#requirements), Requirements 8 and 10).
 

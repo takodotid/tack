@@ -323,9 +323,12 @@ Everything the test creates is named `tack-e2e*`. [test/e2e/env/README.md](test/
 | Doc | Content |
 |---|---|
 | [docs/workload.md](docs/workload.md) | every field of the Workload file, with a complete example |
-| [docs/operations.md](docs/operations.md) | reading a run, stop reasons, break-glass, permissions |
+| [docs/operations.md](docs/operations.md) | reading a run, the decision flags, break-glass, permissions |
 | [docs/runbooks/site-loss.md](docs/runbooks/site-loss.md) | confirming a site loss and fencing the old primary before a site-loss run |
 | [docs/runbooks/rebuild-old-primary.md](docs/runbooks/rebuild-old-primary.md) | rebuilding an old primary after a site loss |
+| [docs/runbooks/stop-reasons.md](docs/runbooks/stop-reasons.md) | the way on for each reason a run stops or waits |
+| [docs/runbooks/no-primary-after-demotion.md](docs/runbooks/no-primary-after-demotion.md) | a planned run that stopped between its demotion and its promotion |
+| [docs/runbooks/abandon-run.md](docs/runbooks/abandon-run.md) | abandoning a run, and removing a hold left behind |
 | [rfcs/](rfcs/) | the design, one subject per RFC |
 | `tack --help`, `tack <command> --help`, `man tack` | every command, flag and exit code |
 | `tack --skill` | the guide for AI agents |
