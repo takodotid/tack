@@ -347,8 +347,9 @@ func TestRunNeedsConfirmation(t *testing.T) {
 	if code != ExitUsage || !strings.Contains(out, "pass --yes once a human approved this run") {
 		t.Fatalf("exit %d, want %d with a refusal:\n%s", code, ExitUsage, out)
 	}
-	if len(f.flux.Held) != 0 {
-		t.Fatal("run held objects without confirmation")
+	// RFC0009 Requirement 3: nothing changed, the ledger included.
+	if f.clients.Writes != 0 || len(f.flux.Calls) != 0 || len(f.git.Commits) != 0 {
+		t.Errorf("run changed something without confirmation: %d cluster writes, Flux %v, %d commits", f.clients.Writes, f.flux.Calls, len(f.git.Commits))
 	}
 }
 
