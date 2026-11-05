@@ -112,7 +112,7 @@ The latest release is v1.3.0. The API is `failover.tako.id/v1`, for both the `Si
 
 ## Install
 
-Each release on the [releases page](https://github.com/takodotid/tack/releases) has an archive per platform, `SHA256SUMS`, the CRD, and a Helm chart of the CRD. Each archive holds `tack`, its man pages and the CRD. The chart is also published at `oci://ghcr.io/takodotid/charts/tack`. From v1.3.0, a release also has an SBOM per archive, and signatures and attestations for every asset: see [Verify a release](#verify-a-release).
+Each release on the [releases page](https://github.com/takodotid/tack/releases) has an archive per platform, `SHA256SUMS`, the CRD, and a Helm chart of the CRD and of optional roles. Each archive holds `tack`, its man pages and the CRD. The chart is also published at `oci://ghcr.io/takodotid/charts/tack`. From v1.3.0, a release also has an SBOM per archive, and signatures and attestations for every asset: see [Verify a release](#verify-a-release).
 
 ```sh
 VERSION=v1.3.0
@@ -155,7 +155,7 @@ Add that folder to `Path` once, then open a new terminal.
 
 To build from source instead: `make build` writes `bin/tack`.
 
-At every site, install the CRD with the chart, which holds only the CRD. Name the release's namespace after the ledger namespace, `spec.ledger.namespace` in the Workload file, so that `--create-namespace` creates it. Tack never creates the ledger namespace: without it, `tack run` fails at the ledger's create, before any step.
+At every site, install the CRD with the chart. The chart can also create the operators' roles, off by default: see [The chart's roles](docs/operations.md#the-charts-roles). Name the release's namespace after the ledger namespace, `spec.ledger.namespace` in the Workload file, so that `--create-namespace` creates it. Tack never creates the ledger namespace: without it, `tack run` fails at the ledger's create, before any step.
 
 ```sh
 for ctx in site-a site-b; do

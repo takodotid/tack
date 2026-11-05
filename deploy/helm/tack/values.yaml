@@ -3,3 +3,21 @@ crds:
   install: true
   # Keep the CRD when the release is uninstalled. Deleting the CRD deletes every SiteFailover ledger with it.
   keep: true
+rbac:
+  # Create the roles of the permissions table in docs/operations.md#permissions: a ClusterRole, a Role in the
+  # release's namespace, which is the ledger namespace, and a Role in each namespace of rbac.objects.
+  create: false
+  # Bind each role to these subjects, such as the operators' group. Empty binds nothing.
+  subjects: []
+  # - {apiGroup: rbac.authorization.k8s.io, kind: Group, name: dba-oncall}
+  # The objects of the Workload files, by namespace and name. A kind without names gets no rule.
+  objects: []
+  # - namespace: db
+  #   clusters: [pg-a]
+  #   poolers: [pg-a-pooler-rw] # also grants get on the Deployment of the same name
+  #   siteServices: [postgres]
+  # - namespace: flux-system
+  #   kustomizations: [apps]
+  #   gitRepositories: [gitops]
+  #   configMaps: [cluster-vars] # those of spec.postBuild.substituteFrom
+  #   secrets: []

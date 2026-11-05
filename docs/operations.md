@@ -130,9 +130,47 @@ Tack acts with the operator's credentials for each site's kube context. Every si
 | A read-only role | Rows 1 to 4 and the `get` of row 7 are enough for `tack plan` and `tack status`. |
 | Rows 1, 2 and 15 | Kubernetes grants them to every authenticated user through the default ClusterRoleBindings `system:public-info-viewer`, `system:discovery` and `system:basic-user`. A cluster without those bindings must grant them. |
 | `resourceNames` | Rows 3 and 7 to 13 can name their objects. Rows 4 to 6 cannot: run names are generated, and `list` and `create` take no name. |
-| Checked | On the e2e's kind clusters, a ServiceAccount with exactly these rows, each named where the table allows, ran `tack plan`, `tack status`, a planned run with the routing check and a Kustomization with `postBuild`, a resume, a run with `--take-over`, and a site-loss run. Without row 3, `tack plan` fails with `namespaces "kube-system" is forbidden`; without the ConfigMap of row 12, the check before release stops with `StepFailed`. Rows 14 and 15 came after that check, with v1.3.0, and were not part of it. |
+| Checked | On the e2e's kind clusters, a ServiceAccount with exactly these rows, each named where the table allows, ran `tack plan`, `tack status`, a planned run with the routing check and a Kustomization with `postBuild`, a resume, a run with `--take-over`, and a site-loss run. Without row 3, `tack plan` fails with `namespaces "kube-system" is forbidden`; without the ConfigMap of row 12, the check before release stops with `StepFailed`. Rows 14 and 15 came after that check, with v1.3.0. The e2e's `TestRoutingFromStrait` now runs `tack plan`, a planned run with the routing check and `tack status` as a ServiceAccount bound to [the chart's roles](#the-charts-roles) and Kubernetes' default bindings only: the run records its Events (row 14) and the ServiceAccount as its history's user (row 15). The e2e has no `postBuild`, so it does not use row 12. |
 
 The runbooks' own `kubectl` commands need more, such as `patch` on `sitefailovers/status`; each runbook says so.
+
+### The chart's roles
+
+The chart creates roles that grant exactly the rows above when `rbac.create` is `true`. It creates none by default ([RFC#0009](../rfcs/RFC0009.md#the-chart), Requirement 29).
+
+| Role | Kind, namespace | Rows |
+|---|---|---|
+| `<release>-cluster` | ClusterRole | 1, 2, 3 and 15 |
+| `<release>-ledger` | Role, the release's namespace: install the chart in the ledger namespace | 4, 5, 6 and 14 |
+| `<release>-objects` | Role, each namespace of `rbac.objects` | 7 to 13, for the objects that entry names |
+
+| Value | Default | Meaning |
+|---|---|---|
+| `rbac.create` | `false` | Create the roles. |
+| `rbac.subjects` | `[]` | Bind each role to these subjects, such as the operators' group: a ClusterRoleBinding, and a RoleBinding next to each Role. Empty binds nothing. |
+| `rbac.objects` | `[]` | Per namespace, the names of the Workload files' objects: `clusters`, `poolers`, `kustomizations`, `gitRepositories`, `configMaps`, `secrets`, `siteServices`. Each list is optional. `poolers` also grants `get` on the Deployment of the same name (row 9). A kind without names gets no rule. The chart fails on an entry without a namespace or without names, and on a namespace listed twice. Each namespace must exist before the install: Helm does not create it. |
+
+```sh
+helm --kube-context "$ctx" upgrade --install tack oci://ghcr.io/takodotid/charts/tack --version "${VERSION#v}" \
+  --namespace tack-system --create-namespace -f rbac.yaml
+```
+
+```yaml
+# rbac.yaml
+rbac:
+  create: true
+  subjects:
+  - {apiGroup: rbac.authorization.k8s.io, kind: Group, name: dba-oncall}
+  objects:
+  - namespace: db
+    clusters: [pg-a, pg-b]
+    poolers: [pg-a-pooler-rw, pg-b-pooler-rw]
+  - namespace: flux-system
+    kustomizations: [apps]
+    gitRepositories: [gitops]
+```
+
+Each site's chart may name every site's objects, so one values file serves all sites. A role grants the names it lists, also where no such object exists.
 
 ### Who may write ledgers
 
