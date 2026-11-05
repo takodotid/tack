@@ -264,13 +264,13 @@ func (f *Flux) Owner(_ context.Context, site string, obj failoverv1.ObjectRef) (
 }
 
 // Hold implements engine.Flux.
-func (f *Flux) Hold(_ context.Context, site string, obj failoverv1.ObjectRef, run, takeOver string) (failoverv1.ObjectKey, error) {
+func (f *Flux) Hold(_ context.Context, site string, obj failoverv1.ObjectRef, run string, takeOver []string) (failoverv1.ObjectKey, error) {
 	if err := f.call("Hold", site, " ", obj.Name); err != nil {
 		return failoverv1.ObjectKey{}, err
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if h, ok := f.Held[key(site, obj)]; ok && h != run && h != takeOver {
+	if h, ok := f.Held[key(site, obj)]; ok && h != run && !slices.Contains(takeOver, h) {
 		return failoverv1.ObjectKey{}, stop.Ask(failoverv1.ReasonHeldByAnotherRun, "held by %s", h)
 	}
 	f.Held[key(site, obj)] = run

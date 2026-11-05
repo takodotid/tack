@@ -147,7 +147,7 @@ func TestResumeRefusesRunTakenOver(t *testing.T) {
 		t.Fatalf("run-1: %v, promote-b %s", err, stepState(s.ledger("b", "run-1"), "promote-b"))
 	}
 
-	if err := s.env("c").Start(ctx, s.plan("run-2", "a", "c"), engine.Options{TakeOver: "run-1"}); err != nil {
+	if err := s.env("c").Start(ctx, s.plan("run-2", "a", "c"), engine.Options{TakeOver: []string{"run-1"}}); err != nil {
 		t.Fatalf("run-2: %v", err)
 	}
 	if !s.isPrimary("c") {
@@ -178,7 +178,7 @@ func TestResumeTakesOverHoldsFromSpec(t *testing.T) {
 	if err := env.Start(ctx, s.plan("run-1", "a", "b"), engine.Options{}); !errors.Is(err, engine.ErrStopped) {
 		t.Fatalf("run-1: %v", err)
 	}
-	if err := s.env("c").Start(ctx, s.plan("run-2", "a", "c"), engine.Options{TakeOver: "run-1"}); err != nil {
+	if err := s.env("c").Start(ctx, s.plan("run-2", "a", "c"), engine.Options{TakeOver: []string{"run-1"}}); err != nil {
 		t.Fatalf("run-2: %v", err)
 	}
 	if got := s.ledger("c", "run-2").Spec.TakeOver; got != "run-1" {

@@ -228,8 +228,12 @@ func printStatus(w io.Writer, sf *failoverv1.SiteFailover) {
 	if st.Message != "" {
 		fmt.Fprintf(w, "Message: %s\n", engine.HideCaptured(st.Captured, st.Message))
 	}
-	if sf.Spec.TakeOver != "" {
-		fmt.Fprintf(w, "Takes over: run %s\n", sf.Spec.TakeOver)
+	switch runs := sf.TakenOver(); len(runs) {
+	case 0:
+	case 1:
+		fmt.Fprintf(w, "Takes over: run %s\n", runs[0])
+	default:
+		fmt.Fprintf(w, "Takes over: runs %s\n", strings.Join(runs, ", "))
 	}
 	if st.SupersededBy != "" {
 		fmt.Fprintf(w, "Taken over by: run %s; this run cannot resume\n", st.SupersededBy)

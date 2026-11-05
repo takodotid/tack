@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -856,5 +857,45 @@ func TestStatusShowsAbandonedRun(t *testing.T) {
 	want := "Abandoned: " + fixedNow.UTC().Format("2006-01-02 15:04:05Z") + ", run pg-main-other of the workload (Running) was created at the same time; this run cannot resume"
 	if code != ExitOK || !strings.Contains(out, want) {
 		t.Fatalf("exit %d, want %q:\n%s", code, want, out)
+	}
+}
+
+// #38 item 2. Two stopped runs each hold an object of the workload. A new
+// run names both with --take-over: it starts, takes over the holds of
+// each, records both in its spec, and marks both ledgers taken over.
+// v1.2.1 took one value: the other run refused the new one.
+func TestTakeOverTwoRuns(t *testing.T) {
+	one, two := stoppedRun(t, "pg-main-one"), stoppedRun(t, "pg-main-two")
+	f := newFactory(map[string][]client.Object{
+		"a": testenv.Site("a", "a", 2),
+		"b": append(testenv.Site("b", "a", 0), one, two),
+	})
+	f.flux.Held["a/Cluster/pg-a"] = "pg-main-one"
+	f.flux.Held["a/Pooler/pg-a-pooler-rw"] = "pg-main-two"
+	f.flux.Fail["Reconcile"] = errors.New("stop after the holds at site a")
+	out, code := run(t, f, "run", "-f", "testdata/workload.yaml", "--to", "b", "--take-over", "pg-main-one", "--take-over", "pg-main-two", "--yes")
+	if code != ExitStopped || !strings.Contains(out, "stop after the holds at site a") {
+		t.Fatalf("run exit %d, want %d at the first reconcile:\n%s", code, ExitStopped, out)
+	}
+	const name = "pg-main-20261027-101500"
+	for _, k := range []string{"a/Cluster/pg-a", "a/Pooler/pg-a-pooler-rw"} {
+		if h := f.flux.Held[k]; h != name {
+			t.Errorf("%s is held by %q, want %s", k, h, name)
+		}
+	}
+	store := &ledger.Store{Client: f.clients.Sites["b"], Namespace: "tack-system"}
+	ctx := context.Background()
+	sf, err := store.Get(ctx, name)
+	if err != nil || sf.Spec.TakeOver != "pg-main-one" || !slices.Equal(sf.Spec.TakeOvers, []string{"pg-main-one", "pg-main-two"}) {
+		t.Fatalf("new run: %v, spec.takeOver %q, spec.takeOvers %v", err, sf.Spec.TakeOver, sf.Spec.TakeOvers)
+	}
+	for _, old := range []string{"pg-main-one", "pg-main-two"} {
+		if sf, err := store.Get(ctx, old); err != nil || sf.Status.SupersededBy != name {
+			t.Errorf("run %s: %v, status.supersededBy %q", old, err, sf.Status.SupersededBy)
+		}
+	}
+	out, code = run(t, f, "status", name, "-f", "testdata/workload.yaml")
+	if code != ExitOK || !strings.Contains(out, "Takes over: runs pg-main-one, pg-main-two\n") {
+		t.Errorf("status: exit %d:\n%s", code, out)
 	}
 }

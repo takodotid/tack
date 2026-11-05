@@ -579,7 +579,16 @@ spec:
                 description: |-
                   TakeOver is the earlier run whose holds this run takes over, as the
                   operator named it with --take-over. That run can no longer resume.
+                  With more than one, it is the first the operator named.
                 type: string
+              takeOvers:
+                description: |-
+                  TakeOvers lists every earlier run this run takes over, in the order
+                  the operator named them, when there is more than one; TakeOver is
+                  the first. Unset for most runs.
+                items:
+                  type: string
+                type: array
               to:
                 description: To is the site of the new primary.
                 type: string
@@ -1687,7 +1696,16 @@ spec:
                 description: |-
                   TakeOver is the earlier run whose holds this run takes over, as the
                   operator named it with --take-over. That run can no longer resume.
+                  With more than one, it is the first the operator named.
                 type: string
+              takeOvers:
+                description: |-
+                  TakeOvers lists every earlier run this run takes over, in the order
+                  the operator named them, when there is more than one; TakeOver is
+                  the first. Unset for most runs.
+                items:
+                  type: string
+                type: array
               to:
                 description: To is the site of the new primary.
                 type: string

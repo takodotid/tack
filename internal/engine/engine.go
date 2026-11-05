@@ -29,8 +29,8 @@ type Flux interface {
 
 	// Hold stops Flux from applying the object and marks it held by run.
 	// It stops the run when another run holds the object, unless that run
-	// is takeOver. It returns the Kustomization that applies the object.
-	Hold(ctx context.Context, site string, obj failoverv1.ObjectRef, run, takeOver string) (failoverv1.ObjectKey, error)
+	// is in takeOver. It returns the Kustomization that applies the object.
+	Hold(ctx context.Context, site string, obj failoverv1.ObjectRef, run string, takeOver []string) (failoverv1.ObjectKey, error)
 
 	// HeldBy returns the run that holds the object, or "" when it is not
 	// held by a run.

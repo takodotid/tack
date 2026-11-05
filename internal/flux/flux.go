@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
 
@@ -131,7 +132,7 @@ func owner(u *unstructured.Unstructured) engine.Owner {
 // Hold implements engine.Flux. It writes AnnotationReconcile and
 // AnnotationHeldBy with an update that fails if the object changed since
 // it was read.
-func (f *Flux) Hold(ctx context.Context, site string, obj failoverv1.ObjectRef, run, takeOver string) (failoverv1.ObjectKey, error) {
+func (f *Flux) Hold(ctx context.Context, site string, obj failoverv1.ObjectRef, run string, takeOver []string) (failoverv1.ObjectKey, error) {
 	if run == "" {
 		return failoverv1.ObjectKey{}, fmt.Errorf("hold %s: no run name", refString(obj))
 	}
@@ -154,7 +155,7 @@ func (f *Flux) Hold(ctx context.Context, site string, obj failoverv1.ObjectRef, 
 		ann := u.GetAnnotations()
 		heldBy := ann[AnnotationHeldBy]
 		switch {
-		case heldBy != "" && heldBy != run && (takeOver == "" || heldBy != takeOver):
+		case heldBy != "" && heldBy != run && !slices.Contains(takeOver, heldBy):
 			return failoverv1.ObjectKey{}, stop.Ask(failoverv1.ReasonHeldByAnotherRun,
 				"%s at site %s is held by run %s. Take it over only once that run is abandoned", refString(obj), site, heldBy)
 		case disabledValue(u.GetLabels()[AnnotationReconcile]):

@@ -29,8 +29,9 @@ type Options struct {
 	// AcceptGitHead is a commit the operator accepted as the new base after
 	// Git changed during the run.
 	AcceptGitHead string
-	// TakeOver is a run whose holds this run may take over.
-	TakeOver string
+	// TakeOver lists the runs whose holds this run may take over, in the
+	// order the operator named them.
+	TakeOver []string
 }
 
 // ErrStopped is returned when the run stops for the operator.
@@ -40,11 +41,21 @@ var ErrStopped = errors.New("run stopped")
 var ErrWaiting = errors.New("run waiting")
 
 // Start creates the ledger and runs the plan. With opts.TakeOver, the
-// ledger's spec records the run it takes over, and that run's ledger is
-// marked superseded when it answers.
+// ledger's spec records the runs it takes over: the first in
+// spec.takeOver, every one in spec.takeOvers when there is more than one.
+// Each of those runs' ledgers is marked superseded when it answers.
 func (e *Env) Start(ctx context.Context, sf *failoverv1.SiteFailover, opts Options) error {
-	if opts.TakeOver != "" {
-		sf.Spec.TakeOver = opts.TakeOver
+	var takeOver []string
+	for _, r := range opts.TakeOver {
+		if r != "" && !slices.Contains(takeOver, r) {
+			takeOver = append(takeOver, r)
+		}
+	}
+	if len(takeOver) > 0 {
+		sf.Spec.TakeOver = takeOver[0]
+	}
+	if len(takeOver) > 1 {
+		sf.Spec.TakeOvers = takeOver
 	}
 	now := metav1.NewTime(e.now())
 	sf.Status.State = failoverv1.RunRunning
@@ -54,7 +65,7 @@ func (e *Env) Start(ctx context.Context, sf *failoverv1.SiteFailover, opts Optio
 		sf.Status.Steps = append(sf.Status.Steps, failoverv1.StepStatus{ID: s.ID, State: failoverv1.StepPending})
 	}
 	status := sf.Status.DeepCopy()
-	if err := e.create(ctx, sf, opts.TakeOver); err != nil {
+	if err := e.create(ctx, sf); err != nil {
 		return fmt.Errorf("create the ledger: %w", err)
 	}
 	fault.Point("create-ledger", "after")
@@ -68,9 +79,12 @@ func (e *Env) Start(ctx context.Context, sf *failoverv1.SiteFailover, opts Optio
 		return err
 	}
 	e.printf("ledger %s/%s created\n", sf.Namespace, sf.Name)
-	if sf.Spec.TakeOver != "" && e.Supersede != nil {
-		if err := e.Supersede(ctx, sf.Spec.TakeOver, sf.Name); err != nil {
-			e.printf("  note      run %s is not marked as taken over (%v); spec.takeOver of this run records it\n", sf.Spec.TakeOver, err)
+	for _, old := range sf.TakenOver() {
+		if e.Supersede == nil {
+			break
+		}
+		if err := e.Supersede(ctx, old, sf.Name); err != nil {
+			e.printf("  note      run %s is not marked as taken over (%v); the spec of this run records it\n", old, err)
 		}
 	}
 	return e.resume(ctx, sf, opts)
@@ -83,8 +97,8 @@ func Ended(r *failoverv1.SiteFailover, runs []failoverv1.SiteFailover) bool {
 	if r.Status.State == failoverv1.RunSucceeded || r.Status.SupersededBy != "" || r.Status.Abandoned != nil {
 		return true
 	}
-	for _, o := range runs {
-		if o.Name != r.Name && o.Spec.TakeOver == r.Name {
+	for i := range runs {
+		if o := &runs[i]; o.Name != r.Name && o.TakesOver(r.Name) {
 			return true
 		}
 	}
@@ -113,7 +127,7 @@ func (e *Env) checkStarted(ctx context.Context, sf *failoverv1.SiteFailover) err
 	}
 	for i := range runs {
 		r := &runs[i]
-		if reason != "" || r.Name == sf.Name || r.Name == sf.Spec.TakeOver || Ended(r, runs) {
+		if reason != "" || r.Name == sf.Name || sf.TakesOver(r.Name) || Ended(r, runs) {
 			continue
 		}
 		reason = fmt.Sprintf("run %s of the workload (%s) was created at the same time", r.Name, orPending(r.Status.State))
@@ -140,7 +154,7 @@ const MaxRunNames = 9
 // tries the name with -2, -3 and so on appended ([RFC#0003] Requirement 7).
 // Any other run with the name refuses the run, as the search for active
 // runs does: it may be a second tack process starting the same switch.
-func (e *Env) create(ctx context.Context, sf *failoverv1.SiteFailover, takeOver string) error {
+func (e *Env) create(ctx context.Context, sf *failoverv1.SiteFailover) error {
 	base := sf.Name
 	for n := 1; ; n++ {
 		err := e.Ledger.Create(ctx, sf)
@@ -152,7 +166,7 @@ func (e *Env) create(ctx context.Context, sf *failoverv1.SiteFailover, takeOver 
 			return fmt.Errorf("the name %s is taken, and its ledger cannot be read: %w", sf.Name, gerr)
 		}
 		switch {
-		case other.Status.State == failoverv1.RunSucceeded, other.Status.SupersededBy != "", other.Status.Abandoned != nil, other.Name == takeOver:
+		case other.Status.State == failoverv1.RunSucceeded, other.Status.SupersededBy != "", other.Status.Abandoned != nil, sf.TakesOver(other.Name):
 		case other.Status.State == "":
 			return fmt.Errorf("the name %s is taken by a run that has not recorded its start: another tack process may be starting it. Nothing was changed; check tack status %s, then plan again",
 				sf.Name, sf.Name)
@@ -299,7 +313,7 @@ func (e *Env) checkLatest(ctx context.Context, sf *failoverv1.SiteFailover, chec
 		case r.Name == sf.Name:
 		case r.Status.State == "" && r.Status.Abandoned != nil:
 			// It ran no step, so the sites are as this run's plan read them.
-		case r.Spec.TakeOver == sf.Name:
+		case r.TakesOver(sf.Name):
 			return fmt.Errorf("%w: run %s was taken over by run %s; see tack status %s", ErrCannotResume, sf.Name, r.Name, r.Name)
 		case r.CreationTimestamp.After(sf.CreationTimestamp.Time):
 			return fmt.Errorf("%w: run %s started after run %s, so the plan of %s may no longer match the sites; see tack status %s",

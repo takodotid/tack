@@ -72,7 +72,7 @@ func TestRunNameTakenByRunItTakesOver(t *testing.T) {
 	f := newFixture(t)
 	f.existing("b", "")
 	f.flux.Fail["Hold"] = errors.New("stop at the first hold")
-	err := f.env("b").Start(context.Background(), f.plan("b", failoverv1.ModePlanned), engine.Options{TakeOver: "run-1"})
+	err := f.env("b").Start(context.Background(), f.plan("b", failoverv1.ModePlanned), engine.Options{TakeOver: []string{"run-1"}})
 	if !errors.Is(err, engine.ErrStopped) {
 		t.Fatalf("run: %v, want a stop at the first hold", err)
 	}

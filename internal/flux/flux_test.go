@@ -154,7 +154,7 @@ func TestHold(t *testing.T) {
 		}}
 		c := newClient(funcs, liveCluster(map[string]string{"keep": "me"}))
 		f := New(fakeClients{c})
-		k, err := f.Hold(ctx, "a", clusterRef, "run-1", "")
+		k, err := f.Hold(ctx, "a", clusterRef, "run-1", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -166,7 +166,7 @@ func TestHold(t *testing.T) {
 			t.Errorf("annotations %v", ann)
 		}
 		// Idempotent: no second write.
-		if _, err := f.Hold(ctx, "a", clusterRef, "run-1", ""); err != nil {
+		if _, err := f.Hold(ctx, "a", clusterRef, "run-1", nil); err != nil {
 			t.Fatal(err)
 		}
 		if updates != 1 {
@@ -175,7 +175,7 @@ func TestHold(t *testing.T) {
 	})
 	t.Run("held by this run without the Flux annotation", func(t *testing.T) {
 		c := newClient(nil, liveCluster(map[string]string{AnnotationHeldBy: "run-1"}))
-		if _, err := New(fakeClients{c}).Hold(ctx, "a", clusterRef, "run-1", ""); err != nil {
+		if _, err := New(fakeClients{c}).Hold(ctx, "a", clusterRef, "run-1", nil); err != nil {
 			t.Fatal(err)
 		}
 		if v := get(t, c, clusterRef).GetAnnotations()[AnnotationReconcile]; v != "disabled" {
@@ -184,14 +184,14 @@ func TestHold(t *testing.T) {
 	})
 	t.Run("other run", func(t *testing.T) {
 		c := newClient(nil, liveCluster(map[string]string{AnnotationReconcile: "disabled", AnnotationHeldBy: "run-0"}))
-		_, err := New(fakeClients{c}).Hold(ctx, "a", clusterRef, "run-1", "")
+		_, err := New(fakeClients{c}).Hold(ctx, "a", clusterRef, "run-1", nil)
 		wantStop(t, err, failoverv1.ReasonHeldByAnotherRun, "run-0")
-		_, err = New(fakeClients{c}).Hold(ctx, "a", clusterRef, "run-1", "run-9")
+		_, err = New(fakeClients{c}).Hold(ctx, "a", clusterRef, "run-1", []string{"run-9"})
 		wantStop(t, err, failoverv1.ReasonHeldByAnotherRun, "run-0")
 	})
 	t.Run("take over", func(t *testing.T) {
 		c := newClient(nil, liveCluster(map[string]string{AnnotationReconcile: "disabled", AnnotationHeldBy: "run-0"}))
-		if _, err := New(fakeClients{c}).Hold(ctx, "a", clusterRef, "run-1", "run-0"); err != nil {
+		if _, err := New(fakeClients{c}).Hold(ctx, "a", clusterRef, "run-1", []string{"run-0"}); err != nil {
 			t.Fatal(err)
 		}
 		if v := get(t, c, clusterRef).GetAnnotations()[AnnotationHeldBy]; v != "run-1" {
@@ -200,20 +200,20 @@ func TestHold(t *testing.T) {
 	})
 	t.Run("held outside Tack", func(t *testing.T) {
 		c := newClient(nil, liveCluster(map[string]string{AnnotationReconcile: "Disabled"}))
-		_, err := New(fakeClients{c}).Hold(ctx, "a", clusterRef, "run-1", "")
+		_, err := New(fakeClients{c}).Hold(ctx, "a", clusterRef, "run-1", nil)
 		wantStop(t, err, failoverv1.ReasonHeldByAnotherRun, "held outside Tack")
 
 		u := liveCluster(nil)
 		u.SetLabels(map[string]string{LabelKustomizationName: "db", LabelKustomizationNamespace: "flux-system", AnnotationReconcile: "disabled"})
 		c = newClient(nil, u)
-		_, err = New(fakeClients{c}).Hold(ctx, "a", clusterRef, "run-1", "")
+		_, err = New(fakeClients{c}).Hold(ctx, "a", clusterRef, "run-1", nil)
 		wantStop(t, err, failoverv1.ReasonHeldByAnotherRun, "held outside Tack", "label")
 	})
 	t.Run("no owner", func(t *testing.T) {
 		u := liveCluster(nil)
 		u.SetLabels(nil)
 		c := newClient(nil, u)
-		if _, err := New(fakeClients{c}).Hold(ctx, "a", clusterRef, "run-1", ""); err == nil || !strings.Contains(err.Error(), "no Flux Kustomization") {
+		if _, err := New(fakeClients{c}).Hold(ctx, "a", clusterRef, "run-1", nil); err == nil || !strings.Contains(err.Error(), "no Flux Kustomization") {
 			t.Fatalf("got %v", err)
 		}
 		if ann := get(t, c, clusterRef).GetAnnotations(); len(ann) != 0 {
@@ -230,7 +230,7 @@ func TestHold(t *testing.T) {
 			return c.Update(ctx, obj, opts...)
 		}}
 		c := newClient(funcs, liveCluster(nil))
-		if _, err := New(fakeClients{c}).Hold(ctx, "a", clusterRef, "run-1", ""); err != nil {
+		if _, err := New(fakeClients{c}).Hold(ctx, "a", clusterRef, "run-1", nil); err != nil {
 			t.Fatal(err)
 		}
 		if n != 2 {
@@ -242,7 +242,7 @@ func TestHold(t *testing.T) {
 			return apierrors.NewConflict(schema.GroupResource{Group: "postgresql.cnpg.io", Resource: "clusters"}, obj.GetName(), nil)
 		}}
 		c := newClient(funcs, liveCluster(nil))
-		if _, err := New(fakeClients{c}).Hold(ctx, "a", clusterRef, "run-1", ""); !apierrors.IsConflict(err) {
+		if _, err := New(fakeClients{c}).Hold(ctx, "a", clusterRef, "run-1", nil); !apierrors.IsConflict(err) {
 			t.Fatalf("got %v", err)
 		}
 	})

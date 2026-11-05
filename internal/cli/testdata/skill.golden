@@ -176,7 +176,7 @@ Usage: `tack run -f WORKLOAD --to SITE [--mode planned|site-loss] [flags]`
 | `-f`, `--file` | the Workload file (required) |
 | `--from` | the site of the current primary (default: the primary the target site declares) |
 | `--mode` | planned: the old primary demotes and hands over its token; site-loss: promote without a token after the old site is lost (default `planned`) |
-| `--take-over` | take over the holds of this earlier run, which can no longer finish |
+| `--take-over` | take over the holds of this earlier run, which can no longer finish; repeat it for each run |
 | `--to` | the site that becomes primary (required) |
 | `--yes` | skip the confirmation; only when a human approved this run |
 
