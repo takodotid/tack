@@ -88,8 +88,39 @@ type SiteFailoverSpec struct {
 
 	// TakeOver is the earlier run whose holds this run takes over, as the
 	// operator named it with --take-over. That run can no longer resume.
+	// With more than one, it is the first the operator named.
 	// +optional
 	TakeOver string `json:"takeOver,omitempty"`
+
+	// TakeOvers lists every earlier run this run takes over, in the order
+	// the operator named them, when there is more than one; TakeOver is
+	// the first. Unset for most runs.
+	// +optional
+	TakeOvers []string `json:"takeOvers,omitempty"`
+}
+
+// TakenOver returns every run sf takes over: spec.takeOver, then the rest
+// of spec.takeOvers.
+func (sf *SiteFailover) TakenOver() []string {
+	var out []string
+	for _, r := range append([]string{sf.Spec.TakeOver}, sf.Spec.TakeOvers...) {
+		if r != "" && !contains(out, r) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// TakesOver tells whether sf takes over run.
+func (sf *SiteFailover) TakesOver(run string) bool { return run != "" && contains(sf.TakenOver(), run) }
+
+func contains(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 // SiteFingerprint identifies the Kubernetes cluster of a site.

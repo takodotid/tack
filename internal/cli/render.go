@@ -228,8 +228,12 @@ func printStatus(w io.Writer, sf *failoverv1.SiteFailover) {
 	if st.Message != "" {
 		fmt.Fprintf(w, "Message: %s\n", engine.HideCaptured(st.Captured, st.Message))
 	}
-	if sf.Spec.TakeOver != "" {
-		fmt.Fprintf(w, "Takes over: run %s\n", sf.Spec.TakeOver)
+	switch runs := sf.TakenOver(); len(runs) {
+	case 0:
+	case 1:
+		fmt.Fprintf(w, "Takes over: run %s\n", runs[0])
+	default:
+		fmt.Fprintf(w, "Takes over: runs %s\n", strings.Join(runs, ", "))
 	}
 	if st.SupersededBy != "" {
 		fmt.Fprintf(w, "Taken over by: run %s; this run cannot resume\n", st.SupersededBy)
@@ -295,12 +299,30 @@ func printRuns(w io.Writer, runs []foundRun) {
 			started = sf.Status.StartedAt.UTC().Format("2006-01-02 15:04:05Z")
 		}
 		state := orPendingRun(sf.Status.State)
-		if sf.Status.Abandoned != nil {
+		switch {
+		case sf.Status.Abandoned != nil:
 			state = "Abandoned"
+		case takenOver(sf, runs):
+			// Its own state is the one it stopped in; it can never go on.
+			state = "TakenOver"
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", r.site, sf.Name, sf.Spec.Mode, sf.Spec.From, sf.Spec.To, state, sf.Status.Reason, started)
 	}
 	tw.Flush()
+}
+
+// takenOver tells whether another run took sf over, as sf's status or the
+// spec of a listed run says.
+func takenOver(sf *failoverv1.SiteFailover, runs []foundRun) bool {
+	if sf.Status.SupersededBy != "" {
+		return true
+	}
+	for _, r := range runs {
+		if r.sf.Name != sf.Name && r.sf.TakesOver(sf.Name) {
+			return true
+		}
+	}
+	return false
 }
 
 func condition(c failoverv1.Condition) string {

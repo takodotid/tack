@@ -29,8 +29,9 @@ type Options struct {
 	// AcceptGitHead is a commit the operator accepted as the new base after
 	// Git changed during the run.
 	AcceptGitHead string
-	// TakeOver is a run whose holds this run may take over.
-	TakeOver string
+	// TakeOver lists the runs whose holds this run may take over, in the
+	// order the operator named them.
+	TakeOver []string
 }
 
 // ErrStopped is returned when the run stops for the operator.
@@ -40,11 +41,21 @@ var ErrStopped = errors.New("run stopped")
 var ErrWaiting = errors.New("run waiting")
 
 // Start creates the ledger and runs the plan. With opts.TakeOver, the
-// ledger's spec records the run it takes over, and that run's ledger is
-// marked superseded when it answers.
+// ledger's spec records the runs it takes over: the first in
+// spec.takeOver, every one in spec.takeOvers when there is more than one.
+// Each of those runs' ledgers is marked superseded when it answers.
 func (e *Env) Start(ctx context.Context, sf *failoverv1.SiteFailover, opts Options) error {
-	if opts.TakeOver != "" {
-		sf.Spec.TakeOver = opts.TakeOver
+	var takeOver []string
+	for _, r := range opts.TakeOver {
+		if r != "" && !slices.Contains(takeOver, r) {
+			takeOver = append(takeOver, r)
+		}
+	}
+	if len(takeOver) > 0 {
+		sf.Spec.TakeOver = takeOver[0]
+	}
+	if len(takeOver) > 1 {
+		sf.Spec.TakeOvers = takeOver
 	}
 	now := metav1.NewTime(e.now())
 	sf.Status.State = failoverv1.RunRunning
@@ -54,7 +65,7 @@ func (e *Env) Start(ctx context.Context, sf *failoverv1.SiteFailover, opts Optio
 		sf.Status.Steps = append(sf.Status.Steps, failoverv1.StepStatus{ID: s.ID, State: failoverv1.StepPending})
 	}
 	status := sf.Status.DeepCopy()
-	if err := e.create(ctx, sf, opts.TakeOver); err != nil {
+	if err := e.create(ctx, sf); err != nil {
 		return fmt.Errorf("create the ledger: %w", err)
 	}
 	fault.Point("create-ledger", "after")
@@ -68,9 +79,12 @@ func (e *Env) Start(ctx context.Context, sf *failoverv1.SiteFailover, opts Optio
 		return err
 	}
 	e.printf("ledger %s/%s created\n", sf.Namespace, sf.Name)
-	if sf.Spec.TakeOver != "" && e.Supersede != nil {
-		if err := e.Supersede(ctx, sf.Spec.TakeOver, sf.Name); err != nil {
-			e.printf("  note      run %s is not marked as taken over (%v); spec.takeOver of this run records it\n", sf.Spec.TakeOver, err)
+	for _, old := range sf.TakenOver() {
+		if e.Supersede == nil {
+			break
+		}
+		if err := e.Supersede(ctx, old, sf.Name); err != nil {
+			e.printf("  note      run %s is not marked as taken over (%v); the spec of this run records it\n", old, err)
 		}
 	}
 	return e.resume(ctx, sf, opts)
@@ -83,8 +97,8 @@ func Ended(r *failoverv1.SiteFailover, runs []failoverv1.SiteFailover) bool {
 	if r.Status.State == failoverv1.RunSucceeded || r.Status.SupersededBy != "" || r.Status.Abandoned != nil {
 		return true
 	}
-	for _, o := range runs {
-		if o.Name != r.Name && o.Spec.TakeOver == r.Name {
+	for i := range runs {
+		if o := &runs[i]; o.Name != r.Name && o.TakesOver(r.Name) {
 			return true
 		}
 	}
@@ -113,7 +127,7 @@ func (e *Env) checkStarted(ctx context.Context, sf *failoverv1.SiteFailover) err
 	}
 	for i := range runs {
 		r := &runs[i]
-		if reason != "" || r.Name == sf.Name || r.Name == sf.Spec.TakeOver || Ended(r, runs) {
+		if reason != "" || r.Name == sf.Name || sf.TakesOver(r.Name) || Ended(r, runs) {
 			continue
 		}
 		reason = fmt.Sprintf("run %s of the workload (%s) was created at the same time", r.Name, orPending(r.Status.State))
@@ -140,7 +154,7 @@ const MaxRunNames = 9
 // tries the name with -2, -3 and so on appended ([RFC#0003] Requirement 7).
 // Any other run with the name refuses the run, as the search for active
 // runs does: it may be a second tack process starting the same switch.
-func (e *Env) create(ctx context.Context, sf *failoverv1.SiteFailover, takeOver string) error {
+func (e *Env) create(ctx context.Context, sf *failoverv1.SiteFailover) error {
 	base := sf.Name
 	for n := 1; ; n++ {
 		err := e.Ledger.Create(ctx, sf)
@@ -152,7 +166,7 @@ func (e *Env) create(ctx context.Context, sf *failoverv1.SiteFailover, takeOver 
 			return fmt.Errorf("the name %s is taken, and its ledger cannot be read: %w", sf.Name, gerr)
 		}
 		switch {
-		case other.Status.State == failoverv1.RunSucceeded, other.Status.SupersededBy != "", other.Status.Abandoned != nil, other.Name == takeOver:
+		case other.Status.State == failoverv1.RunSucceeded, other.Status.SupersededBy != "", other.Status.Abandoned != nil, sf.TakesOver(other.Name):
 		case other.Status.State == "":
 			return fmt.Errorf("the name %s is taken by a run that has not recorded its start: another tack process may be starting it. Nothing was changed; check tack status %s, then plan again",
 				sf.Name, sf.Name)
@@ -282,7 +296,10 @@ var ErrCannotResume = errors.New("the run cannot resume")
 
 // checkLatest refuses a run that another run took over or started after.
 // It reads the runs at every site of the run's Workload snapshot that
-// answers checks.
+// answers checks. Creation times come from the API server of each ledger's
+// site, to the second: a run created in the same second at the same site,
+// or within ClockSkew at another site, counts as started after this one,
+// unless this run took it over.
 func (e *Env) checkLatest(ctx context.Context, sf *failoverv1.SiteFailover, checks *SiteChecks) error {
 	if by := sf.Status.SupersededBy; by != "" {
 		return fmt.Errorf("%w: run %s was taken over by run %s; see tack status %s", ErrCannotResume, sf.Name, by, by)
@@ -294,20 +311,32 @@ func (e *Env) checkLatest(ctx context.Context, sf *failoverv1.SiteFailover, chec
 	if err != nil {
 		return fmt.Errorf("search the workload's runs before resuming %s: %w", sf.Name, err)
 	}
-	for _, r := range runs {
+	for i := range runs {
+		r := &runs[i]
 		switch {
 		case r.Name == sf.Name:
 		case r.Status.State == "" && r.Status.Abandoned != nil:
 			// It ran no step, so the sites are as this run's plan read them.
-		case r.Spec.TakeOver == sf.Name:
+		case r.TakesOver(sf.Name):
 			return fmt.Errorf("%w: run %s was taken over by run %s; see tack status %s", ErrCannotResume, sf.Name, r.Name, r.Name)
-		case r.CreationTimestamp.After(sf.CreationTimestamp.Time):
-			return fmt.Errorf("%w: run %s started after run %s, so the plan of %s may no longer match the sites; see tack status %s",
+		case sf.TakesOver(r.Name):
+			// This run took it over, so it is older.
+		case !r.CreationTimestamp.Before(&sf.CreationTimestamp) && r.Spec.To == sf.Spec.To:
+			return fmt.Errorf("%w: run %s started after run %s, or in the same second, so the plan of %s may no longer match the sites; see tack status %s",
 				ErrCannotResume, r.Name, sf.Name, sf.Name, r.Name)
+		case r.CreationTimestamp.After(sf.CreationTimestamp.Add(-ClockSkew)) && r.Spec.To != sf.Spec.To:
+			return fmt.Errorf("%w: run %s started after run %s, or less than %s before it by the clock of another site's API server, so the plan of %s may no longer match the sites; see tack status %s",
+				ErrCannotResume, r.Name, sf.Name, ClockSkew, sf.Name, r.Name)
 		}
 	}
 	return nil
 }
+
+// ClockSkew is how far apart the clocks of two sites' API servers may be.
+// A run's ledger lives at its to site, and that site's API server sets its
+// creation time, to the second. A run of another site created less than
+// ClockSkew before this one may have started after it (#38 item 7).
+const ClockSkew = 10 * time.Second
 
 func (e *Env) resume(ctx context.Context, sf *failoverv1.SiteFailover, opts Options) error {
 	head, err := AcceptedHead(sf, opts.AcceptGitHead)
@@ -386,8 +415,33 @@ func (r *runner) run(ctx context.Context) error {
 				continue
 			}
 			if err := r.identify(ctx, step.Site); err != nil {
+				if ctx.Err() != nil {
+					return r.stopBefore(ctx, step, ctx.Err())
+				}
+				if !kube.IsUnreachable(err) || !step.Deferrable {
+					return r.stopBefore(ctx, step, err)
+				}
+				// The site gave no answer to the read of its cluster's
+				// identity: it stays unreachable for this process.
+				r.reachable[step.Site] = err
+				r.deferStep(step, fmt.Sprintf("site %s unreachable: %v", step.Site, err))
+				if err := r.write(ctx, r.sf); err != nil {
+					return err
+				}
+				r.printf("  deferred  %s (site %s did not answer the read of its cluster's identity)\n", step.ID, step.Site)
+				continue
+			}
+		}
+		// The read of the other sites comes before the read before the
+		// step's site, so a site that is primary again after its demotion
+		// gets one way on, not first --fence and then a stop that --fence
+		// cannot help.
+		if r.readsOthers(i) {
+			if err := r.readOthers(ctx, i); err != nil {
 				return r.stopBefore(ctx, step, err)
 			}
+		}
+		if step.Site != "" {
 			if step.Deferrable {
 				if err := r.gate(ctx, step.Site); err != nil {
 					if ctx.Err() != nil {
@@ -409,11 +463,6 @@ func (r *runner) run(ctx context.Context) error {
 					r.printf("  deferred  %s (site %s did not answer the read before its steps)\n", step.ID, step.Site)
 					continue
 				}
-			}
-		}
-		if step.ID == r.promotion() {
-			if err := r.beforePromotion(ctx); err != nil {
-				return r.stopBefore(ctx, step, err)
 			}
 		}
 		if step.Type == failoverv1.StepRelease && !r.verified[step.Site] {
@@ -521,41 +570,70 @@ func (r *runner) promotion() string {
 	return ""
 }
 
-// fencesAfter tells whether the run has a Failover step at site after the
-// promotion, such as the step that declares the new primary at a third
-// site. Only such a step can fence a site that is primary at the promotion.
-func (r *runner) fencesAfter(site string) bool {
-	promotion, after := r.promotion(), false
-	for _, s := range r.sf.Spec.Steps {
-		if s.ID == promotion {
-			after = true
-			continue
-		}
-		if after && s.Phase == failoverv1.PhaseFailover && s.Site == site {
-			return true
-		}
+// index returns the position of the step id in the plan, or -1.
+func (r *runner) index(id string) int {
+	if id == "" {
+		return -1
 	}
-	return false
+	return slices.IndexFunc(r.sf.Spec.Steps, func(s failoverv1.Step) bool { return s.ID == id })
 }
 
-// beforePromotion reads every site but to before the step that promotes
-// to, in each process, and stops the run when a site that answers is
-// primary, or declares itself primary: promoting to would give two
-// primaries ([RFC#0007] Requirement 9). The read before a site's steps
-// (gate) cannot see it: it skips to, and does not run for a site whose
-// steps are done, such as an old primary promoted again by hand after its
-// demotion (issue #45).
+// request is the run's request, as its driver takes it.
+func (r *runner) request() driver.Request {
+	return driver.Request{From: r.sf.Spec.From, To: r.sf.Spec.To, Mode: r.sf.Spec.Mode}
+}
+
+// fencesAfter tells whether the step that makes site declare another
+// primary, as the driver names it, comes after the promotion and has not
+// succeeded, such as the step that declares the new primary at a third
+// site. Only such a step can fence a site that is primary at the promotion
+// or after it.
+func (r *runner) fencesAfter(site string) bool {
+	p, d := r.index(r.promotion()), r.index(r.Driver.Demotion(r.request(), site))
+	return p >= 0 && d > p && r.stepStatus(r.sf.Spec.Steps[d].ID).State != failoverv1.StepSucceeded
+}
+
+// readsOthers tells whether the run reads every site but to before step
+// i: a Failover step after the step that demotes or fences from, the
+// promotion among them ([RFC#0007] Requirement 9). A plan without the
+// demotion the driver names reads only before the promotion.
+func (r *runner) readsOthers(i int) bool {
+	step := &r.sf.Spec.Steps[i]
+	if step.Phase != failoverv1.PhaseFailover {
+		return false
+	}
+	if step.ID == r.promotion() {
+		return true
+	}
+	d := r.index(r.Driver.Demotion(r.request(), r.sf.Spec.From))
+	return d >= 0 && i > d
+}
+
+// readOthers reads every site but to before step i, in each process, and
+// stops the run when a site that answers is primary, or declares itself
+// primary ([RFC#0007] Requirement 9). Before the promotion, promoting to
+// would give two primaries; after it, there are two. The read before a
+// site's steps (gate) cannot see it: it skips to, and does not run for a
+// site whose steps are done, such as an old primary promoted again by hand
+// after its demotion (issues #45 and #46). Before the promotion, it also
+// compares the values the run captured with their source (checkCaptured).
 //
 // A site that gave no answer in this process gives none here, without
 // another check; any other site gets the run's checks, so a site checked
 // before in this process is not checked again. A site that gives no answer
 // does not stop the run. --fence lets the run go on only for a site that
-// the run fences after the promotion.
-func (r *runner) beforePromotion(ctx context.Context) error {
+// the run fences after the promotion, with a step not yet done.
+func (r *runner) readOthers(ctx context.Context, i int) error {
 	to := r.sf.Spec.To
+	p := r.index(r.promotion())
+	promoted := p >= 0 && i > p
+	read := "the read after the demotion"
+	if i == p {
+		read = "the read before the promotion"
+	}
 	topo, err := r.Driver.Discover(ctx, &r.sf.Spec.Workload.Spec, runChecks{r: r, skip: to})
 	if err != nil {
-		return fmt.Errorf("the read before the promotion: %w", err)
+		return fmt.Errorf("%s: %w", read, err)
 	}
 	for _, s := range topo.Sites {
 		if s.Name == to || !s.Reachable {
@@ -565,15 +643,80 @@ func (r *runner) beforePromotion(ctx context.Context) error {
 		if what == "" {
 			continue
 		}
-		if !r.fencesAfter(s.Name) {
+		fences, fence := r.fencesAfter(s.Name), slices.Contains(r.opts.Fence, s.Name)
+		switch {
+		case !fences && !promoted:
 			return stop.Ask(failoverv1.ReasonFencedSiteIsPrimary,
-				"site %s %s (%s). Promoting %s now gives two primaries, and no step of this run is left to fence %s, so --fence cannot help. The workload was changed outside this run, such as by a recovery by hand, and the run's plan may be stale: see docs/runbooks/abandon-run.md",
+				"site %s %s (%s). Promoting %s gives two primaries, and no step of this run is left to fence %s, so --fence cannot help. The workload was changed outside this run, such as by a recovery by hand, and the run's plan may be stale: see docs/runbooks/abandon-run.md",
 				s.Name, what, s.Summary, to, s.Name)
-		}
-		if !slices.Contains(r.opts.Fence, s.Name) {
+		case !fences:
+			return stop.Ask(failoverv1.ReasonFencedSiteIsPrimary,
+				"site %s %s (%s), and so does %s, which this run promoted: two primaries. No step of this run is left to fence %s, so --fence cannot help. The workload was changed outside this run, such as by a recovery by hand: see docs/runbooks/abandon-run.md",
+				s.Name, what, s.Summary, to, s.Name)
+		case !fence && !promoted:
 			return stop.Ask(failoverv1.ReasonFencedSiteIsPrimary,
 				"site %s %s (%s), and this run fences it only after it promotes %s. Check it, then resume with --fence %s: %s and %s are then both primary until the run fences %s",
 				s.Name, what, s.Summary, to, s.Name, to, s.Name, s.Name)
+		case !fence:
+			return stop.Ask(failoverv1.ReasonFencedSiteIsPrimary,
+				"site %s %s (%s), and so does %s, which this run promoted, until this run fences %s. Check it, then resume with --fence %s",
+				s.Name, what, s.Summary, to, s.Name, s.Name)
+		}
+	}
+	if i == p {
+		return r.checkCaptured(ctx, i)
+	}
+	return nil
+}
+
+// checkCaptured reads again, before the promotion, each value a Capture
+// step before step i captured, and stops the run with TokenMissing when
+// the value at its source changed: the workload was changed outside the
+// run, such as an old primary promoted again and demoted again by hand,
+// and the promotion would use the token of a demotion that a later one
+// replaced (#46). A site that gave no answer in this process is not read:
+// the run then promotes with the value it captured, as with from down
+// (docs/runbooks/no-primary-after-demotion.md, option 1). Neither value is
+// printed.
+func (r *runner) checkCaptured(ctx context.Context, i int) error {
+	for _, s := range r.sf.Spec.Steps[:i] {
+		c := s.Capture
+		if s.Type != failoverv1.StepCapture || c == nil || r.stepStatus(s.ID).State != failoverv1.StepSucceeded {
+			continue
+		}
+		want := r.sf.Status.Captured[c.Into]
+		if want == "" {
+			// The step that uses it stops with TokenMissing.
+			continue
+		}
+		if err := (runChecks{r: r}).Reachable(ctx, s.Site); err != nil {
+			if !kube.IsUnreachable(err) {
+				return fmt.Errorf("the read before the promotion: site %s: %w", s.Site, err)
+			}
+			r.note(r.sf.Spec.To, fmt.Sprintf("site %s gave no answer, so %s was not compared with %s", s.Site, c.Into, refString(c.Object)))
+			r.printf("  note      site %s gave no answer: %s is not compared with %s\n", s.Site, c.Into, refString(c.Object))
+			continue
+		}
+		cl, err := r.Clients.Client(s.Site)
+		if err != nil {
+			return fmt.Errorf("the read before the promotion: site %s: %w", s.Site, err)
+		}
+		u := newObject(c.Object)
+		if err := cl.Get(ctx, client.ObjectKeyFromObject(u), u); err != nil {
+			return fmt.Errorf("the read before the promotion: site %s: read %s: %w", s.Site, refString(c.Object), err)
+		}
+		got, err := JSONPath(u.Object, c.JSONPath)
+		if err != nil {
+			return fmt.Errorf("the read before the promotion: site %s: %w", s.Site, err)
+		}
+		if got != want {
+			now := "another value"
+			if got == "" {
+				now = "no value"
+			}
+			return stop.Ask(failoverv1.ReasonTokenMissing,
+				"%s now has %s at %s, not the value step %s captured as %s: the workload was changed outside this run, such as a demotion by hand after a promotion by hand, and the run must not promote with %s. The run's plan may be stale: see docs/runbooks/abandon-run.md",
+				refString(c.Object), now, c.JSONPath, s.ID, c.Into, c.Into)
 		}
 	}
 	return nil

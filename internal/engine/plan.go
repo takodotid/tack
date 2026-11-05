@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -80,6 +81,12 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 	checks := e.SiteChecks(req.Mode, req.To)
 	topo, err := e.Driver.Discover(ctx, req.Spec, checks)
 	if err != nil {
+		if req.Mode == failoverv1.ModeSiteLoss && kube.Retryable(err) && !kube.IsUnreachable(err) {
+			// An answer 5xx or 429 is an answer, also from a load balancer
+			// in front of a lost site: Tack does not count the site as lost
+			// (#38 item 8). The runbook has the way on.
+			return nil, fmt.Errorf("%w. A site whose API answers, even with an error, is not counted as lost. If the site is lost and something in front of it still answers, such as a load balancer, see docs/runbooks/site-loss.md#when-tack-refuses-the-lost-site", err)
+		}
 		return nil, err
 	}
 	to, _ := topo.Site(req.To)
@@ -519,13 +526,42 @@ var userinfo = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/\s]+@`)
 // Redact hides the user and password of every URL in s.
 func Redact(s string) string { return userinfo.ReplaceAllString(s, "${1}***@") }
 
-// fingerprint reads the fingerprint of a site's cluster.
+// fingerprint reads the fingerprint of a site's cluster. The site has just
+// answered its check, so a read that gets no answer, or a 5xx or 429, is a
+// blip: it is repeated with the pauses of the site's checks, up to 3 reads
+// in all (#38 item 5). A read whose last try got no answer returns a
+// kube.UnreachableError.
 func (e *Env) fingerprint(ctx context.Context, site string) (string, error) {
 	c, err := e.Clients.Client(site)
 	if err != nil {
 		return "", err
 	}
-	return kube.Fingerprint(ctx, c)
+	waits := e.ReachWaits
+	if waits == nil {
+		waits = DefaultReachWaits
+	}
+	for n := 1; ; n++ {
+		uid, err := kube.Fingerprint(ctx, c)
+		switch {
+		case err == nil:
+			if n > 1 {
+				e.printf("  answered  site %s, the read of its cluster's identity, on try %d of %d\n", site, n, len(waits)+1)
+			}
+			return uid, nil
+		case !kube.Transient(err) || ctx.Err() != nil:
+			return "", err
+		case n > len(waits) && kube.NoAnswer(err):
+			return "", &kube.UnreachableError{Err: fmt.Errorf("no answer to %d reads: %w", n, err)}
+		case n > len(waits):
+			return "", fmt.Errorf("%d reads: %w", n, err)
+		}
+		e.printf("  retry     site %s, the read of its cluster's identity, try %d of %d (%v); next in %s\n", site, n, len(waits)+1, err, waits[n-1])
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(waits[n-1]):
+		}
+	}
 }
 
 // Fingerprint returns the fingerprint the run recorded for a site: in its

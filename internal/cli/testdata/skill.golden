@@ -45,6 +45,46 @@ Exit codes:
 
 ## Commands
 
+### tack abandon
+
+Mark a run that must never go on.
+
+```text
+Abandon marks a run that must never go on, such as one whose old primary
+was promoted again by hand: it records status.abandoned in the run's
+ledger. tack resume then refuses the run, and a new run of the workload no
+longer waits for it.
+
+Abandon changes nothing else. The objects the run holds stay held: remove
+the holds once Git equals live (docs/runbooks/abandon-run.md), or start the
+next run with --take-over RUN, which takes them over.
+
+Abandon does not stop a tack process that runs the run: check first that
+none does. A step that runs, such as a promotion, still changes the
+workload. Only tack v1.3.0 and later honour the mark: an older tack resumes
+the run, and drops the mark.
+
+An agent never starts "tack abandon" without an explicit instruction from a
+human for that run.
+```
+
+Usage: `tack abandon RUN (-f WORKLOAD | --context CONTEXT) [flags]`
+
+| Flag | Meaning |
+|---|---|
+| `--context` | a kube context to read runs from, instead of --file |
+| `-f`, `--file` | the Workload file: search every site of the workload for its runs |
+| `--namespace` | the ledger namespace, with --context (default `tack-system`) |
+| `--reason` | why the run is abandoned, recorded in its ledger (default `abandoned by the operator with tack abandon`) |
+| `--yes` | skip the confirmation; only when a human approved abandoning this run |
+
+Examples:
+
+```sh
+  # After the old primary was promoted again by hand
+  tack abandon pg-main-20261027-101500 -f workload.yaml --reason "a promoted again by hand"
+```
+
 ### tack plan
 
 Print every step and change of a run, and change nothing.
@@ -176,7 +216,7 @@ Usage: `tack run -f WORKLOAD --to SITE [--mode planned|site-loss] [flags]`
 | `-f`, `--file` | the Workload file (required) |
 | `--from` | the site of the current primary (default: the primary the target site declares) |
 | `--mode` | planned: the old primary demotes and hands over its token; site-loss: promote without a token after the old site is lost (default `planned`) |
-| `--take-over` | take over the holds of this earlier run, which can no longer finish |
+| `--take-over` | take over the holds of this earlier run, which can no longer finish; repeat it for each run |
 | `--to` | the site that becomes primary (required) |
 | `--yes` | skip the confirmation; only when a human approved this run |
 

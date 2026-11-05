@@ -100,6 +100,10 @@ func Transient(err error) bool {
 	return false
 }
 
+// NoAnswer reports whether a failed request got no answer from the server,
+// as a check that IsUnreachable accepts.
+func NoAnswer(err error) bool { return noAnswer(err) }
+
 // noAnswer reports whether a failed request got no answer from the server.
 // An unknown error counts as an answer: only a known transport failure may
 // make a site count as lost.

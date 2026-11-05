@@ -55,8 +55,8 @@ func (r *runner) exec(ctx context.Context, s *failoverv1.Step) (string, error) {
 }
 
 func (r *runner) hold(ctx context.Context, s *failoverv1.Step) (string, error) {
-	takeOver := r.sf.Spec.TakeOver
-	if takeOver == "" {
+	takeOver := r.sf.TakenOver()
+	if len(takeOver) == 0 {
 		takeOver = r.opts.TakeOver
 	}
 	ks, err := r.Flux.Hold(ctx, s.Site, s.Hold.Object, r.sf.Name, takeOver)

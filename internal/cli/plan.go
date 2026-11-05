@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -163,7 +164,7 @@ human for that run, and runs "tack plan" first.`
 func newRun(o *options) *cobra.Command {
 	var p planFlags
 	var yes bool
-	var takeOver string
+	var takeOver []string
 	cmd := &cobra.Command{
 		Use:   "run -f WORKLOAD --to SITE [--mode planned|site-loss]",
 		Short: "Start a run: hold Flux, switch the primary, commit to Git, release",
@@ -194,15 +195,15 @@ func newRun(o *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if old != nil {
-				env.Supersede = supersede(env.Clients, *old)
+			if len(old) > 0 {
+				env.Supersede = supersede(env.Clients, old)
 			}
 			return env.Start(cmd.Context(), plan.SiteFailover, engine.Options{TakeOver: takeOver})
 		},
 	}
 	p.add(cmd, false)
 	cmd.Flags().BoolVar(&yes, "yes", false, "skip the confirmation; only when a human approved this run")
-	cmd.Flags().StringVar(&takeOver, "take-over", "", "take over the holds of this earlier run, which can no longer finish")
+	cmd.Flags().StringSliceVar(&takeOver, "take-over", nil, "take over the holds of this earlier run, which can no longer finish; repeat it for each run")
 	return cmd
 }
 
@@ -230,8 +231,8 @@ func stdinIsTerminal() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
 // checkNoActiveRun refuses a second active run of the same workload. It
 // checks the sites again: the plan's checks may be older than the
 // operator's confirmation. A run that another run took over is not active.
-// It returns the run to take over, when it was found.
-func checkNoActiveRun(ctx context.Context, env *engine.Env, sf *failoverv1.SiteFailover, takeOver string) (*foundRun, error) {
+// It returns the runs to take over that it found.
+func checkNoActiveRun(ctx context.Context, env *engine.Env, sf *failoverv1.SiteFailover, takeOver []string) ([]foundRun, error) {
 	// Start searches again with the same checks once its ledger exists.
 	env.StartChecks = env.SiteChecks(sf.Spec.Mode, sf.Spec.To)
 	runs, err := findRuns(ctx, env.StartChecks, &sf.Spec.Workload.Spec, sf.Spec.Workload.Name)
@@ -242,10 +243,10 @@ func checkNoActiveRun(ctx context.Context, env *engine.Env, sf *failoverv1.SiteF
 	for i, r := range runs {
 		all[i] = *r.sf
 	}
-	var old *foundRun
-	for i, r := range runs {
-		if r.sf.Name == takeOver {
-			old = &runs[i]
+	var old []foundRun
+	for _, r := range runs {
+		if slices.Contains(takeOver, r.sf.Name) {
+			old = append(old, r)
 			continue
 		}
 		if engine.Ended(r.sf, all) {
@@ -261,11 +262,16 @@ func checkNoActiveRun(ctx context.Context, env *engine.Env, sf *failoverv1.SiteF
 	return old, nil
 }
 
-// supersede returns the Supersede of a run that takes over old: it writes
-// the new run's name into old's status at old's site, through c, the
-// clients that found it.
-func supersede(c kube.Clients, old foundRun) func(ctx context.Context, run, by string) error {
+// supersede returns the Supersede of a run that takes over the runs old:
+// it writes the new run's name into the status of the run named, at its
+// site, through c, the clients that found it.
+func supersede(c kube.Clients, old []foundRun) func(ctx context.Context, run, by string) error {
 	return func(ctx context.Context, run, by string) error {
+		i := slices.IndexFunc(old, func(r foundRun) bool { return r.sf.Name == run })
+		if i < 0 {
+			return fmt.Errorf("run %s was not found", run)
+		}
+		old := old[i]
 		cl, err := c.Client(old.site)
 		if err != nil {
 			return err

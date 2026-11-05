@@ -104,6 +104,13 @@ type Driver interface {
 	// Verify returns the conditions that mean the switch is complete at a
 	// site, as Wait steps.
 	Verify(w *failoverv1.WorkloadSpec, r Request, site string) ([]failoverv1.Step, error)
+
+	// Demotion returns the ID of the Failover step after which site no
+	// longer runs as primary: the demotion of from, or its fence in a site
+	// loss; at another site but to, the step that declares the new
+	// primary there. It returns "" for to. The IDs are the same in the
+	// ledgers of every earlier Tack release.
+	Demotion(r Request, site string) string
 }
 
 var drivers = map[string]Driver{}

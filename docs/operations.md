@@ -4,10 +4,11 @@
 
 | Command | Shows |
 |---|---|
-| `tack status -f workload.yaml` | the workload's runs at every reachable site: site, run, mode, from, to, state, reason, start |
+| `tack status -f workload.yaml` | the workload's runs at every reachable site: site, run, mode, from, to, state, reason, start. The state is `Abandoned` for an abandoned run, and `TakenOver` for a run another run took over |
 | `tack status RUN -f workload.yaml` | one run: state and reason, message, Git base and commit, captured values by name, held objects, each step with its state and last result, follow-ups |
 | `tack status [RUN] --context site-b` | the same from one context, without the Workload file; `--namespace` when the ledger namespace is not `tack-system` |
 | `tack status RUN -f workload.yaml -o yaml` | the whole `SiteFailover` object |
+| `tack abandon RUN -f workload.yaml --reason TEXT` | marks a run that must never go on: [runbooks/abandon-run.md](runbooks/abandon-run.md) |
 | `kubectl --context site-b -n tack-system get sfo` | the ledgers at one site, with workload, mode, from, to, state and phase |
 
 A run's state is `Running`, `Waiting`, `Stopped` or `Succeeded`; each step's state is `Pending`, `Running`, `Succeeded`, `Failed` or `Deferred` ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirements 9 and 11). A run left `Running` by a process that ended, such as a killed terminal, goes on with `tack resume`. A run shown as `NotStarted` never recorded its start: its process ended between creating the ledger and its first write, so none of its steps ran. It cannot resume; plan again and start a new run with `--take-over RUN`.
@@ -59,7 +60,7 @@ Most reasons go on with a plain `tack resume RUN -f workload.yaml` once the caus
 |---|---|---|
 | `--accept-git-head SHA` | The run stopped with `GitChanged`; or with `GitDiffersFromLive` once Git is fixed, or `FluxChanged` for an expected change ([runbooks/stop-reasons.md](runbooks/stop-reasons.md)). | Review the commits between the base and the new head named in the message, such as `git log --oneline 6dd30f7..a2c8b96`, then `tack resume RUN -f workload.yaml --accept-git-head a2c8b96`. When the `GitChanged` message names one head, only that commit, or `HEAD` for it, is accepted; `tack status RUN` shows it. Before the run's commit, the accepted head becomes its base. After it, the release checks Git against the accepted head, which must contain the run's commit. |
 | `--fence SITE` | The run stopped with `FencedSiteIsPrimary`, and its message offers the flag. | A lost site came back and answers as primary, or declares itself primary. Check it, then `tack resume RUN -f workload.yaml --fence a` declares the new primary there. When no step of the run is left to fence the site, such as an old primary promoted again by hand, the flag cannot help, and the message says so ([runbooks/stop-reasons.md](runbooks/stop-reasons.md#fencedsiteisprimary)). |
-| `--take-over RUN` | Another run of the workload can no longer finish, such as when its ledger is at a lost site. Without the flag, the new run is refused while that run is listed and not `Succeeded`, or stops on its holds. | Pass it when starting the new run: `tack run -f workload.yaml --to b --mode site-loss --take-over RUN` takes over the holds of `RUN`, and records it in its ledger. `RUN` can then never resume. |
+| `--take-over RUN` | Another run of the workload can no longer finish, such as when its ledger is at a lost site. Without the flag, the new run is refused while that run is listed and not `Succeeded`, or stops on its holds. | Pass it when starting the new run: `tack run -f workload.yaml --to b --mode site-loss --take-over RUN` takes over the holds of `RUN`, and records it in its ledger. `RUN` can then never resume. Repeat the flag for each run to take over: `--take-over RUN1 --take-over RUN2`. |
 
 A hold set outside Tack, which stops a run with `HeldByAnotherRun`, stays until the operator removes it: Tack never removes a hold it did not set ([runbooks/abandon-run.md](runbooks/abandon-run.md#remove-a-hold-left-behind)).
 
@@ -87,7 +88,7 @@ In a site loss, Git may be down too. Tack then switches live and commits later. 
 
 While the run waits, the held objects stay held: Flux applies nothing to them, including unrelated Git changes. A planned run never starts with Git unreachable. A git command that gets no answer ends within 2 minutes and counts as Git unreachable; over HTTP a stalled transfer ends after 30 s, and over SSH a connection that does not connect ends after 15 s, unless `GIT_SSH_COMMAND`, `GIT_SSH` or `core.sshCommand` names the operator's own ssh command ([RFC#0006](../rfcs/RFC0006.md#requirements), Requirement 3).
 
-When the lost site answers again, `tack resume` runs its deferred steps: hold, then fence. If the site answers as primary, or declares itself primary, the run stops with `FencedSiteIsPrimary` first and changes nothing there until the operator passes `--fence`. The steps stay as they were, `Deferred` for a lost site. `--fence` holds for the resume it is passed to: each `tack run` and `tack resume` reads the site again before its first step there, and stops again while the site answers as primary. Each also reads every site but the new primary right before the promotion, in every mode, and stops while one that answers is primary ([RFC#0007](../rfcs/RFC0007.md#requirements), Requirement 9). A run that already succeeded with deferred steps runs them on a later `tack resume`. If the site comes back after the commit and no resume runs, Flux at that site applies Git, which already declares the new primary. A later resume holds and releases the site at the run's commit; a later commit that Flux applied there stops it with `GitChanged` until the operator accepts that head.
+When the lost site answers again, `tack resume` runs its deferred steps: hold, then fence. If the site answers as primary, or declares itself primary, the run stops with `FencedSiteIsPrimary` first and changes nothing there until the operator passes `--fence`. The steps stay as they were, `Deferred` for a lost site. `--fence` holds for the resume it is passed to: each `tack run` and `tack resume` reads the site again before its first step there, and stops again while the site answers as primary. Each also reads every site but the new primary before each Failover step after the old primary's demotion or fence, the promotion among them, in every mode, and stops while one that answers is primary ([RFC#0007](../rfcs/RFC0007.md#requirements), Requirement 9). A run that already succeeded with deferred steps runs them on a later `tack resume`. If the site comes back after the commit and no resume runs, Flux at that site applies Git, which already declares the new primary. A later resume holds and releases the site at the run's commit; a later commit that Flux applied there stops it with `GitChanged` until the operator accepts that head.
 
 ## After a site loss
 
@@ -99,12 +100,12 @@ Tack acts with the operator's credentials for each site's kube context. Every si
 
 | # | Resource | Verbs | Namespace | Commands | For |
 |---|---|---|---|---|---|
-| 1 | non-resource URL `/readyz` | get | | `plan`, `run`, `resume`, `status -f` | the check of a site's API ([RFC#0007](../rfcs/RFC0007.md#requirements), Requirement 5) |
+| 1 | non-resource URL `/readyz` | get | | `plan`, `run`, `resume`, `status -f`, `abandon -f` | the check of a site's API ([RFC#0007](../rfcs/RFC0007.md#requirements), Requirement 5) |
 | 2 | non-resource URLs `/api`, `/apis` and below | get | | all | API discovery: the client maps each kind to its resource |
 | 3 | `namespaces`, name `kube-system` | get | | `plan`, `run`, `resume` | the site's cluster ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 19) |
 | 4 | `sitefailovers` (`failover.tako.id`) | list | the ledger's | all | the search for runs |
-| 5 | `sitefailovers` | get, create | the ledger's | `run`, `resume` | the ledger: a dry-run create, then the create at `to`; reading a run, and a ledger that holds the run's name |
-| 6 | `sitefailovers/status` | update | the ledger's | `run`, `resume` | every step; with `--take-over`, the mark on the run taken over, at that run's site |
+| 5 | `sitefailovers` | get, create | the ledger's | `run`, `resume`; `get` also `abandon` | the ledger: a dry-run create, then the create at `to`; reading a run, and a ledger that holds the run's name |
+| 6 | `sitefailovers/status` | update | the ledger's | `run`, `resume`, `abandon` | every step; with `--take-over`, the mark on each run taken over, at that run's site; the mark of `tack abandon` |
 | 7 | `clusters`, `poolers` (`postgresql.cnpg.io`) named in the Workload | get | the member's | `plan`, `run`, `resume` | reading each site, the owner labels, `Wait`, `Capture` and the checks |
 | 8 | the same | update, patch | the member's | `run`, `resume` | `update`: adding and removing the hold annotations. `patch`: the Failover steps, and the server-side dry-run apply of the check before release |
 | 9 | `deployments` (`apps`) named after each Pooler | get | the Pooler's | `run`, `resume` | the Pooler waits |

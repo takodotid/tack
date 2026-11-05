@@ -31,7 +31,7 @@ func TestWritesUseFieldManagerTack(t *testing.T) {
 	ks := kustomization(ksKey, false)
 	c := newClient(funcs, liveCluster(nil), ks)
 	f := testFlux(c, nil)
-	if _, err := f.Hold(ctx, "a", clusterRef, "run-1", ""); err != nil {
+	if _, err := f.Hold(ctx, "a", clusterRef, "run-1", nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.Release(ctx, "a", clusterRef, "run-1", nil); err != nil {
