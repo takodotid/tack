@@ -113,39 +113,39 @@ node_arch() {
   esac
 }
 
-# Puts the images in the nodes. An image already in the host's Docker is
-# loaded from a single-platform archive, so the run needs no registry for it:
-# a registry that slows down makes the installs time out. The nodes pull the
-# others in the background, and the kubelet pulls anything still missing.
-# The host's images are never pulled nor removed here.
+# Pulls the images inside the nodes, by digest, in the background; the
+# kubelet pulls anything still missing. An image in the host's Docker is not
+# loaded instead: docker save of a digest writes neither the tag nor the
+# index, so a pod that names the digest would not find it.
 prepull_images() {
-  local site image cached=() archive=$WORK/cache/prepull.tar
+  local site image
   for image in "${PREPULL_IMAGES[@]}"; do
-    if docker image inspect "$image" >/dev/null 2>&1; then
-      cached+=("$image")
-      continue
-    fi
     for site in "${SITES[@]}"; do
       docker exec -d "$(cluster_name "$site")-control-plane" crictl pull "$image"
     done
   done
-  ((${#cached[@]})) || return 0
-  docker save --platform "linux/$(node_arch)" -o "$archive" "${cached[@]}"
-  for site in "${SITES[@]}"; do
-    kind load image-archive --name "$(cluster_name "$site")" "$archive" \
-      >"$WORK/logs/prepull-$site.log" 2>&1 ||
-      die "loading cached images failed for site $site, see $WORK/logs/prepull-$site.log"
-  done
-  rm -f "$archive"
-  log "loaded from the host's Docker: ${cached[*]}"
 }
 
+# Installs Flux from the manifests of the pinned flux CLI, with each
+# controller's image named by its digest.
 install_flux() {
-  local site
+  local site manifest=$WORK/cache/flux.yaml image
+  flux install --export --components "$FLUX_COMPONENTS" |
+    sed -e "s|image: ${FLUX_SOURCE_IMAGE%@*}\$|image: $FLUX_SOURCE_IMAGE|" \
+      -e "s|image: ${FLUX_KUSTOMIZE_IMAGE%@*}\$|image: $FLUX_KUSTOMIZE_IMAGE|" >"$manifest"
+  for image in $(sed -n 's/^ *image: //p' "$manifest"); do
+    [[ $image == "$FLUX_SOURCE_IMAGE" || $image == "$FLUX_KUSTOMIZE_IMAGE" ]] ||
+      die "flux $FLUX_VERSION names the image $image, not one pinned in lib.sh"
+  done
   for site in "${SITES[@]}"; do
-    flux install --kubeconfig "$KUBECONFIG_FILE" --context "$(context_name "$site")" \
-      --components "$FLUX_COMPONENTS" --timeout 5m >"$WORK/logs/flux-$site.log" 2>&1 ||
+    kc "$site" apply --server-side --force-conflicts -f "$manifest" >"$WORK/logs/flux-$site.log" 2>&1 ||
       die "flux install failed for site $site, see $WORK/logs/flux-$site.log"
+  done
+  for site in "${SITES[@]}"; do
+    for image in source-controller kustomize-controller; do
+      kc "$site" -n flux-system rollout status "deployment/$image" --timeout 5m >>"$WORK/logs/flux-$site.log" 2>&1 ||
+        die "flux is not ready at site $site, see $WORK/logs/flux-$site.log"
+    done
   done
 }
 
@@ -157,8 +157,12 @@ install_cnpg() {
       die "checksum mismatch for $CNPG_MANIFEST_URL"
     mv "$manifest.tmp" "$manifest"
   fi
+  # The manifest names the operator's image by its tag: name it by its digest.
+  sed "s|ghcr.io/cloudnative-pg/cloudnative-pg:$CNPG_VERSION\$|$CNPG_IMAGE|" "$manifest" >"$manifest.pinned"
+  [[ $(grep -c "cloudnative-pg/cloudnative-pg:" "$manifest.pinned") -eq $(grep -cF "$CNPG_IMAGE" "$manifest.pinned") ]] ||
+    die "the CloudNativePG manifest names an image that is not pinned in lib.sh"
   for site in "${SITES[@]}"; do
-    kc "$site" apply --server-side --force-conflicts -f "$manifest" >/dev/null
+    kc "$site" apply --server-side --force-conflicts -f "$manifest.pinned" >/dev/null
   done
   for site in "${SITES[@]}"; do
     kc "$site" -n cnpg-system rollout status deployment/cnpg-controller-manager --timeout 5m
@@ -353,7 +357,7 @@ install_strait() {
       pod-security.kubernetes.io/enforce=privileged >/dev/null
     cat >"$WORK/strait-values-$site.yaml" <<EOF
 image: {repository: ${STRAIT_IMAGE%:*}, tag: ${STRAIT_IMAGE##*:}, pullPolicy: Never}
-envoy: {image: {repository: ${ENVOY_IMAGE%:*}, tag: ${ENVOY_IMAGE##*:}, pullPolicy: IfNotPresent}}
+envoy: {image: {repository: $ENVOY_REPOSITORY, tag: "$ENVOY_TAG", pullPolicy: IfNotPresent}}
 site:
   name: $site
   spec:
