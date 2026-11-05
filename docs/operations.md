@@ -134,6 +134,44 @@ Tack acts with the operator's credentials for each site's kube context. Every si
 
 The runbooks' own `kubectl` commands need more, such as `patch` on `sitefailovers/status`; each runbook says so.
 
+### The chart's roles
+
+The chart creates roles that grant exactly the rows above when `rbac.create` is `true`. It creates none by default ([RFC#0009](../rfcs/RFC0009.md#the-chart), Requirement 29).
+
+| Role | Kind, namespace | Rows |
+|---|---|---|
+| `<release>-cluster` | ClusterRole | 1, 2, 3 and 15 |
+| `<release>-ledger` | Role, the release's namespace: install the chart in the ledger namespace | 4, 5, 6 and 14 |
+| `<release>-objects` | Role, each namespace of `rbac.objects` | 7 to 13, for the objects that entry names |
+
+| Value | Default | Meaning |
+|---|---|---|
+| `rbac.create` | `false` | Create the roles. |
+| `rbac.subjects` | `[]` | Bind each role to these subjects, such as the operators' group: a ClusterRoleBinding, and a RoleBinding next to each Role. Empty binds nothing. |
+| `rbac.objects` | `[]` | Per namespace, the names of the Workload files' objects: `clusters`, `poolers`, `kustomizations`, `gitRepositories`, `configMaps`, `secrets`, `siteServices`. Each list is optional. `poolers` also grants `get` on the Deployment of the same name (row 9). A kind without names gets no rule, and the chart fails on an entry without a namespace or without names. |
+
+```sh
+helm --kube-context "$ctx" upgrade --install tack oci://ghcr.io/takodotid/charts/tack --version "${VERSION#v}" \
+  --namespace tack-system --create-namespace -f rbac.yaml
+```
+
+```yaml
+# rbac.yaml
+rbac:
+  create: true
+  subjects:
+  - {apiGroup: rbac.authorization.k8s.io, kind: Group, name: dba-oncall}
+  objects:
+  - namespace: db
+    clusters: [pg-a, pg-b]
+    poolers: [pg-a-pooler-rw, pg-b-pooler-rw]
+  - namespace: flux-system
+    kustomizations: [apps]
+    gitRepositories: [gitops]
+```
+
+Each site's chart may name every site's objects, so one values file serves all sites. A role grants the names it lists, also where no such object exists.
+
 ### Who may write ledgers
 
 Writing a ledger is privileged. A ledger names the steps, the kube contexts and the Git URL that `tack resume` uses with the operator's credentials, so anyone who may create `sitefailovers`, or update their status, can plant a run, or change one, for an operator to resume.

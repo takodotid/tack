@@ -1,0 +1,173 @@
+{{- /*
+The roles of the permissions table in docs/operations.md, when rbac.create is set. "Row N" names the table's row.
+A rule for objects that can be named always names them: a kind without names in rbac.objects gets no rule.
+*/ -}}
+{{- $rbac := .Values.rbac | default dict }}
+{{- if $rbac.create }}
+{{- $subjects := $rbac.subjects | default list }}
+{{- $labels := include "tack.labels" . }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Name }}-cluster
+  labels:
+    {{- $labels | nindent 4 }}
+rules:
+  # Row 1
+  - nonResourceURLs: ["/readyz"]
+    verbs: ["get"]
+  # Row 2
+  - nonResourceURLs: ["/api", "/api/*", "/apis", "/apis/*"]
+    verbs: ["get"]
+  # Row 3
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    resourceNames: ["kube-system"]
+    verbs: ["get"]
+  # Row 15
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["selfsubjectreviews"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Release.Name }}-ledger
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- $labels | nindent 4 }}
+rules:
+  # Row 4
+  - apiGroups: ["failover.tako.id"]
+    resources: ["sitefailovers"]
+    verbs: ["list"]
+  # Row 5
+  - apiGroups: ["failover.tako.id"]
+    resources: ["sitefailovers"]
+    verbs: ["get", "create"]
+  # Row 6
+  - apiGroups: ["failover.tako.id"]
+    resources: ["sitefailovers/status"]
+    verbs: ["update"]
+  # Row 14
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create"]
+{{- range $i, $o := $rbac.objects | default list }}
+{{- if not $o.namespace }}
+{{- fail (printf "rbac.objects[%d] needs a namespace" $i) }}
+{{- end }}
+{{- if not (or $o.clusters $o.poolers $o.kustomizations $o.gitRepositories $o.configMaps $o.secrets $o.siteServices) }}
+{{- fail (printf "rbac.objects[%d] names no object" $i) }}
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $.Release.Name }}-objects
+  namespace: {{ $o.namespace }}
+  labels:
+    {{- $labels | nindent 4 }}
+rules:
+  {{- if $o.clusters }}
+  # Rows 7 and 8
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    resourceNames: {{ toJson $o.clusters }}
+    verbs: ["get", "update", "patch"]
+  {{- end }}
+  {{- if $o.poolers }}
+  # Rows 7 and 8
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["poolers"]
+    resourceNames: {{ toJson $o.poolers }}
+    verbs: ["get", "update", "patch"]
+  # Row 9: each Pooler's Deployment has the Pooler's name.
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: {{ toJson $o.poolers }}
+    verbs: ["get"]
+  {{- end }}
+  {{- if $o.kustomizations }}
+  # Row 10
+  - apiGroups: ["kustomize.toolkit.fluxcd.io"]
+    resources: ["kustomizations"]
+    resourceNames: {{ toJson $o.kustomizations }}
+    verbs: ["get", "patch"]
+  {{- end }}
+  {{- if $o.gitRepositories }}
+  # Row 11
+  - apiGroups: ["source.toolkit.fluxcd.io"]
+    resources: ["gitrepositories"]
+    resourceNames: {{ toJson $o.gitRepositories }}
+    verbs: ["get", "patch"]
+  {{- end }}
+  {{- if $o.configMaps }}
+  # Row 12
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: {{ toJson $o.configMaps }}
+    verbs: ["get"]
+  {{- end }}
+  {{- if $o.secrets }}
+  # Row 12
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: {{ toJson $o.secrets }}
+    verbs: ["get"]
+  {{- end }}
+  {{- if $o.siteServices }}
+  # Row 13
+  - apiGroups: ["strait.tako.id"]
+    resources: ["siteservices"]
+    resourceNames: {{ toJson $o.siteServices }}
+    verbs: ["get"]
+  {{- end }}
+{{- if $subjects }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $.Release.Name }}-objects
+  namespace: {{ $o.namespace }}
+  labels:
+    {{- $labels | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $.Release.Name }}-objects
+subjects:
+  {{- toYaml $subjects | nindent 2 }}
+{{- end }}
+{{- end }}
+{{- if $subjects }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Name }}-cluster
+  labels:
+    {{- $labels | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Name }}-cluster
+subjects:
+  {{- toYaml $subjects | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Release.Name }}-ledger
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- $labels | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ .Release.Name }}-ledger
+subjects:
+  {{- toYaml $subjects | nindent 2 }}
+{{- end }}
+{{- end }}

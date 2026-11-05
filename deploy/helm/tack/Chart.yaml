@@ -1,6 +1,6 @@
 apiVersion: v2
 name: tack
-description: The CRD of Tack's ledger, the SiteFailover resource.
+description: The CRD of Tack's ledger, the SiteFailover resource, and optional roles for the operators.
 type: application
 version: 0.1.0
 appVersion: dev
