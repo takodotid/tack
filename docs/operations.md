@@ -83,14 +83,31 @@ The old primary may hold writes the new one lacks, and cannot follow it. Rebuild
 
 ## Permissions
 
-Tack acts with the operator's credentials for each site's kube context. Per site, it needs:
+Tack acts with the operator's credentials for each site's kube context. Every site needs the same rows: any site can be `from` or `to`.
 
-| For | Listed in |
+| # | Resource | Verbs | Namespace | Commands | For |
+|---|---|---|---|---|---|
+| 1 | non-resource URL `/readyz` | get | | `plan`, `run`, `resume`, `status -f` | the check of a site's API ([RFC#0007](../rfcs/RFC0007.md#requirements), Requirement 5) |
+| 2 | non-resource URLs `/api`, `/apis` and below | get | | all | API discovery: the client maps each kind to its resource |
+| 3 | `namespaces`, name `kube-system` | get | | `plan`, `run`, `resume` | the site's cluster ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 19) |
+| 4 | `sitefailovers` (`failover.tako.id`) | list | the ledger's | all | the search for runs |
+| 5 | `sitefailovers` | get, create | the ledger's | `run`, `resume` | the ledger: a dry-run create, then the create at `to`; reading a run, and a ledger that holds the run's name |
+| 6 | `sitefailovers/status` | update | the ledger's | `run`, `resume` | every step; with `--take-over`, the mark on the run taken over, at that run's site |
+| 7 | `clusters`, `poolers` (`postgresql.cnpg.io`) named in the Workload | get | the member's | `plan`, `run`, `resume` | reading each site, the owner labels, `Wait`, `Capture` and the checks |
+| 8 | the same | update, patch | the member's | `run`, `resume` | `update`: adding and removing the hold annotations. `patch`: the Failover steps, and the server-side dry-run apply of the check before release |
+| 9 | `deployments` (`apps`) named after each Pooler | get | the Pooler's | `run`, `resume` | the Pooler waits |
+| 10 | `kustomizations` (`kustomize.toolkit.fluxcd.io`) that apply the objects of rows 7 and 8 | get, patch | Flux's | `run`, `resume` | the reconcile request, an annotation; the waits; the render |
+| 11 | `gitrepositories` (`source.toolkit.fluxcd.io`) of those Kustomizations | get, patch | Flux's | `run`, `resume` | the reconcile request; the render reads `spec.ignore` and `spec.include` |
+| 12 | `configmaps`, `secrets` named in those Kustomizations' `spec.postBuild.substituteFrom` | get | the Kustomization's | `run`, `resume` | the render's variables |
+| 13 | `siteservices` (`strait.tako.id`) named in `spec.routing` | get | the SiteService's | `run`, `resume` | the routing check |
+
+| Fact | Detail |
 |---|---|
-| The ledger: `SiteFailover` objects in the ledger namespace | [RFC#0003](../rfcs/RFC0003.md#security-considerations), Security Considerations |
-| Identifying the site's cluster: `get` on the namespace `kube-system` | [RFC#0003](../rfcs/RFC0003.md#security-considerations), Security Considerations |
-| Holding and releasing objects, Flux reconciles, rendering and diffing Git | [RFC#0005](../rfcs/RFC0005.md#security-considerations), Security Considerations |
-| The Pooler waits: `get` on the `apps/v1` Deployment named after each Pooler | [RFC#0004](../rfcs/RFC0004.md#requirements), Requirement 6 |
-| The routing check: `get` on Strait's `SiteService` | [RFC#0008](../rfcs/RFC0008.md#requirements), Requirement 1 |
+| A read-only role | Rows 1 to 4 and the `get` of row 7 are enough for `tack plan` and `tack status`. |
+| Rows 1 and 2 | Kubernetes grants them to every authenticated user through the default ClusterRoleBindings `system:public-info-viewer` and `system:discovery`. A cluster without those bindings must grant them. |
+| `resourceNames` | Rows 3 and 7 to 13 can name their objects. Rows 4 to 6 cannot: run names are generated, and `list` and `create` take no name. |
+| Checked | On the e2e's kind clusters, a ServiceAccount with exactly these rows, each named where the table allows, ran `tack plan`, `tack status`, a planned run with the routing check and a Kustomization with `postBuild`, a resume, a run with `--take-over`, and a site-loss run. Without row 3, `tack plan` fails with `namespaces "kube-system" is forbidden`; without the ConfigMap of row 12, the check before release stops with `StepFailed`. |
+
+The runbooks' own `kubectl` commands need more, such as `patch` on `sitefailovers/status`; each runbook says so.
 
 For Git, the operator's `git` configuration needs read access for `tack plan`, and push access to the branch for `tack run`. Tack pushes without force and skips client-side hooks; server-side rules still apply ([RFC#0006](../rfcs/RFC0006.md#requirements)).
