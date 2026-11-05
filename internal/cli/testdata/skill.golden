@@ -45,6 +45,42 @@ Exit codes:
 
 ## Commands
 
+### tack abandon
+
+Mark a run that must never go on.
+
+```text
+Abandon marks a run that must never go on, such as one whose old primary
+was promoted again by hand: it records status.abandoned in the run's
+ledger. tack resume then refuses the run, and a new run of the workload no
+longer waits for it.
+
+Abandon changes nothing else. The objects the run holds stay held: remove
+the holds once Git equals live (docs/runbooks/abandon-run.md), or start the
+next run with --take-over RUN, which takes them over. A tack process that
+still runs the run ends at its next ledger write.
+
+An agent never starts "tack abandon" without an explicit instruction from a
+human for that run.
+```
+
+Usage: `tack abandon RUN (-f WORKLOAD | --context CONTEXT) [flags]`
+
+| Flag | Meaning |
+|---|---|
+| `--context` | a kube context to read runs from, instead of --file |
+| `-f`, `--file` | the Workload file: search every site of the workload for its runs |
+| `--namespace` | the ledger namespace, with --context (default `tack-system`) |
+| `--reason` | why the run is abandoned, recorded in its ledger (default `abandoned by the operator with tack abandon`) |
+| `--yes` | skip the confirmation; only when a human approved abandoning this run |
+
+Examples:
+
+```sh
+  # After the old primary was promoted again by hand
+  tack abandon pg-main-20261027-101500 -f workload.yaml --reason "a promoted again by hand"
+```
+
 ### tack plan
 
 Print every step and change of a run, and change nothing.

@@ -4,10 +4,11 @@
 
 | Command | Shows |
 |---|---|
-| `tack status -f workload.yaml` | the workload's runs at every reachable site: site, run, mode, from, to, state, reason, start |
+| `tack status -f workload.yaml` | the workload's runs at every reachable site: site, run, mode, from, to, state, reason, start. The state is `Abandoned` for an abandoned run, and `TakenOver` for a run another run took over |
 | `tack status RUN -f workload.yaml` | one run: state and reason, message, Git base and commit, captured values by name, held objects, each step with its state and last result, follow-ups |
 | `tack status [RUN] --context site-b` | the same from one context, without the Workload file; `--namespace` when the ledger namespace is not `tack-system` |
 | `tack status RUN -f workload.yaml -o yaml` | the whole `SiteFailover` object |
+| `tack abandon RUN -f workload.yaml --reason TEXT` | marks a run that must never go on: [runbooks/abandon-run.md](runbooks/abandon-run.md) |
 | `kubectl --context site-b -n tack-system get sfo` | the ledgers at one site, with workload, mode, from, to, state and phase |
 
 A run's state is `Running`, `Waiting`, `Stopped` or `Succeeded`; each step's state is `Pending`, `Running`, `Succeeded`, `Failed` or `Deferred` ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirements 9 and 11). A run left `Running` by a process that ended, such as a killed terminal, goes on with `tack resume`. A run shown as `NotStarted` never recorded its start: its process ended between creating the ledger and its first write, so none of its steps ran. It cannot resume; plan again and start a new run with `--take-over RUN`.
@@ -99,12 +100,12 @@ Tack acts with the operator's credentials for each site's kube context. Every si
 
 | # | Resource | Verbs | Namespace | Commands | For |
 |---|---|---|---|---|---|
-| 1 | non-resource URL `/readyz` | get | | `plan`, `run`, `resume`, `status -f` | the check of a site's API ([RFC#0007](../rfcs/RFC0007.md#requirements), Requirement 5) |
+| 1 | non-resource URL `/readyz` | get | | `plan`, `run`, `resume`, `status -f`, `abandon -f` | the check of a site's API ([RFC#0007](../rfcs/RFC0007.md#requirements), Requirement 5) |
 | 2 | non-resource URLs `/api`, `/apis` and below | get | | all | API discovery: the client maps each kind to its resource |
 | 3 | `namespaces`, name `kube-system` | get | | `plan`, `run`, `resume` | the site's cluster ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 19) |
 | 4 | `sitefailovers` (`failover.tako.id`) | list | the ledger's | all | the search for runs |
-| 5 | `sitefailovers` | get, create | the ledger's | `run`, `resume` | the ledger: a dry-run create, then the create at `to`; reading a run, and a ledger that holds the run's name |
-| 6 | `sitefailovers/status` | update | the ledger's | `run`, `resume` | every step; with `--take-over`, the mark on the run taken over, at that run's site |
+| 5 | `sitefailovers` | get, create | the ledger's | `run`, `resume`; `get` also `abandon` | the ledger: a dry-run create, then the create at `to`; reading a run, and a ledger that holds the run's name |
+| 6 | `sitefailovers/status` | update | the ledger's | `run`, `resume`, `abandon` | every step; with `--take-over`, the mark on each run taken over, at that run's site; the mark of `tack abandon` |
 | 7 | `clusters`, `poolers` (`postgresql.cnpg.io`) named in the Workload | get | the member's | `plan`, `run`, `resume` | reading each site, the owner labels, `Wait`, `Capture` and the checks |
 | 8 | the same | update, patch | the member's | `run`, `resume` | `update`: adding and removing the hold annotations. `patch`: the Failover steps, and the server-side dry-run apply of the check before release |
 | 9 | `deployments` (`apps`) named after each Pooler | get | the Pooler's | `run`, `resume` | the Pooler waits |

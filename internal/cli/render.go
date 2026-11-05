@@ -299,12 +299,30 @@ func printRuns(w io.Writer, runs []foundRun) {
 			started = sf.Status.StartedAt.UTC().Format("2006-01-02 15:04:05Z")
 		}
 		state := orPendingRun(sf.Status.State)
-		if sf.Status.Abandoned != nil {
+		switch {
+		case sf.Status.Abandoned != nil:
 			state = "Abandoned"
+		case takenOver(sf, runs):
+			// Its own state is the one it stopped in; it can never go on.
+			state = "TakenOver"
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", r.site, sf.Name, sf.Spec.Mode, sf.Spec.From, sf.Spec.To, state, sf.Status.Reason, started)
 	}
 	tw.Flush()
+}
+
+// takenOver tells whether another run took sf over, as sf's status or the
+// spec of a listed run says.
+func takenOver(sf *failoverv1.SiteFailover, runs []foundRun) bool {
+	if sf.Status.SupersededBy != "" {
+		return true
+	}
+	for _, r := range runs {
+		if r.sf.Name != sf.Name && r.sf.TakesOver(sf.Name) {
+			return true
+		}
+	}
+	return false
 }
 
 func condition(c failoverv1.Condition) string {
