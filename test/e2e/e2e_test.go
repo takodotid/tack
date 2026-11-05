@@ -329,11 +329,15 @@ func latestRun(t *testing.T, site string) map[string]any {
 
 func runName(sf map[string]any) string { return sf["metadata"].(map[string]any)["name"].(string) }
 
+// stamp matches the time that starts each progress line ([RFC#0009]
+// Requirement 27).
+const stamp = `[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z `
+
 // createdRun returns the name of the run whose ledger tack created, from
 // tack's output.
 func createdRun(t *testing.T, out string) string {
 	t.Helper()
-	m := regexp.MustCompile(`(?m)^ledger ` + ledgerNS + `/(\S+) created$`).FindStringSubmatch(out)
+	m := regexp.MustCompile(`(?m)^` + stamp + `ledger ` + ledgerNS + `/(\S+) created$`).FindStringSubmatch(out)
 	if m == nil {
 		t.Fatalf("tack created no ledger:\n%s", out)
 	}
@@ -376,7 +380,8 @@ func TestPlannedSwitchover(t *testing.T) {
 			t.Errorf("plan lacks %q", want)
 		}
 	}
-	tackOK(t, "run", "-f", workload, "--to", "b", "--yes")
+	out = tackOK(t, "run", "-f", workload, "--to", "b", "--yes")
+	run := createdRun(t, out)
 	assertPrimary(t, "b", "a")
 	assertGitMatches(t, "b", "a", "b")
 	if got := psql(t, "b", "select id from marks where id = 'before-switchover'"); got != "before-switchover" {
@@ -386,6 +391,45 @@ func TestPlannedSwitchover(t *testing.T) {
 	sf := latestRun(t, "b")
 	if state, _ := runStatus(sf); state != "Succeeded" {
 		t.Fatalf("run state %s", state)
+	}
+	assertRecorded(t, run, out)
+}
+
+// assertRecorded checks, against a real API server, what a planned run
+// that succeeded in one process records: each progress line's time, the
+// ledger's history with the user the API server names, the tack that
+// wrote it, its Events, the field manager tack, and the column Reason
+// ([RFC#0003] Requirements 22 to 25, [RFC#0009] Requirement 27).
+func assertRecorded(t *testing.T, run, out string) {
+	t.Helper()
+	if !regexp.MustCompile(`(?m)^` + stamp + `  start     demote-a: `).MatchString(out) {
+		t.Errorf("no progress line of demote-a with its time")
+	}
+	get := func(path string) string {
+		return strings.TrimSpace(kubectl(t, "b", "-n", ledgerNS, "get", "sitefailover", run, "-o", "jsonpath="+path))
+	}
+	if got := get(`{range .status.history[*]}{.state}/{.user}/{.version}/{.flags[*]};{end}`); got != "Running/kubernetes-admin/"+version.Version+"/--yes;Succeeded/kubernetes-admin/"+version.Version+"/--yes;" {
+		t.Errorf("history %q, want Running and Succeeded by kubernetes-admin with tack %s and --yes", got, version.Version)
+	}
+	if got := get(`{.status.writtenBy}`); got != version.Version {
+		t.Errorf("writtenBy %q, want %q", got, version.Version)
+	}
+	if got := get(`{.metadata.managedFields[*].manager}`); strings.Trim(strings.ReplaceAll(got, "tack", ""), " ") != "" {
+		t.Errorf("field managers %q, want tack only", got)
+	}
+	events := kubectl(t, "b", "-n", ledgerNS, "get", "events", "--field-selector", "involvedObject.kind=SiteFailover,involvedObject.name="+run,
+		"-o", `jsonpath={range .items[*]}{.reason}/{.type}/{.source.component}{"\n"}{end}`)
+	for _, want := range []string{"RunRunning/Normal/tack", "StepStarted/Normal/tack", "StepSucceeded/Normal/tack", "RunSucceeded/Normal/tack"} {
+		if !strings.Contains(events, want+"\n") {
+			t.Errorf("no Event %s on the ledger:\n%s", want, events)
+		}
+	}
+	if head := strings.SplitN(kubectl(t, "b", "-n", ledgerNS, "get", "sfo", run), "\n", 2)[0]; !regexp.MustCompile(`STATE\s+REASON\s+PHASE`).MatchString(head) {
+		t.Errorf("kubectl get sfo prints %q, want the column REASON after STATE", head)
+	}
+	status := tackOK(t, "status", run, "-f", workload)
+	if !strings.Contains(status, "History:\n") || !strings.Contains(status, "Written by: tack "+version.Version) || !strings.Contains(status, ", attempts 1\n") {
+		t.Errorf("tack status lacks the history, the writer or the attempts")
 	}
 }
 
@@ -573,6 +617,13 @@ func TestGitChangedDuringRun(t *testing.T) {
 	}
 	if got := stepState(latestRun(t, "b"), "verify-noop-a"); got != "Succeeded" {
 		t.Errorf("verify-noop-a is %q", got)
+	}
+	// #35 row 29: each stop stays in the history, with the head each
+	// resume accepted. The processes that the faults ended recorded no end.
+	history := strings.TrimSpace(kubectl(t, "b", "-n", ledgerNS, "get", "sitefailover", run, "-o", `jsonpath={range .status.history[*]}{.state}/{.reason}/{.flags[*]};{end}`))
+	want := "Running//--yes;Running//--yes;Stopped/GitChanged/--yes;Running//--accept-git-head=" + other + " --yes;Running//--yes;Stopped/GitChanged/--yes;Running//--accept-git-head=" + later + " --yes;Succeeded//--accept-git-head=" + later + " --yes;"
+	if history != want {
+		t.Errorf("history\n%s\nwant\n%s", history, want)
 	}
 }
 
