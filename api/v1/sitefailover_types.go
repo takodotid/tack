@@ -445,6 +445,19 @@ type SiteFailoverStatus struct {
 	// writes it when this ledger answers; its spec.takeOver is the record.
 	// +optional
 	SupersededBy string `json:"supersededBy,omitempty"`
+
+	// Abandoned marks a run that never goes on: tack resume refuses it,
+	// and it does not block a new run. Unset for most runs.
+	// +optional
+	Abandoned *Abandonment `json:"abandoned,omitempty"`
+}
+
+// Abandonment says when and why a run was abandoned.
+type Abandonment struct {
+	// At is when the run was abandoned.
+	At metav1.Time `json:"at"`
+	// Reason says why, such as another run that started at the same time.
+	Reason string `json:"reason"`
 }
 
 // PhaseStatus records one phase.

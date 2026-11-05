@@ -58,6 +58,9 @@ func (e *Env) Start(ctx context.Context, sf *failoverv1.SiteFailover, opts Optio
 		return fmt.Errorf("create the ledger: %w", err)
 	}
 	fault.Point("create-ledger", "after")
+	if err := e.checkStarted(ctx, sf); err != nil {
+		return err
+	}
 	// The status subresource ignores status on create. The first write
 	// outlives a cancelled run: without it the ledger has no follow-ups.
 	sf.Status = *status
@@ -71,6 +74,59 @@ func (e *Env) Start(ctx context.Context, sf *failoverv1.SiteFailover, opts Optio
 		}
 	}
 	return e.resume(ctx, sf, opts)
+}
+
+// Ended tells whether run r no longer blocks a new run of its workload
+// ([RFC#0003] Requirement 8): it succeeded, it was abandoned, or another
+// run took it over, as its status or the spec of a run in runs says.
+func Ended(r *failoverv1.SiteFailover, runs []failoverv1.SiteFailover) bool {
+	if r.Status.State == failoverv1.RunSucceeded || r.Status.SupersededBy != "" || r.Status.Abandoned != nil {
+		return true
+	}
+	for _, o := range runs {
+		if o.Name != r.Name && o.Spec.TakeOver == r.Name {
+			return true
+		}
+	}
+	return false
+}
+
+// checkStarted searches the workload's runs again once the ledger exists,
+// before the first status write, any step, and the mark on the run it takes
+// over. The search before Start and the create are not one operation: two
+// tack processes can both find no active run, then both create a ledger
+// (#35 row 35). Each searches after its create, so at most one goes on.
+// A run that finds another active run, or cannot search, is abandoned: it
+// changed nothing, and blocks no later run.
+func (e *Env) checkStarted(ctx context.Context, sf *failoverv1.SiteFailover) error {
+	if e.Runs == nil {
+		return nil
+	}
+	checks := e.StartChecks
+	if checks == nil {
+		checks = e.SiteChecks(sf.Spec.Mode, sf.Spec.To)
+	}
+	runs, err := e.Runs(ctx, checks)
+	reason := ""
+	if err != nil {
+		reason = fmt.Sprintf("the search for other runs after the ledger's creation failed: %v", err)
+	}
+	for i := range runs {
+		r := &runs[i]
+		if reason != "" || r.Name == sf.Name || r.Name == sf.Spec.TakeOver || Ended(r, runs) {
+			continue
+		}
+		reason = fmt.Sprintf("run %s of the workload, %s, started at the same time", r.Name, orPending(r.Status.State))
+	}
+	if reason == "" {
+		return nil
+	}
+	sf.Status = failoverv1.SiteFailoverStatus{Abandoned: &failoverv1.Abandonment{At: metav1.NewTime(e.now()), Reason: reason}}
+	if werr := e.write(ctx, sf); werr != nil {
+		return fmt.Errorf("%s. Run %s ran no step and changed nothing, but its ledger could not be marked abandoned (%v): take it over with --take-over %s",
+			reason, sf.Name, werr, sf.Name)
+	}
+	return fmt.Errorf("%s. Run %s ran no step, changed nothing, and is abandoned: see tack status, then plan again", reason, sf.Name)
 }
 
 // MaxRunNames is how many names Start tries for a run: the plan's name,
@@ -96,7 +152,7 @@ func (e *Env) create(ctx context.Context, sf *failoverv1.SiteFailover, takeOver 
 			return fmt.Errorf("the name %s is taken, and its ledger cannot be read: %w", sf.Name, gerr)
 		}
 		switch {
-		case other.Status.State == failoverv1.RunSucceeded, other.Status.SupersededBy != "", other.Name == takeOver:
+		case other.Status.State == failoverv1.RunSucceeded, other.Status.SupersededBy != "", other.Status.Abandoned != nil, other.Name == takeOver:
 		case other.Status.State == "":
 			return fmt.Errorf("the name %s is taken by a run that has not recorded its start: another tack process may be starting it. Nothing was changed; check tack status %s, then plan again",
 				sf.Name, sf.Name)
@@ -156,6 +212,9 @@ type Resumption struct {
 // may no longer match the sites (Requirement 18). tack resume calls it
 // before it asks the operator, then Resumption.Resume after.
 func (e *Env) CheckResume(ctx context.Context, sf *failoverv1.SiteFailover) (*Resumption, error) {
+	if a := sf.Status.Abandoned; a != nil {
+		return nil, fmt.Errorf("%w: run %s was abandoned at %s: %s", ErrCannotResume, sf.Name, a.At.UTC().Format(time.RFC3339), a.Reason)
+	}
 	if sf.Status.State == "" {
 		return nil, fmt.Errorf("%w: run %s never recorded its start, so none of its steps ran and its follow-ups are not in its ledger. Plan again, and start a new run with --take-over %s",
 			ErrCannotResume, sf.Name, sf.Name)
@@ -238,6 +297,8 @@ func (e *Env) checkLatest(ctx context.Context, sf *failoverv1.SiteFailover, chec
 	for _, r := range runs {
 		switch {
 		case r.Name == sf.Name:
+		case r.Status.State == "" && r.Status.Abandoned != nil:
+			// It ran no step, so the sites are as this run's plan read them.
 		case r.Spec.TakeOver == sf.Name:
 			return fmt.Errorf("%w: run %s was taken over by run %s; see tack status %s", ErrCannotResume, sf.Name, r.Name, r.Name)
 		case r.CreationTimestamp.After(sf.CreationTimestamp.Time):

@@ -135,6 +135,10 @@ type Env struct {
 	// Supersede records in the ledger of run that the run by took it over.
 	// Nil does nothing.
 	Supersede func(ctx context.Context, run, by string) error
+	// StartChecks are the site checks of the search for active runs before
+	// Start. Start searches again with them once its ledger exists, so it
+	// adds no check of a site. Nil makes new checks.
+	StartChecks *SiteChecks
 	// Out receives progress lines.
 	Out io.Writer
 	// Now returns the time. Tests replace it.

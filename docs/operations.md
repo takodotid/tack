@@ -65,6 +65,8 @@ A hold set outside Tack, which stops a run with `HeldByAnotherRun`, stays until 
 
 After `--accept-git-head`, the check before release reports differences outside the run's own fields instead of stopping, and the check after release does not stop on a changed generation ([RFC#0005](../rfcs/RFC0005.md#requirements), Requirements 8 and 10).
 
+`tack run` searches for other runs again once its ledger exists. When another run of the workload started at the same time, the run ends before any step, changes nothing, and is marked abandoned: `tack status` lists it as `Abandoned`, and it never resumes. Plan again once the other run is done.
+
 `tack resume` refuses a run that another run took over, or that another run of the workload started after: its plan may no longer match the sites. Resume or check the newer run instead. It refuses before it asks for the workload's name, with exit code 1, and searches again after the confirmation.
 
 `tack resume` asks for the workload's name like `tack run`. `--yes` skips that, only for a resume a human approved.

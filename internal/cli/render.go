@@ -234,6 +234,9 @@ func printStatus(w io.Writer, sf *failoverv1.SiteFailover) {
 	if st.SupersededBy != "" {
 		fmt.Fprintf(w, "Taken over by: run %s; this run cannot resume\n", st.SupersededBy)
 	}
+	if a := st.Abandoned; a != nil {
+		fmt.Fprintf(w, "Abandoned: %s, %s; this run cannot resume\n", a.At.UTC().Format("2006-01-02 15:04:05Z"), a.Reason)
+	}
 	if st.StartedAt != nil {
 		fmt.Fprintf(w, "Started: %s\n", st.StartedAt.UTC().Format("2006-01-02 15:04:05Z"))
 	}
@@ -291,7 +294,11 @@ func printRuns(w io.Writer, runs []foundRun) {
 		if sf.Status.StartedAt != nil {
 			started = sf.Status.StartedAt.UTC().Format("2006-01-02 15:04:05Z")
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", r.site, sf.Name, sf.Spec.Mode, sf.Spec.From, sf.Spec.To, orPendingRun(sf.Status.State), sf.Status.Reason, started)
+		state := orPendingRun(sf.Status.State)
+		if sf.Status.Abandoned != nil {
+			state = "Abandoned"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", r.site, sf.Name, sf.Spec.Mode, sf.Spec.From, sf.Spec.To, state, sf.Status.Reason, started)
 	}
 	tw.Flush()
 }

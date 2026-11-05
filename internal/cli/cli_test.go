@@ -757,6 +757,11 @@ func TestRunSearchForOtherRuns(t *testing.T) {
 			r.Status.State, r.Status.Reason = failoverv1.RunSucceeded, ""
 			return r
 		}()}, code: ExitStopped},
+		{name: "an abandoned run that never started", runs: []*failoverv1.SiteFailover{func() *failoverv1.SiteFailover {
+			r := stopped("pg-main-earlier")
+			r.Status = failoverv1.SiteFailoverStatus{Abandoned: &failoverv1.Abandonment{At: metav1.NewTime(fixedNow), Reason: "run pg-main-other of the workload, Running, started at the same time"}}
+			return r
+		}()}, code: ExitStopped},
 		{name: "a Stopped run", runs: []*failoverv1.SiteFailover{stopped("pg-main-earlier")}, code: ExitError,
 			want: "run pg-main-earlier at site b is Stopped: resume it (tack resume pg-main-earlier) or take it over (--take-over pg-main-earlier)"},
 		{name: "a Stopped run, taken over", runs: []*failoverv1.SiteFailover{stopped("pg-main-earlier")}, takeOver: "pg-main-earlier", code: ExitStopped},
@@ -834,5 +839,22 @@ func TestResumeIgnoresChangedWorkloadFile(t *testing.T) {
 		if c.Site == "b" && c.Object.Kind == "Pooler" && (c.Value == nil || *c.Value != "2") {
 			t.Errorf("the commit sets Pooler instances at b to %v, want the ledger's 2", c.Value)
 		}
+	}
+}
+
+// #35 row 35. tack status shows an abandoned run: the list as Abandoned,
+// and the run with when and why.
+func TestStatusShowsAbandonedRun(t *testing.T) {
+	r := stoppedRun(t, "pg-main-earlier")
+	r.Status = failoverv1.SiteFailoverStatus{Abandoned: &failoverv1.Abandonment{At: metav1.NewTime(fixedNow), Reason: "run pg-main-other of the workload, Running, started at the same time"}}
+	f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": append(testenv.Site("b", "a", 0), r)})
+	out, code := run(t, f, "status", "-f", "testdata/workload.yaml")
+	if code != ExitOK || !strings.Contains(out, "pg-main-earlier") || !strings.Contains(out, "Abandoned") {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	out, code = run(t, f, "status", "pg-main-earlier", "-f", "testdata/workload.yaml")
+	want := "Abandoned: " + fixedNow.UTC().Format("2006-01-02 15:04:05Z") + ", run pg-main-other of the workload, Running, started at the same time; this run cannot resume"
+	if code != ExitOK || !strings.Contains(out, want) {
+		t.Fatalf("exit %d, want %q:\n%s", code, want, out)
 	}
 }

@@ -232,9 +232,15 @@ func stdinIsTerminal() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
 // operator's confirmation. A run that another run took over is not active.
 // It returns the run to take over, when it was found.
 func checkNoActiveRun(ctx context.Context, env *engine.Env, sf *failoverv1.SiteFailover, takeOver string) (*foundRun, error) {
-	runs, err := findRuns(ctx, env.SiteChecks(sf.Spec.Mode, sf.Spec.To), &sf.Spec.Workload.Spec, sf.Spec.Workload.Name)
+	// Start searches again with the same checks once its ledger exists.
+	env.StartChecks = env.SiteChecks(sf.Spec.Mode, sf.Spec.To)
+	runs, err := findRuns(ctx, env.StartChecks, &sf.Spec.Workload.Spec, sf.Spec.Workload.Name)
 	if err != nil {
 		return nil, err
+	}
+	all := make([]failoverv1.SiteFailover, len(runs))
+	for i, r := range runs {
+		all[i] = *r.sf
 	}
 	var old *foundRun
 	for i, r := range runs {
@@ -242,7 +248,7 @@ func checkNoActiveRun(ctx context.Context, env *engine.Env, sf *failoverv1.SiteF
 			old = &runs[i]
 			continue
 		}
-		if r.sf.Status.State == failoverv1.RunSucceeded || superseded(runs, r.sf) {
+		if engine.Ended(r.sf, all) {
 			continue
 		}
 		if r.sf.Status.State == "" {
@@ -253,19 +259,6 @@ func checkNoActiveRun(ctx context.Context, env *engine.Env, sf *failoverv1.SiteF
 			r.sf.Name, r.site, orPendingRun(r.sf.Status.State), r.sf.Name, r.sf.Name)
 	}
 	return old, nil
-}
-
-// superseded tells whether another run took sf over.
-func superseded(runs []foundRun, sf *failoverv1.SiteFailover) bool {
-	if sf.Status.SupersededBy != "" {
-		return true
-	}
-	for _, r := range runs {
-		if r.sf.Name != sf.Name && r.sf.Spec.TakeOver == sf.Name {
-			return true
-		}
-	}
-	return false
 }
 
 // supersede returns the Supersede of a run that takes over old: it writes
