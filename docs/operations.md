@@ -131,7 +131,7 @@ Writing a ledger is privileged. A ledger names the steps, the kube contexts and 
 |---|---|
 | Grant rows 5 and 6 to the operators only, in the ledger namespace at every site. | Rows 5 and 6 are the write access. |
 | Keep the ledger namespace out of every Flux path, and keep `SiteFailover` objects out of Git. | A Kustomization applies what Git holds with kustomize-controller's service account, or the one its `spec.serviceAccountName` names. |
-| Check who else may write: `kubectl --context CTX auth can-i create sitefailovers.failover.tako.id -n tack-system --as system:serviceaccount:NS:NAME`, and the same for `update` on `sitefailovers/status`. | A wide role, such as `cluster-admin` or `edit` on the namespace, includes them. |
+| Check who else may write: `kubectl --context CTX auth can-i create sitefailovers.failover.tako.id -n tack-system --as system:serviceaccount:NS:NAME`, and the same for `update` on `sitefailovers/status`. | A role with a wildcard resource or verb, such as `cluster-admin`, includes them. |
 
 A Role with rows 4 to 6, for a RoleBinding to the operators' group:
 
