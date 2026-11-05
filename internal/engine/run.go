@@ -620,6 +620,62 @@ func (r *runner) readOthers(ctx context.Context, i int) error {
 				s.Name, what, s.Summary, to, s.Name, s.Name)
 		}
 	}
+	if i == p {
+		return r.checkCaptured(ctx, i)
+	}
+	return nil
+}
+
+// checkCaptured reads again, before the promotion, each value a Capture
+// step before step i captured, and stops the run with TokenMissing when
+// the value at its source changed: the workload was changed outside the
+// run, such as an old primary promoted again and demoted again by hand,
+// and the promotion would use the token of a demotion that a later one
+// replaced (#46). A site that gave no answer in this process is not read:
+// the run then promotes with the value it captured, as with from down
+// (docs/runbooks/no-primary-after-demotion.md, option 1). Neither value is
+// printed.
+func (r *runner) checkCaptured(ctx context.Context, i int) error {
+	for _, s := range r.sf.Spec.Steps[:i] {
+		c := s.Capture
+		if s.Type != failoverv1.StepCapture || c == nil || r.stepStatus(s.ID).State != failoverv1.StepSucceeded {
+			continue
+		}
+		want := r.sf.Status.Captured[c.Into]
+		if want == "" {
+			// The step that uses it stops with TokenMissing.
+			continue
+		}
+		if err := (runChecks{r: r}).Reachable(ctx, s.Site); err != nil {
+			if !kube.IsUnreachable(err) {
+				return fmt.Errorf("the read before the promotion: site %s: %w", s.Site, err)
+			}
+			r.note(r.sf.Spec.To, fmt.Sprintf("site %s gave no answer, so %s was not compared with %s", s.Site, c.Into, refString(c.Object)))
+			r.printf("  note      site %s gave no answer: %s is not compared with %s\n", s.Site, c.Into, refString(c.Object))
+			continue
+		}
+		cl, err := r.Clients.Client(s.Site)
+		if err != nil {
+			return fmt.Errorf("the read before the promotion: site %s: %w", s.Site, err)
+		}
+		u := newObject(c.Object)
+		if err := cl.Get(ctx, client.ObjectKeyFromObject(u), u); err != nil {
+			return fmt.Errorf("the read before the promotion: site %s: read %s: %w", s.Site, refString(c.Object), err)
+		}
+		got, err := JSONPath(u.Object, c.JSONPath)
+		if err != nil {
+			return fmt.Errorf("the read before the promotion: site %s: %w", s.Site, err)
+		}
+		if got != want {
+			now := "another value"
+			if got == "" {
+				now = "no value"
+			}
+			return stop.Ask(failoverv1.ReasonTokenMissing,
+				"%s now has %s at %s, not the value step %s captured as %s: the workload was changed outside this run, such as a demotion by hand after a promotion by hand, and the run must not promote with %s. The run's plan may be stale: see docs/runbooks/abandon-run.md",
+				refString(c.Object), now, c.JSONPath, s.ID, c.Into, c.Into)
+		}
+	}
 	return nil
 }
 
