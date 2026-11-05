@@ -31,9 +31,9 @@ dist: tools-go
 	cd dist && sha256sum *.tar.gz *.zip > SHA256SUMS
 	SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) $(GO) run ./hack/distcheck dist $(VERSION) $(PLATFORMS)
 
-## sbom: after make dist, a CycloneDX SBOM per archive, from the build information of its binary, in dist/
+## sbom: after make dist, a CycloneDX SBOM per archive, from the build information of its binary, in dist/; the SBOM names the tool by its hashes, so the tool is built with -trimpath
 sbom: tools-go
-	$(GO) build -modfile=hack/tools/go.mod -o bin/cyclonedx-gomod github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod
+	$(GO) build -trimpath -modfile=hack/tools/go.mod -o bin/cyclonedx-gomod github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod
 	set -e; for p in $(PLATFORMS); do \
 		os=$${p%/*}; arch=$${p#*/}; dir=dist/tack-$(VERSION)-$$os-$$arch; \
 		case $$os in windows) exe=.exe;; *) exe=;; esac; \
