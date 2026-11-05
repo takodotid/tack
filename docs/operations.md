@@ -103,6 +103,38 @@ When the lost site answers again, `tack resume` runs its deferred steps: hold, t
 
 The old primary may hold writes the new one lacks, and cannot follow it. Rebuild it with [docs/runbooks/rebuild-old-primary.md](runbooks/rebuild-old-primary.md). Until it is rebuilt, `tack plan` refuses a planned switchover back to it.
 
+## Old ledgers
+
+Tack never deletes a ledger. Each search for runs reads every ledger of the workload at each site that answers, in pages of 100 ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 26). `tack plan` and `tack status -f` search once, `tack resume` three times, `tack run` four times. The cost grows with the number of runs.
+
+| Measured for #35 row 47 | Size |
+|---|---|
+| A ledger as a planned run on 2 sites leaves it | 21 KB of JSON |
+| The same on 10 sites | 86 KB |
+| A ledger with a full history: 100 entries of 1024 bytes | 138 KB on 2 sites, 204 KB on 10 |
+| A search at one site with 1,000 ledgers of 13.5 KB | 13.5 MB, in 10 answers of 1.35 MB |
+| The list of `tack status -f` once its search is done, for 10,000 runs | 28 ms |
+
+Delete old ledgers by hand when their number slows the searches. Delete only what these rules allow:
+
+| Rule | Why |
+|---|---|
+| Every site of the workload answers, and every run of the workload at every site is finished: `Succeeded` with no `Deferred` step, `Abandoned` or `TakenOver`. | Deleting a newer run lets an older unfinished run resume on a plan that no longer fits the sites ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 18). |
+| Delete only a `Succeeded` run with no `Deferred` step. Keep `Abandoned` and `TakenOver` runs. | They record holds that may be left in the cluster, and the take-over that ended them ([runbooks/abandon-run.md](runbooks/abandon-run.md), step 6). A `TakenOver` run whose mark did not land counts as ended only through the spec of the run that took it over. |
+| Keep the newest run of the workload. | It records the last switch. |
+| Keep a run with a follow-up `Rebuild` until the site's member was created again after the run started. | `tack plan` refuses a planned switchover to that member while such a run says it diverged ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 14). Deleting the ledger lifts the refusal. |
+| Delete by name, one run at a time, never by label selector or `--all`. | A selector also matches the runs these rules keep. |
+
+```sh
+# At every site: every run of the workload, and its state
+kubectl --context "$ctx" -n tack-system get sfo -l failover.tako.id/workload=pg-main
+# One run: Succeeded, no Deferred step, no follow-up Rebuild
+tack status RUN -f workload.yaml
+kubectl --context "$ctx" -n tack-system delete sfo RUN
+```
+
+Deleting needs `delete` on `sitefailovers`, which the permissions table and the chart's roles do not grant: Tack itself never deletes.
+
 ## Permissions
 
 Tack acts with the operator's credentials for each site's kube context. Every site needs the same rows: any site can be `from` or `to`.
