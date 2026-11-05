@@ -1,16 +1,48 @@
-# On a tag vX.Y.Z: the CLI archives with the man pages and the CRD, the CRD's Helm chart, and the GitHub release.
+# On a tag vX.Y.Z: the CLI archives with the man pages and the CRD, an SBOM per archive, the CRD's Helm chart, and the
+# GitHub release, signed and attested ([RFC#0009] Requirements 19 to 24).
 name: release
 on:
   push:
     tags: ['v*']
-permissions:
-  contents: read
+# Each job states what it may do (Requirement 21).
+permissions: {}
+# pipefail in every step.
+defaults:
+  run:
+    shell: bash
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
-  release:
+  # A signed tag on main, whose ci run on main succeeded, and a version that no release published (Requirements 19 and
+  # 22). The environment lets the operator require a review before anything runs.
+  gate:
     runs-on: ubuntu-26.04
+    environment: release
     permissions:
-      contents: write
-      packages: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Signed tag on main, with ci green
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: hack/release/gate.sh "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$GITHUB_SHA"
+      - name: Version not published
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          hack/release/absent.sh oci "ghcr.io/takodotid/charts/tack:${GITHUB_REF_NAME#v}"
+          hack/release/absent.sh release "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME"
+  # Every Go program and make target of the release runs here, before any push, with read access only (Requirements 20
+  # and 21). The assets and SHA256SUMS go to publish.
+  test:
+    runs-on: ubuntu-26.04
+    needs: gate
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -18,24 +50,91 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+          # Modules come from the proxy, checked against go.sum, not from a cache that another run saved.
+          cache: false
+      - name: helm, pinned
+        run: hack/tools/install.sh "$RUNNER_TEMP/tools" helm && echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
       - run: make verify test
-      - run: make dist VERSION="$GITHUB_REF_NAME"
-      - name: Helm chart
+      - run: hack/release/build.sh "$GITHUB_REF_NAME"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.cdx.json
+            dist/*.tgz
+            dist/failover.tako.id_sitefailovers.yaml
+            dist/SHA256SUMS
+          if-no-files-found: error
+  # Attests every asset and signs SHA256SUMS, then pushes and signs the chart, then creates the GitHub release. Steps
+  # that can fail without a push run first. Each push checks again, right before it, that its version is not published
+  # (Requirements 22 and 23). No Go runs here.
+  publish:
+    runs-on: ubuntu-26.04
+    needs: test
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
+      - name: The assets that test built
+        run: cd dist && sha256sum --check --strict SHA256SUMS
+      - name: helm and cosign, pinned
+        run: hack/tools/install.sh "$RUNNER_TEMP/tools" helm cosign && echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.cdx.json
+            dist/*.tgz
+            dist/failover.tako.id_sitefailovers.yaml
+            dist/SHA256SUMS
+      - name: Sign SHA256SUMS
+        run: cosign sign-blob --yes --bundle dist/SHA256SUMS.sigstore.json dist/SHA256SUMS
+      - name: Push and sign the chart
         env:
           ACTOR: ${{ github.actor }}
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           v="${GITHUB_REF_NAME#v}"
-          helm lint deploy/helm/tack
-          helm package deploy/helm/tack --version "$v" --app-version "$v" -d dist
+          hack/release/absent.sh oci "ghcr.io/takodotid/charts/tack:$v"
           printf '%s' "$TOKEN" | helm registry login ghcr.io -u "$ACTOR" --password-stdin
           helm push "dist/tack-$v.tgz" oci://ghcr.io/takodotid/charts
+          chart=$(hack/release/digest.sh "ghcr.io/takodotid/charts/tack:$v")
+          # cosign reads the registry's credentials from Docker's configuration.
+          printf '%s' "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+          cosign sign --yes "ghcr.io/takodotid/charts/tack@$chart"
+          docker logout ghcr.io
       - name: GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp config/crd/failover.tako.id_sitefailovers.yaml dist/
+          hack/release/absent.sh release "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME"
           cd dist
-          sha256sum *.tar.gz *.zip *.tgz failover.tako.id_sitefailovers.yaml > SHA256SUMS
-          gh release create "$GITHUB_REF_NAME" --verify-tag --title "Tack $GITHUB_REF_NAME" --generate-notes *.tar.gz *.zip *.tgz SHA256SUMS failover.tako.id_sitefailovers.yaml
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "Tack $GITHUB_REF_NAME" --generate-notes \
+            *.tar.gz *.zip *.cdx.json *.tgz failover.tako.id_sitefailovers.yaml SHA256SUMS SHA256SUMS.sigstore.json
+      # The README's commands, against what this run published.
+      - name: Verify the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          id="https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yaml@$GITHUB_REF"
+          issuer=https://token.actions.githubusercontent.com
+          cosign verify "ghcr.io/takodotid/charts/tack:${GITHUB_REF_NAME#v}" \
+            --certificate-identity "$id" --certificate-oidc-issuer "$issuer" >/dev/null
+          cosign verify-blob --bundle dist/SHA256SUMS.sigstore.json \
+            --certificate-identity "$id" --certificate-oidc-issuer "$issuer" dist/SHA256SUMS
+          for f in dist/*.tar.gz dist/*.zip dist/*.cdx.json dist/*.tgz dist/failover.tako.id_sitefailovers.yaml dist/SHA256SUMS; do
+            gh attestation verify "$f" --repo "$GITHUB_REPOSITORY" --cert-identity "$id" >/dev/null
+            echo "attested: $f"
+          done

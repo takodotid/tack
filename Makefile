@@ -6,7 +6,7 @@ SOURCE_DATE_EPOCH ?= $(shell git log -1 --format=%ct 2>/dev/null || date +%s)
 LDFLAGS := -s -w -X github.com/takodotid/tack/internal/version.Version=$(VERSION)
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 
-.PHONY: all build dist generate verify test e2e e2e-up e2e-down tools clean
+.PHONY: all build dist sbom lint generate verify test e2e e2e-up e2e-down tools clean
 
 all: verify test build
 
@@ -14,7 +14,7 @@ all: verify test build
 build: tools-go
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags '$(LDFLAGS)' -o bin/tack ./cmd/tack
 
-## dist: static binaries for Linux, macOS and Windows, with the man pages and the CRD, in dist/; lists each archive to check it
+## dist: static binaries for Linux, macOS and Windows, with the man pages and the CRD, in dist/; the same bytes for the same commit; lists each archive to check it
 dist: tools-go
 	rm -rf dist && mkdir -p dist/man
 	SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) $(GO) run -ldflags '$(LDFLAGS)' ./hack/genman dist/man
@@ -25,13 +25,28 @@ dist: tools-go
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $$dir/tack$$exe ./cmd/tack; \
 		cp dist/man/*.1 $$dir/man/man1/; \
 		cp config/crd/*.yaml LICENSE README.md $$dir/; \
-		case $$os in \
-			windows) $(GO) run ./hack/zipdir $$dir.zip $$dir;; \
-			*) tar -C dist -czf $$dir.tar.gz $$(basename $$dir);; \
-		esac; \
+		case $$os in windows) ext=.zip;; *) ext=.tar.gz;; esac; \
+		SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) $(GO) run ./hack/archive $$dir$$ext $$dir; \
 	done
 	cd dist && sha256sum *.tar.gz *.zip > SHA256SUMS
-	$(GO) run ./hack/distcheck dist $(VERSION) $(PLATFORMS)
+	SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) $(GO) run ./hack/distcheck dist $(VERSION) $(PLATFORMS)
+
+## sbom: after make dist, a CycloneDX SBOM per archive, from the build information of its binary, in dist/; the SBOM names the tool by its hashes, so the tool is built as the binaries are, without cgo and with -trimpath
+sbom: tools-go
+	CGO_ENABLED=0 $(GO) build -trimpath -modfile=hack/tools/go.mod -o bin/cyclonedx-gomod github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod
+	set -e; for p in $(PLATFORMS); do \
+		os=$${p%/*}; arch=$${p#*/}; dir=dist/tack-$(VERSION)-$$os-$$arch; \
+		case $$os in windows) exe=.exe;; *) exe=;; esac; \
+		GOOS=$$os GOARCH=$$arch bin/cyclonedx-gomod bin -json -noserial -notimestamp \
+			-version $(VERSION) -output $$dir.cdx.json $$dir/tack$$exe; \
+	done
+
+## lint: the module's checksums, known vulnerabilities, the chart, and the pins of the workflows and the e2e
+lint: tools-go
+	$(GO) mod verify
+	$(GO) tool -modfile=hack/tools/go.mod govulncheck ./...
+	helm lint --strict deploy/helm/tack
+	hack/release/pinned.sh
 
 ## generate: deepcopy code and the CRD, from api/, and the chart's copy of the CRD
 generate: tools-go

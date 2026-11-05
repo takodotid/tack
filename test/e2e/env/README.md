@@ -20,10 +20,10 @@ Two sites, each a single-node kind cluster deployed by Flux from one local Git r
 | Git server | container `tack-e2e-git` | Smart HTTP with push, built from `test/e2e/gitserver/`. No authentication. |
 | GitOps repository | `gitops.git` | Seeded from `test/e2e/fixtures/gitops/` only when the repository has no `main` branch. |
 | kind clusters | `tack-e2e-a`, `tack-e2e-b` | Contexts `kind-tack-e2e-a`, `kind-tack-e2e-b`. |
-| Images | `PREPULL_IMAGES` in `lib.sh` | Loaded into both nodes from the host's Docker when it has them, so a slow registry does not make the installs time out. The nodes pull the others. `up.sh` never pulls nor removes a host image. |
-| Flux | v2.10.0 | source-controller and kustomize-controller only. |
+| Images | `PREPULL_IMAGES` in `lib.sh` | Each named by the digest of its index, here and in the fixtures. Both nodes pull them in the background while the controllers install. The host's Docker is not used: `docker save` of a digest keeps neither its tag nor its index, so a pod that names the digest would not find the image. |
+| Flux | v2.10.0 | source-controller and kustomize-controller only, from `flux install --export`, with each image named by its digest. |
 | Flux sync | `GitRepository/tack-e2e`, `Kustomization/site-a` or `site-b` | Namespace `flux-system`. Path `./clusters/<site>`. Interval 30s. |
-| CloudNativePG | v1.30.1 | Release manifest, checked against a pinned SHA-256. |
+| CloudNativePG | v1.30.1 | Release manifest, checked against a pinned SHA-256, with the operator's image named by its digest. |
 | Runtime Secrets | `tack-e2e-server-ca`, `tack-e2e-client-ca`, `app-credentials` | Namespace `db` at both sites. Generated once into `.e2e/secrets/`. Never in Git. |
 | Strait image | `tack-e2e-strait:<commit>` | Built once from Strait's source at `STRAIT_COMMIT` in `lib.sh`, loaded into both nodes from an archive. |
 | Strait | Helm release `strait`, namespace `strait-system` | Chart from the same commit. Pod Security `privileged`, for the gateway's `NET_ADMIN`. Exchange polls every 2s, peer timeout 6s. |

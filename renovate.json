@@ -5,10 +5,10 @@
   ],
   "packageRules": [
     {
-      "description": "go.mod's replace pins kustomize to the version kustomize-controller pins. Newer kustomize needs a k8s.io/kube-openapi built on sigs.k8s.io/structured-merge-diff/v7, which k8s.io/apimachinery v0.37 cannot use. Re-enable together with the replace, once k8s.io moves to structured-merge-diff/v7.",
+      "description": "go.mod's replace pins kustomize to the version that kustomize-controller pins, as its comment says. Renovate lists each new version of these two, in the require lines and in the replace, on the Dependency Dashboard, and opens a pull request only once it is approved there. Approve it when the kustomize-controller of the e2e's Flux moves to that version, and change the replace in the same pull request: a bump of the require lines alone drags k8s.io/kube-openapi onto sigs.k8s.io/structured-merge-diff/v7, which k8s.io/apimachinery v0.37 cannot use (#13, #15).",
       "matchManagers": ["gomod"],
       "matchPackageNames": ["sigs.k8s.io/kustomize/api", "sigs.k8s.io/kustomize/kyaml"],
-      "enabled": false
+      "dependencyDashboardApproval": true
     }
   ]
 }

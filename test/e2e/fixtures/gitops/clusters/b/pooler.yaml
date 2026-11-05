@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: pgbouncer
-          image: ghcr.io/cloudnative-pg/pgbouncer:1.25.2
+          image: ghcr.io/cloudnative-pg/pgbouncer:1.25.2@sha256:b15c428057d1ffbc19fb70496911a5f1a47066dcc1315bf794f4e85ade29e2e5
           resources:
             requests:
               cpu: 10m
