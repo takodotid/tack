@@ -192,12 +192,13 @@ Each release also needs:
 
 | From | To | CRD | Also before the new CLI runs |
 |---|---|---|---|
+| v1.2.x | v1.3.0 | new optional fields: `status.abandoned`, `status.git.changedRevision` | nothing |
 | v1.2.0 | v1.2.1 | unchanged | nothing |
 | v1.0.x or v1.1.x | v1.2.x | new optional fields: `spec.takeOver`, `spec.fingerprints`, `status.fingerprints`, `status.supersededBy`, `status.git.releaseRevision` | Grant `get` on the namespace `kube-system` at every site: the plan reads its UID to identify the site's cluster, and fails with `forbidden` without it. Move a user out of an `http` or `https` Git URL, such as `https://user@git.example.com/gitops.git`, into git's configuration (`credential.<url>.username`): Tack refuses such a URL. `ssh://git@git.example.com/gitops.git` and `git@git.example.com:gitops.git` still work. |
 
-| A ledger written by | Under v1.2.1 |
+| A ledger written by | Under v1.2.1 and v1.3.0 |
 |---|---|
-| v1.2.0 | `tack resume` continues it. |
+| v1.2.x | `tack resume` continues it. |
 | v1.0.x or v1.1.x | `tack resume` continues it. Each site's cluster is recorded in `status.fingerprints` on its first read, and checked after. |
 
 ## Upgrading from v0.1.x
