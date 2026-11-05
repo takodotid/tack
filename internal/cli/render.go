@@ -297,7 +297,8 @@ func printStatus(w io.Writer, sf *failoverv1.SiteFailover) {
 		fmt.Fprintf(w, "Captured: %s\n", strings.Join(sorted(keys), ", "))
 	}
 	if len(st.Held) > 0 {
-		fmt.Fprintln(w, "Held objects:")
+		// The ledger is not written when a hold is removed by hand (#59).
+		fmt.Fprintln(w, "Held objects, as the ledger records them:")
 		for _, h := range st.Held {
 			state := "held"
 			if h.ReleasedAt != nil {

@@ -55,10 +55,15 @@ was promoted again by hand: it records status.abandoned in the run's
 ledger. tack resume then refuses the run, and a new run of the workload no
 longer waits for it.
 
-Abandon changes nothing else. The objects the run holds stay held: remove
-the holds once Git equals live, or start the next run with --take-over RUN,
-which takes them over. The runbook:
+Abandon changes nothing else. A hold the run left on an object stays:
+remove the holds once Git equals live, or start the next run with
+--take-over RUN, which takes them over. Abandon lists the holds as the run's
+ledger records them, and does not read the objects: a hold removed by hand
+is still listed. The runbook:
   https://github.com/takodotid/tack/blob/main/docs/runbooks/abandon-run.md
+
+kubectl get sfo still shows an abandoned run's last state, such as Stopped:
+tack status lists it as Abandoned.
 
 Abandon does not stop a tack process that runs the run: check first that
 none does. A step that runs, such as a promotion, still changes the

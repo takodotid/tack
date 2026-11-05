@@ -20,10 +20,15 @@ was promoted again by hand: it records status.abandoned in the run's
 ledger. tack resume then refuses the run, and a new run of the workload no
 longer waits for it.
 
-Abandon changes nothing else. The objects the run holds stay held: remove
-the holds once Git equals live, or start the next run with --take-over RUN,
-which takes them over. The runbook:
+Abandon changes nothing else. A hold the run left on an object stays:
+remove the holds once Git equals live, or start the next run with
+--take-over RUN, which takes them over. Abandon lists the holds as the run's
+ledger records them, and does not read the objects: a hold removed by hand
+is still listed. The runbook:
   ` + version.DocLink("docs/runbooks/abandon-run.md") + `
+
+kubectl get sfo still shows an abandoned run's last state, such as Stopped:
+tack status lists it as Abandoned.
 
 Abandon does not stop a tack process that runs the run: check first that
 none does. A step that runs, such as a promotion, still changes the
@@ -85,13 +90,15 @@ func newAbandon(o *options) *cobra.Command {
 			if err := engine.CheckWriter(sf); err != nil {
 				return err
 			}
+			// The list is the ledger's: abandon reads no object of the
+			// workload, and a hold removed by hand stays in it (#59).
 			held := stillHeld(sf)
 			if len(held) > 0 {
-				fmt.Fprintf(out, "The run's holds stay after it is abandoned:\n")
+				fmt.Fprintln(out, "The ledger records these objects as held by the run, and not released:")
 				for _, h := range held {
 					fmt.Fprintf(out, "  %s at site %s\n", ref(h.Object), h.Site)
 				}
-				fmt.Fprintf(out, "Remove them once Git equals live (%s), or start the next run with --take-over %s.\n", version.DocLink("docs/runbooks/abandon-run.md"), sf.Name)
+				fmt.Fprintf(out, "Abandon does not read the objects: a hold removed by hand is still listed. A hold still on an object stays after the run is abandoned: remove it once Git equals live (%s), or start the next run with --take-over %s.\n", version.DocLink("docs/runbooks/abandon-run.md"), sf.Name)
 			}
 			fmt.Fprintf(out, "Check that no tack process runs %s: abandon does not stop one. Only tack v1.3.0 and later honour the mark.\n", sf.Name)
 			if err := o.confirm(out, yes, sf.Spec.Workload.Name); err != nil {
@@ -123,6 +130,13 @@ func newAbandon(o *options) *cobra.Command {
 				env.EventOn(ctx, rec, back, true, "Run"+string(failoverv1.HistoryAbandoned), engine.EntryText(back.Status.History[len(back.Status.History)-1]))
 			}
 			fmt.Fprintf(out, "run %s abandoned: tack resume refuses it, and a new run no longer waits for it\n", sf.Name)
+			// The State column reads status.state, which the mark leaves
+			// as it was ([RFC#0003] Limitations).
+			state := "empty"
+			if s := back.Status.State; s != "" {
+				state = "as " + string(s)
+			}
+			fmt.Fprintf(out, "kubectl get sfo still shows its State %s: status.abandoned marks the run, and tack status lists it as Abandoned (%s)\n", state, version.DocLink("docs/operations.md#reading-a-run"))
 			return nil
 		},
 	}
