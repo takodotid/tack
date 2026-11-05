@@ -392,6 +392,7 @@ func (r *runner) runStep(ctx context.Context, step *failoverv1.Step) error {
 	if err != nil {
 		return r.end(ctx, step, err)
 	}
+	msg = r.hideCaptured(msg)
 	if note := r.retried[step.Site]; note != "" {
 		delete(r.retried, step.Site)
 		if msg != "" {
@@ -433,6 +434,7 @@ func (r *runner) halt(ctx context.Context, step *failoverv1.Step, err error, set
 	if !ok {
 		se = &stop.Error{Reason: failoverv1.ReasonStepFailed, Message: err.Error()}
 	}
+	se = &stop.Error{Reason: se.Reason, Message: r.hideCaptured(se.Message), Wait: se.Wait}
 	st := r.stepStatus(step.ID)
 	st.Message = se.Message
 	if note := r.retried[step.Site]; note != "" {
@@ -458,7 +460,7 @@ func (r *runner) halt(ctx context.Context, step *failoverv1.Step, err error, set
 	r.sf.Status.Reason = se.Reason
 	r.sf.Status.Message = fmt.Sprintf("step %s: %s", step.ID, se.Message)
 	if werr := r.write(ctx, r.sf); werr != nil {
-		return errors.Join(werr, err)
+		return errors.Join(werr, errors.New(r.sf.Status.Message))
 	}
 	r.printf("  %-9s %s: %s: %s\n", strings.ToLower(string(r.sf.Status.State)), step.ID, se.Reason, se.Message)
 	return fmt.Errorf("%w: %s", ret, r.sf.Status.Message)

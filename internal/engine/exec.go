@@ -433,6 +433,11 @@ func (r *runner) conditionsHold(u *unstructured.Unstructured, conds []failoverv1
 			return false, "", fmt.Errorf("unknown operator %q", cond.Operator)
 		}
 		if !ok {
+			if placeholder.MatchString(cond.Value) {
+				// The value is captured, such as a token: name it, and
+				// print neither it nor the live value it is compared with.
+				return false, fmt.Sprintf("%s is %s, want %s %s", cond.JSONPath, size(got), cond.Operator, cond.Value), nil
+			}
 			return false, fmt.Sprintf("%s is %q, want %s %q", cond.JSONPath, got, cond.Operator, want), nil
 		}
 	}
@@ -460,6 +465,39 @@ func (r *runner) capture(ctx context.Context, s *failoverv1.Step) (string, error
 	}
 	r.sf.Status.Captured[s.Capture.Into] = v
 	return fmt.Sprintf("captured %s (%d bytes)", s.Capture.Into, len(v)), nil
+}
+
+// size describes a value without printing it.
+func size(v string) string {
+	if v == "" {
+		return "empty"
+	}
+	return fmt.Sprintf("a value of %d bytes", len(v))
+}
+
+// minHidden is the shortest captured value hideCaptured replaces: a shorter
+// one is no token, and replacing it would garble the message.
+const minHidden = 8
+
+// hideCaptured replaces each captured value in a message with its name, so
+// the ledger and the output name captured values and never print them
+// ([RFC#0009] Requirement 10), whatever error carried one.
+func (r *runner) hideCaptured(msg string) string {
+	names := make([]string, 0, len(r.sf.Status.Captured))
+	for name := range r.sf.Status.Captured {
+		names = append(names, name)
+	}
+	// The longest value first, so a value inside another is not replaced
+	// first.
+	slices.SortFunc(names, func(a, b string) int {
+		return len(r.sf.Status.Captured[b]) - len(r.sf.Status.Captured[a])
+	})
+	for _, name := range names {
+		if v := r.sf.Status.Captured[name]; len(v) >= minHidden {
+			msg = strings.ReplaceAll(msg, v, "$("+name+")")
+		}
+	}
+	return msg
 }
 
 var placeholder = regexp.MustCompile(`\$\(([a-zA-Z0-9_.-]+)\)`)
