@@ -206,10 +206,15 @@ func newResume(o *options) *cobra.Command {
 			printStatus(out, sf)
 			fmt.Fprintln(out)
 			printClusters(out, sf, env.Clients)
+			// Refuse a run that cannot resume before asking the operator.
+			res, err := env.CheckResume(ctx, sf)
+			if err != nil {
+				return err
+			}
 			if err := o.confirm(out, yes, sf.Spec.Workload.Name); err != nil {
 				return err
 			}
-			return env.Resume(ctx, sf, opts)
+			return res.Resume(ctx, opts)
 		},
 	}
 	l.add(cmd)

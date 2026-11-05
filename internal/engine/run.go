@@ -128,23 +128,68 @@ func orPending(s failoverv1.RunState) string {
 	return string(s)
 }
 
-// Resume runs the remaining steps of a ledger. It refuses a ledger that
-// never recorded its start ([RFC#0003] Requirement 20), a run that another
-// run took over, and a run older than another run of the workload: its
-// plan may no longer match the sites ([RFC#0003] Requirement 18).
+// Resume runs the remaining steps of a ledger, once CheckResume let it.
 func (e *Env) Resume(ctx context.Context, sf *failoverv1.SiteFailover, opts Options) error {
-	if sf.Status.State == "" {
-		return fmt.Errorf("%w: run %s never recorded its start, so none of its steps ran and its follow-ups are not in its ledger. Plan again, and start a new run with --take-over %s",
-			ErrCannotResume, sf.Name, sf.Name)
-	}
-	if sf.Status.State == failoverv1.RunSucceeded && !hasRunnableDeferred(sf) {
-		e.printf("run %s already succeeded\n", sf.Name)
-		return nil
-	}
-	if err := e.checkLatest(ctx, sf); err != nil {
+	res, err := e.CheckResume(ctx, sf)
+	if err != nil {
 		return err
 	}
-	return e.resume(ctx, sf, opts)
+	return res.run(ctx, opts)
+}
+
+// A Resumption is a run that CheckResume let resume.
+type Resumption struct {
+	env *Env
+	sf  *failoverv1.SiteFailover
+	// checks are the site checks of the search for other runs. The search
+	// after the confirmation reuses them, so it adds no check of a site
+	// ([RFC#0007] Requirement 5).
+	checks *SiteChecks
+}
+
+// CheckResume refuses a run that cannot resume: a ledger that never
+// recorded its start ([RFC#0003] Requirement 20), a run that another run
+// took over, and a run older than another run of the workload, whose plan
+// may no longer match the sites (Requirement 18). tack resume calls it
+// before it asks the operator, then Resumption.Resume after.
+func (e *Env) CheckResume(ctx context.Context, sf *failoverv1.SiteFailover) (*Resumption, error) {
+	if sf.Status.State == "" {
+		return nil, fmt.Errorf("%w: run %s never recorded its start, so none of its steps ran and its follow-ups are not in its ledger. Plan again, and start a new run with --take-over %s",
+			ErrCannotResume, sf.Name, sf.Name)
+	}
+	res := &Resumption{env: e, sf: sf, checks: e.SiteChecks(sf.Spec.Mode, sf.Spec.To)}
+	if res.done() {
+		return res, nil
+	}
+	if err := e.checkLatest(ctx, sf, res.checks); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// Resume searches the workload's runs again, since another run may have
+// taken this one over while the operator confirmed (issue #27), then runs
+// the remaining steps.
+func (r *Resumption) Resume(ctx context.Context, opts Options) error {
+	if !r.done() {
+		if err := r.env.checkLatest(ctx, r.sf, r.checks); err != nil {
+			return err
+		}
+	}
+	return r.run(ctx, opts)
+}
+
+// done tells whether the run succeeded with no deferred step left to run.
+func (r *Resumption) done() bool {
+	return r.sf.Status.State == failoverv1.RunSucceeded && !hasRunnableDeferred(r.sf)
+}
+
+func (r *Resumption) run(ctx context.Context, opts Options) error {
+	if r.done() {
+		r.env.printf("run %s already succeeded\n", r.sf.Name)
+		return nil
+	}
+	return r.env.resume(ctx, r.sf, opts)
 }
 
 // ErrCannotResume is returned when a run cannot resume: it never recorded
@@ -153,15 +198,15 @@ var ErrCannotResume = errors.New("the run cannot resume")
 
 // checkLatest refuses a run that another run took over or started after.
 // It reads the runs at every site of the run's Workload snapshot that
-// answers.
-func (e *Env) checkLatest(ctx context.Context, sf *failoverv1.SiteFailover) error {
+// answers checks.
+func (e *Env) checkLatest(ctx context.Context, sf *failoverv1.SiteFailover, checks *SiteChecks) error {
 	if by := sf.Status.SupersededBy; by != "" {
 		return fmt.Errorf("%w: run %s was taken over by run %s; see tack status %s", ErrCannotResume, sf.Name, by, by)
 	}
 	if e.Runs == nil {
 		return nil
 	}
-	runs, err := e.Runs(ctx, e.SiteChecks(sf.Spec.Mode, sf.Spec.To))
+	runs, err := e.Runs(ctx, checks)
 	if err != nil {
 		return fmt.Errorf("search the workload's runs before resuming %s: %w", sf.Name, err)
 	}
