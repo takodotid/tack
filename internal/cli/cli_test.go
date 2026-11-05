@@ -711,3 +711,66 @@ func TestResumeNeedsConfirmation(t *testing.T) {
 		})
 	}
 }
+
+// #35 row 52 (RFC0003 Requirement 8, RFC0009 Requirement 5). tack run
+// refuses while another run of the workload is not Succeeded, except a run
+// another run took over, by its status or by the other run's spec, and the
+// run it names with --take-over, which it records.
+func TestRunSearchForOtherRuns(t *testing.T) {
+	stopped := func(name string) *failoverv1.SiteFailover { return stoppedRun(t, name) }
+	for _, tt := range []struct {
+		name     string
+		runs     []*failoverv1.SiteFailover
+		takeOver string
+		code     int
+		want     string
+	}{
+		{name: "a Succeeded run", runs: []*failoverv1.SiteFailover{func() *failoverv1.SiteFailover {
+			r := stopped("pg-main-earlier")
+			r.Status.State, r.Status.Reason = failoverv1.RunSucceeded, ""
+			return r
+		}()}, code: ExitStopped},
+		{name: "a run taken over, by its status", runs: []*failoverv1.SiteFailover{func() *failoverv1.SiteFailover {
+			r := stopped("pg-main-earlier")
+			r.Status.SupersededBy = "pg-main-later"
+			return r
+		}()}, code: ExitStopped},
+		{name: "a run taken over, by the other run's spec", runs: []*failoverv1.SiteFailover{stopped("pg-main-earlier"), func() *failoverv1.SiteFailover {
+			r := stopped("pg-main-later")
+			r.Spec.TakeOver = "pg-main-earlier"
+			r.Status.State, r.Status.Reason = failoverv1.RunSucceeded, ""
+			return r
+		}()}, code: ExitStopped},
+		{name: "a Stopped run", runs: []*failoverv1.SiteFailover{stopped("pg-main-earlier")}, code: ExitError,
+			want: "run pg-main-earlier at site b is Stopped: resume it (tack resume pg-main-earlier) or take it over (--take-over pg-main-earlier)"},
+		{name: "a Stopped run, taken over", runs: []*failoverv1.SiteFailover{stopped("pg-main-earlier")}, takeOver: "pg-main-earlier", code: ExitStopped},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			objs := testenv.Site("b", "a", 0)
+			for _, r := range tt.runs {
+				objs = append(objs, r)
+			}
+			f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": objs})
+			f.flux.Fail["Hold"] = errors.New("stop at the first hold")
+			args := []string{"run", "-f", "testdata/workload.yaml", "--to", "b", "--yes"}
+			if tt.takeOver != "" {
+				args = append(args, "--take-over", tt.takeOver)
+			}
+			out, code := run(t, f, args...)
+			if code != tt.code || !strings.Contains(out, tt.want) {
+				t.Fatalf("exit %d, want %d with %q:\n%s", code, tt.code, tt.want, out)
+			}
+			if code != ExitStopped {
+				if len(f.flux.Calls) > 0 {
+					t.Errorf("the refused run called Flux: %v", f.flux.Calls)
+				}
+				return
+			}
+			store := &ledger.Store{Client: f.clients.Sites["b"], Namespace: "tack-system"}
+			sf, err := store.Get(context.Background(), "pg-main-20261027-101500")
+			if err != nil || sf.Spec.TakeOver != tt.takeOver {
+				t.Errorf("the new run: %v, spec.takeOver %q, want %q", err, sf.Spec.TakeOver, tt.takeOver)
+			}
+		})
+	}
+}
