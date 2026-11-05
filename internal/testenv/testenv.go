@@ -336,7 +336,9 @@ func (f *Flux) VerifyNoop(_ context.Context, site string, _ []failoverv1.HeldObj
 	return "nothing changed", f.call("VerifyNoop", site)
 }
 
-// Git is a fake engine.Git. It maps each field to clusters/<site>/<kind>.yaml.
+// Git is a fake engine.Git. It maps each field as spec.git.fields says,
+// else to clusters/<site>/<kind>.yaml when spec.git.find is set; a field
+// with neither has no mapping.
 // The branch's history is the commits Commit made, in order; a Head set by
 // a test on top of them is a commit pushed after them.
 type Git struct {
@@ -350,11 +352,23 @@ type Git struct {
 }
 
 // Resolve implements engine.Git.
-func (g *Git) Resolve(_ context.Context, _ *failoverv1.WorkloadSpec, changes []driver.FieldChange) ([]failoverv1.GitChange, error) {
+func (g *Git) Resolve(_ context.Context, w *failoverv1.WorkloadSpec, changes []driver.FieldChange) ([]failoverv1.GitChange, error) {
 	var out []failoverv1.GitChange
 	for _, c := range changes {
 		gc := failoverv1.GitChange{Site: c.Site, Object: c.Object, Field: c.Field, Value: c.Value}
-		if !g.Unreachable {
+		var m *failoverv1.FieldMapping
+		for i, f := range w.Git.Fields {
+			if f.Site == c.Site && f.Object.Kind == c.Object.Kind && f.Object.Name == c.Object.Name && f.Field == c.Field {
+				m = &w.Git.Fields[i]
+			}
+		}
+		switch {
+		case m == nil && w.Git.Find == nil:
+			return nil, fmt.Errorf("%w: site %s, %s %s, field %s", engine.ErrNoMapping, c.Site, c.Object.Kind, c.Object.Name, c.Field)
+		case g.Unreachable:
+		case m != nil:
+			gc.File, gc.Path = m.File, m.Path
+		default:
 			gc.File = fmt.Sprintf("clusters/%s/%s.yaml", c.Site, lower(c.Object.Kind))
 			gc.Path = c.Field
 		}

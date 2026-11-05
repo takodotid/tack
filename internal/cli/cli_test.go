@@ -191,6 +191,21 @@ func TestPlanGolden(t *testing.T) {
 			args: []string{"plan", "-f", "testdata/workload.yaml", "--to", "a"},
 		},
 		{
+			// RFC0006 Requirement 6: without find, an optional removal
+			// without a mapping is left out of the commit and noted.
+			name:    "plan-planned-mapped",
+			objects: map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": testenv.Site("b", "a", 0)},
+			args:    []string{"plan", "-f", "testdata/workload-mapped.yaml", "--to", "b"},
+		},
+		{
+			// RFC0006 Requirement 6: a required field without a mapping
+			// fails the plan.
+			name:    "plan-planned-unmapped",
+			objects: map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": testenv.Site("b", "a", 0)},
+			args:    []string{"plan", "-f", "testdata/workload-unmapped.yaml", "--to", "b"},
+			code:    ExitError,
+		},
+		{
 			name:    "plan-bad-mode",
 			objects: map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": testenv.Site("b", "a", 0)},
 			args:    []string{"plan", "-f", "testdata/workload.yaml", "--to", "b", "--mode", "fast"},

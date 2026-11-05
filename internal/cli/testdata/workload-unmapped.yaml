@@ -1,0 +1,24 @@
+apiVersion: failover.tako.id/v1
+kind: Workload
+metadata:
+  name: pg-main
+spec:
+  driver: cnpg
+  sites:
+  - name: a
+    kubeContext: site-a
+    cnpg:
+      cluster: {namespace: db, name: pg-a}
+      pooler: {namespace: db, name: pg-a-pooler-rw, instances: 2}
+  - name: b
+    kubeContext: site-b
+    cnpg:
+      cluster: {namespace: db, name: pg-b}
+      pooler: {namespace: db, name: pg-b-pooler-rw, instances: 2}
+  git:
+    url: https://git.example.com/gitops.git
+    branch: main
+    fields:
+    - {site: a, object: {kind: Cluster, namespace: db, name: pg-a}, field: spec.replica.primary, file: apps/db/values-a.yaml, path: cnpg.replica.primary}
+    - {site: a, object: {kind: Pooler, namespace: db, name: pg-a-pooler-rw}, field: spec.instances, file: apps/db/values-a.yaml, path: pooler.instances}
+    - {site: b, object: {kind: Cluster, namespace: db, name: pg-b}, field: spec.replica.primary, file: apps/db/values-b.yaml, path: cnpg.replica.primary}
