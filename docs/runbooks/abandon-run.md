@@ -4,7 +4,7 @@ A run is abandoned when it must not go on, such as after its old primary was pro
 
 | Name | Meaning |
 |---|---|
-| `RUN` | the run to abandon |
+| `RUN`, `T` | the run to abandon, and its `to` site, where its ledger is |
 | `SITE_CTX` | the kube context of a site with a held object |
 | `KIND`, `NAME`, `NS` | a held object: its kind, name and namespace |
 | `KS`, `FLUX_NS` | the Flux Kustomization that applies it, and its namespace |
