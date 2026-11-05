@@ -774,3 +774,49 @@ func TestRunSearchForOtherRuns(t *testing.T) {
 		})
 	}
 }
+
+// #35 row 54 (RFC0003 Requirement 6). The Workload file changes after a run
+// stopped: another Pooler size at b and another Git URL. tack resume with
+// the new file finds the run, then runs the ledger's plan with the
+// ledger's Workload: it does not plan again.
+func TestResumeIgnoresChangedWorkloadFile(t *testing.T) {
+	f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": testenv.Site("b", "a", 0)})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go (&testenv.Operator{Clients: f.clients, Sites: []string{"a", "b"}}).Run(ctx)
+	f.flux.Fail["Reconcile"] = errors.New("stop before the switch")
+	if out, code := run(t, f, "run", "-f", "testdata/workload.yaml", "--to", "b", "--yes"); code != ExitStopped {
+		t.Fatalf("run: exit %d, want %d:\n%s", code, ExitStopped, out)
+	}
+	delete(f.flux.Fail, "Reconcile")
+
+	b, err := os.ReadFile("testdata/workload.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := strings.Replace(string(b), "name: pg-b-pooler-rw, instances: 2", "name: pg-b-pooler-rw, instances: 5", 1)
+	changed = strings.Replace(changed, "https://git.example.com/gitops.git", "https://other.example.com/gitops.git", 1)
+	file := filepath.Join(t.TempDir(), "workload.yaml")
+	if err := os.WriteFile(file, []byte(changed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, code := run(t, f, "resume", "pg-main-20261027-101500", "-f", file, "--yes")
+	if code != ExitOK || !strings.Contains(out, "Git: https://git.example.com/gitops.git, branch main") {
+		t.Fatalf("resume: exit %d, want %d with the ledger's Git URL:\n%s", code, ExitOK, out)
+	}
+	p := testenv.Pooler("b", 0)
+	if err := f.clients.Sites["b"].Get(ctx, client.ObjectKeyFromObject(p), p); err != nil {
+		t.Fatal(err)
+	}
+	if n, _, _ := unstructured.NestedInt64(p.Object, "spec", "instances"); n != 2 {
+		t.Errorf("Pooler pg-b-pooler-rw has %d instances, want the ledger's 2", n)
+	}
+	if len(f.git.Commits) != 1 {
+		t.Fatalf("%d commits, want 1", len(f.git.Commits))
+	}
+	for _, c := range f.git.Commits[0].Changes {
+		if c.Site == "b" && c.Object.Kind == "Pooler" && (c.Value == nil || *c.Value != "2") {
+			t.Errorf("the commit sets Pooler instances at b to %v, want the ledger's 2", c.Value)
+		}
+	}
+}
