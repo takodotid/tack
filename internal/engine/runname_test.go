@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/engine"
 )
@@ -123,5 +125,23 @@ func TestRunNamesAllTaken(t *testing.T) {
 	}
 	if len(f.flux.Calls) > 0 {
 		t.Errorf("the run changed something: %v", f.flux.Calls)
+	}
+}
+
+// #35 row 35 (RFC0003 Requirement 7). A name taken by an abandoned run,
+// such as one that lost a race of two tack processes, is free for the
+// next name: the abandoned run never goes on.
+func TestRunNameTakenByAbandonedRun(t *testing.T) {
+	f := newFixture(t)
+	other := f.existing("b", "")
+	other.Status = failoverv1.SiteFailoverStatus{Abandoned: &failoverv1.Abandonment{At: metav1.Now(), Reason: "another run was created at the same time"}}
+	if err := f.env("b").Ledger.UpdateStatus(context.Background(), other); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.env("b").Start(context.Background(), f.plan("b", failoverv1.ModePlanned), engine.Options{}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if sf := f.ledgerNamed("b", "run-1-2"); sf.Status.State != failoverv1.RunSucceeded {
+		t.Fatalf("run-1-2 is %s: %s", sf.Status.State, sf.Status.Message)
 	}
 }

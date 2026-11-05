@@ -101,6 +101,30 @@ func TestRunThatLosesTheRaceEndsBeforeItsSteps(t *testing.T) {
 	}
 }
 
+// #35 row 35 (RFC0003 Requirement 8). A run that cannot search for other
+// runs once its ledger exists cannot tell that no other run started: it
+// ends the same way, before its first status write.
+func TestRunThatCannotSearchAgainEnds(t *testing.T) {
+	f := newFixture(t)
+	env := f.env("b")
+	searches := 0
+	env.Runs = func(context.Context, kube.Clients) ([]failoverv1.SiteFailover, error) {
+		searches++
+		return nil, errors.New("site a: list runs: the server is not ready")
+	}
+	err := env.Start(context.Background(), f.plan("b", failoverv1.ModePlanned), engine.Options{})
+	if err == nil || !strings.Contains(err.Error(), "the search for other runs after the ledger's creation failed: site a: list runs") ||
+		!strings.Contains(err.Error(), "is abandoned") {
+		t.Fatalf("err %v", err)
+	}
+	if searches != 1 || len(f.flux.Calls) != 0 {
+		t.Errorf("%d searches, Flux calls %v", searches, f.flux.Calls)
+	}
+	if sf := f.ledger("b"); sf.Status.Abandoned == nil || sf.Status.State != "" || len(sf.Status.Steps) != 0 {
+		t.Errorf("abandoned %v, state %q, %d steps", sf.Status.Abandoned, sf.Status.State, len(sf.Status.Steps))
+	}
+}
+
 // #35 row 35. The run that won goes on: the abandoned run, created after
 // it, ran no step, so it neither stops the winner's start nor refuses its
 // resume as a newer run.
