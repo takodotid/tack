@@ -437,7 +437,7 @@ func (r *runner) beforePromotion(ctx context.Context) error {
 	to := r.sf.Spec.To
 	topo, err := r.Driver.Discover(ctx, &r.sf.Spec.Workload.Spec, runChecks{r: r, skip: to})
 	if err != nil {
-		return err
+		return fmt.Errorf("the read before the promotion: %w", err)
 	}
 	for _, s := range topo.Sites {
 		if s.Name == to || !s.Reachable {

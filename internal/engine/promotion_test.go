@@ -165,6 +165,29 @@ func TestSiteLossResumeStopsBeforePromotionWhenFromPrimaryAgain(t *testing.T) {
 	}
 }
 
+// The read before the promotion fails at a site that answers: the run
+// stops with StepFailed before promote-b, which keeps its state, and b is
+// not promoted. It cannot tell that the site is not primary.
+func TestReadBeforePromotionErrorStops(t *testing.T) {
+	f := newFixture(t)
+	f.diesBeforePromotion(f.plan("b", failoverv1.ModePlanned))
+	if err := f.clients.Sites["a"].Delete(context.Background(), testenv.Pooler("a", 0)); err != nil {
+		t.Fatal(err)
+	}
+	before := resourceVersion(t, f.clients.Sites["b"], "Cluster", "pg-b")
+	sf, err := f.resume("b", engine.Options{})
+	if !errors.Is(err, engine.ErrStopped) || sf.Status.Reason != failoverv1.ReasonStepFailed ||
+		!strings.HasPrefix(sf.Status.Message, "step promote-b: the read before the promotion: site a: read Pooler") {
+		t.Fatalf("err %v, %s: %s", err, sf.Status.Reason, sf.Status.Message)
+	}
+	if st := stepState(sf, "promote-b"); st != failoverv1.StepPending {
+		t.Errorf("promote-b is %s, want Pending", st)
+	}
+	if after := resourceVersion(t, f.clients.Sites["b"], "Cluster", "pg-b"); after != before {
+		t.Errorf("Cluster pg-b changed: resourceVersion %s, then %s", before, after)
+	}
+}
+
 // A planned run whose old primary gives no answer when the run resumes
 // before the promotion: the read before the promotion does not stop it.
 // b promotes with a's token, and the run stops at the first step at a, as
