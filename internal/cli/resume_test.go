@@ -158,3 +158,30 @@ func TestResumeRefusesAnotherHeadBeforeAsking(t *testing.T) {
 		t.Errorf("%d cluster writes, Flux %v", f.clients.Writes, f.flux.Calls)
 	}
 }
+
+// #35 row 43. A ledger that an older Tack wrote may hold a URL's password
+// in its messages. tack status, its YAML and the error of tack resume
+// print none ([RFC#0009] Requirement 10).
+func TestOutputRedactsOlderLedgers(t *testing.T) {
+	const url = "https://user:tok3n-secret@git.example.invalid/gitops.git"
+	sf := stoppedRun(t, "pg-main-earlier")
+	sf.Status.Message = "step hold-a-cluster-pg-a: fetch " + url + ": 403"
+	sf.Status.Steps[0].Message = "fetch " + url + ": 403"
+	sf.Status.Abandoned = &failoverv1.Abandonment{At: metav1.NewTime(fixedNow), Reason: "the search failed: Get " + url + ": EOF"}
+	for _, args := range [][]string{
+		{"status", "pg-main-earlier"},
+		{"status", "pg-main-earlier", "-o", "yaml"},
+		{"resume", "pg-main-earlier", "--yes"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": append(testenv.Site("b", "a", 0), sf.DeepCopy())})
+			out, _ := run(t, f, append(args, "-f", "testdata/workload.yaml")...)
+			if strings.Contains(out, "tok3n-secret") {
+				t.Errorf("the password is printed:\n%s", out)
+			}
+			if !strings.Contains(out, "https://***@git.example.invalid/gitops.git") {
+				t.Errorf("no redacted URL:\n%s", out)
+			}
+		})
+	}
+}

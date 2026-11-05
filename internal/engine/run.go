@@ -18,6 +18,7 @@ import (
 	"github.com/takodotid/tack/internal/driver"
 	"github.com/takodotid/tack/internal/fault"
 	"github.com/takodotid/tack/internal/kube"
+	"github.com/takodotid/tack/internal/redact"
 	"github.com/takodotid/tack/internal/stop"
 )
 
@@ -983,8 +984,8 @@ func (r *runner) endPhase(p failoverv1.Phase, now metav1.Time) {
 // writeTimeout bounds a ledger write, its repeats included.
 const writeTimeout = 30 * time.Second
 
-// write records the status. It outlives a cancelled run, so an interrupt
-// is still recorded. A write that got no answer, or an answer that the API
+// write records the status, its messages cleaned (Clean). It outlives a
+// cancelled run, so an interrupt is still recorded. A write that got no answer, or an answer that the API
 // server cannot serve it now, is repeated with the same resourceVersion
 // until writeTimeout ([RFC#0003] Requirement 5). A repeat that conflicts
 // may follow a write that landed without its answer: the ledger is read,
@@ -993,6 +994,7 @@ const writeTimeout = 30 * time.Second
 func (e *Env) write(ctx context.Context, sf *failoverv1.SiteFailover) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
 	defer cancel()
+	cleanStatus(&sf.Status)
 	sent := sf.DeepCopy()
 	start := e.now()
 	for attempt := 1; ; attempt++ {
@@ -1034,9 +1036,11 @@ func sameStatus(a, b *failoverv1.SiteFailoverStatus) bool {
 	return aerr == nil && berr == nil && bytes.Equal(ja, jb)
 }
 
+// printf prints a progress line, cleaned of URL credentials: it may carry
+// an outside error.
 func (e *Env) printf(format string, a ...any) {
 	if e.Out != nil {
-		fmt.Fprintf(e.Out, format, a...)
+		fmt.Fprint(e.Out, redact.Text(fmt.Sprintf(format, a...)))
 	}
 }
 

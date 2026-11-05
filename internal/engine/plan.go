@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -15,6 +14,7 @@ import (
 	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/driver"
 	"github.com/takodotid/tack/internal/kube"
+	"github.com/takodotid/tack/internal/redact"
 )
 
 // LabelWorkload carries the workload's name on its SiteFailover objects.
@@ -403,7 +403,7 @@ func Compose(in Inputs) (*failoverv1.SiteFailover, error) {
 	}
 	add(failoverv1.Step{
 		ID: "git-commit", Phase: failoverv1.PhasePromoteToGitOps, Type: failoverv1.StepGit,
-		Description: fmt.Sprintf("commit the live state to %s branch %s", Redact(spec.Git.URL), spec.Git.Branch),
+		Description: fmt.Sprintf("commit the live state to %s branch %s", redact.Text(spec.Git.URL), spec.Git.Branch),
 		Git: &failoverv1.GitStep{
 			Changes: in.GitChanges,
 			Message: commitMessage(in.Workload, in.From, in.To, in.Mode, in.Run),
@@ -520,11 +520,6 @@ func deferrable(req driver.Request, site string) bool {
 func commitMessage(workload, from, to string, mode failoverv1.Mode, run string) string {
 	return fmt.Sprintf("tack: %s primary %s to %s (%s)\n\nRun %s, mode %s.", workload, from, to, strings.ToLower(string(mode)), run, mode)
 }
-
-var userinfo = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/\s]+@`)
-
-// Redact hides the user and password of every URL in s.
-func Redact(s string) string { return userinfo.ReplaceAllString(s, "${1}***@") }
 
 // fingerprint reads the fingerprint of a site's cluster. The site has just
 // answered its check, so a read that gets no answer, or a 5xx or 429, is a

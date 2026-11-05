@@ -14,6 +14,7 @@ import (
 	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/driver"
 	"github.com/takodotid/tack/internal/engine"
+	"github.com/takodotid/tack/internal/redact"
 	"github.com/takodotid/tack/internal/stop"
 )
 
@@ -60,7 +61,7 @@ func (r *Repo) Commit(ctx context.Context, w *failoverv1.WorkloadSpec, req engin
 			return head, nil
 		}
 		return "", stop.AskHead(failoverv1.ReasonGitChanged, head,
-			"branch %s of %s is at %s, but the run's base is %s: Git changed during the run", c.branch, Redact(c.url), head, req.Base)
+			"branch %s of %s is at %s, but the run's base is %s: Git changed during the run", c.branch, redact.Text(c.url), head, req.Base)
 	}
 
 	if err := r.reset(ctx, c, base); err != nil {
@@ -256,10 +257,10 @@ func (r *Repo) push(ctx context.Context, c *clone, commit string) error {
 		if !strings.HasPrefix(l, "!") {
 			continue
 		}
-		status := Redact(strings.TrimSpace(l[1:]))
+		status := redact.Text(strings.TrimSpace(l[1:]))
 		if strings.Contains(l, "[rejected]") {
 			return stop.Ask(failoverv1.ReasonGitChanged,
-				"the push of %s to branch %s of %s was rejected because the branch moved: Git changed during the run (%s)", commit, c.branch, Redact(c.url), status)
+				"the push of %s to branch %s of %s was rejected because the branch moved: Git changed during the run (%s)", commit, c.branch, redact.Text(c.url), status)
 		}
 		return fmt.Errorf("the remote refused the push of %s to branch %s: %s", commit, c.branch, status)
 	}
@@ -309,7 +310,7 @@ func (r *Repo) find(ctx context.Context, c *clone, revision string) (string, err
 		}
 	}
 	if err != nil {
-		return "", fmt.Errorf("commit %s is not in branch %s of %s", revision, c.branch, Redact(c.url))
+		return "", fmt.Errorf("commit %s is not in branch %s of %s", revision, c.branch, redact.Text(c.url))
 	}
 	return commit, nil
 }

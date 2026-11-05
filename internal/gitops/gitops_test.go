@@ -766,19 +766,9 @@ func TestClose(t *testing.T) {
 	}
 }
 
-func TestRedact(t *testing.T) {
-	for in, want := range map[string]string{
-		"fetch https://user:secret@git.example.invalid/r.git failed": "fetch https://***@git.example.invalid/r.git failed",
-		"https://tok3n@git.example.invalid/r.git":                    "https://***@git.example.invalid/r.git",
-		"https://user:p@ss@git.example.invalid/r.git":                "https://***@git.example.invalid/r.git",
-		"ssh://git@git.example.invalid/r.git":                        "ssh://***@git.example.invalid/r.git",
-		"git@git.example.invalid:r.git":                              "git@git.example.invalid:r.git",
-		"https://git.example.invalid/a@b":                            "https://git.example.invalid/a@b",
-	} {
-		if got := Redact(in); got != want {
-			t.Errorf("Redact(%q) = %q, want %q", in, got, want)
-		}
-	}
+// git's messages pass through the shared redact.Text: a failed command
+// never shows the URL's password.
+func TestGitErrorsAreRedacted(t *testing.T) {
 	e := &gitError{args: []string{"fetch"}, stderr: "fatal: unable to access 'https://user:secret@git.example.invalid/r.git/'"}
 	if strings.Contains(e.Error(), "secret") {
 		t.Errorf("gitError shows the password: %s", e)
