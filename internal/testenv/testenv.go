@@ -217,12 +217,14 @@ func Object(apiVersion, kind, namespace, name string, fields map[string]any) *un
 }
 
 // Flux is a fake engine.Flux. Every object is applied by Kustomization
-// flux-system/<site>.
+// flux-system/<site>, unless Owners names its owner.
 type Flux struct {
 	mu       sync.Mutex
 	Revision string
-	Held     map[string]string
-	Calls    []string
+	// Owners is how Flux applies an object, by <site>/<kind>/<name>.
+	Owners map[string]engine.Owner
+	Held   map[string]string
+	Calls  []string
 	// Fail makes a method return an error, by method name.
 	Fail map[string]error
 	// GitDown makes a Git fetch hang for half the timeout, as a
@@ -245,7 +247,12 @@ func (f *Flux) call(name string, a ...any) error {
 func key(site string, o failoverv1.ObjectRef) string { return site + "/" + o.Kind + "/" + o.Name }
 
 // Owner implements engine.Flux.
-func (f *Flux) Owner(_ context.Context, site string, _ failoverv1.ObjectRef) (engine.Owner, error) {
+func (f *Flux) Owner(_ context.Context, site string, obj failoverv1.ObjectRef) (engine.Owner, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if o, ok := f.Owners[key(site, obj)]; ok {
+		return o, nil
+	}
 	return engine.Owner{Kustomization: &failoverv1.ObjectKey{Namespace: "flux-system", Name: site}}, nil
 }
 
