@@ -18,6 +18,7 @@ import (
 	"github.com/takodotid/tack/internal/driver"
 	"github.com/takodotid/tack/internal/engine"
 	"github.com/takodotid/tack/internal/kube"
+	"github.com/takodotid/tack/internal/version"
 )
 
 // Name is the driver's name in the Workload.
@@ -327,8 +328,8 @@ func (d Driver) Steps(w *failoverv1.WorkloadSpec, r driver.Request) ([]failoverv
 		follow = append(follow, failoverv1.FollowUp{
 			Site:   from.Name,
 			Action: engine.FollowUpRebuild,
-			Reason: fmt.Sprintf("Cluster %s was promoted without a token, so Cluster %s may hold writes that %s lacks and cannot follow it: recreate %s from %s (docs/runbooks/rebuild-old-primary.md)",
-				toName, from.CNPG.Cluster.Name, toName, from.CNPG.Cluster.Name, toName),
+			Reason: fmt.Sprintf("Cluster %s was promoted without a token, so Cluster %s may hold writes that %s lacks and cannot follow it: recreate %s from %s (%s)",
+				toName, from.CNPG.Cluster.Name, toName, from.CNPG.Cluster.Name, toName, version.DocLink("docs/runbooks/rebuild-old-primary.md")),
 		})
 	default:
 		return nil, nil, fmt.Errorf("unknown mode %q", r.Mode)

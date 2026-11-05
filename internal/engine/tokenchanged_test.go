@@ -7,6 +7,7 @@ import (
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/engine"
+	"github.com/takodotid/tack/internal/version"
 )
 
 // Issue #46, from PR #48. A planned run from a to b dies after
@@ -31,7 +32,7 @@ func TestResumeStopsWhenTokenChanged(t *testing.T) {
 	if !errors.Is(err, engine.ErrStopped) || sf.Status.Reason != failoverv1.ReasonTokenMissing {
 		t.Fatalf("err %v, %s %s: %s", err, sf.Status.State, sf.Status.Reason, sf.Status.Message)
 	}
-	for _, want := range []string{"step promote-b: Cluster db/pg-a now has another value at {.status.demotionToken}", "captured as demotionToken", "docs/runbooks/abandon-run.md"} {
+	for _, want := range []string{"step promote-b: Cluster db/pg-a now has another value at {.status.demotionToken}", "captured as demotionToken", version.DocLink("docs/runbooks/abandon-run.md")} {
 		if !strings.Contains(sf.Status.Message, want) {
 			t.Errorf("message %q lacks %q", sf.Status.Message, want)
 		}

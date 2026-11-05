@@ -120,10 +120,10 @@ Release
         check that the generation of 2 released objects did not change
 
 Follow-ups for the operator:
-  site a: Rebuild: Cluster pg-b was promoted without a token, so Cluster pg-a may hold writes that pg-b lacks and cannot follow it: recreate pg-a from pg-b (docs/runbooks/rebuild-old-primary.md)
+  site a: Rebuild: Cluster pg-b was promoted without a token, so Cluster pg-a may hold writes that pg-b lacks and cannot follow it: recreate pg-a from pg-b (https://github.com/takodotid/tack/blob/main/docs/runbooks/rebuild-old-primary.md)
 
 Notes:
-  site loss: Tack cannot tell a lost site from one cut off from this host. If site a still runs, it stays primary until Flux there applies the run's commit or Tack fences it. Confirm the loss and fence it first: docs/runbooks/site-loss.md
+  site loss: Tack cannot tell a lost site from one cut off from this host. If site a still runs, it stays primary until Flux there applies the run's commit or Tack fences it. Confirm the loss and fence it first: https://github.com/takodotid/tack/blob/main/docs/runbooks/site-loss.md
   site a is unreachable: connection refused; the steps at site a wait for it to come back
   Git: git: remote unreachable; the Git step waits for Git (break-glass)
 

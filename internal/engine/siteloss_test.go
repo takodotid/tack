@@ -8,6 +8,7 @@ import (
 	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/driver"
 	"github.com/takodotid/tack/internal/engine"
+	"github.com/takodotid/tack/internal/version"
 )
 
 // Issue #26. Tack cannot tell a lost site from one cut off from the
@@ -24,7 +25,7 @@ func TestSiteLossPlanNotesRunbook(t *testing.T) {
 	}
 	found := false
 	for _, n := range p.Notes {
-		found = found || strings.Contains(n, "cut off from this host") && strings.Contains(n, "site a") && strings.Contains(n, "docs/runbooks/site-loss.md")
+		found = found || strings.Contains(n, "cut off from this host") && strings.Contains(n, "site a") && strings.Contains(n, version.DocLink("docs/runbooks/site-loss.md"))
 	}
 	if !found {
 		t.Errorf("notes %q lack the warning", p.Notes)

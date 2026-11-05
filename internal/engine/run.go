@@ -20,6 +20,7 @@ import (
 	"github.com/takodotid/tack/internal/kube"
 	"github.com/takodotid/tack/internal/redact"
 	"github.com/takodotid/tack/internal/stop"
+	"github.com/takodotid/tack/internal/version"
 )
 
 // Options are the operator's decisions for one invocation of run or resume.
@@ -555,8 +556,8 @@ func (r *runner) recheck(ctx context.Context) error {
 		}
 	}
 	if _, _, err := r.Driver.Plan(&r.sf.Spec.Workload.Spec, topo, req); err != nil {
-		return fmt.Errorf("the read before the first Failover step: driver %s no longer allows the run: %v. No Failover step of this run ran. When the sites are back as the plan read them, resume; else abandon the run (docs/runbooks/abandon-run.md) and plan again",
-			r.sf.Spec.Workload.Spec.Driver, err)
+		return fmt.Errorf("the read before the first Failover step: driver %s no longer allows the run: %v. No Failover step of this run ran. When the sites are back as the plan read them, resume; else abandon the run (%s) and plan again",
+			r.sf.Spec.Workload.Spec.Driver, err, version.DocLink("docs/runbooks/abandon-run.md"))
 	}
 	r.rechecked = true
 	return nil
@@ -730,12 +731,12 @@ func (r *runner) readOthers(ctx context.Context, i int) error {
 		switch {
 		case !fences && !promoted:
 			return stop.Ask(failoverv1.ReasonFencedSiteIsPrimary,
-				"site %s %s (%s). Promoting %s gives two primaries, and no step of this run is left to fence %s, so --fence cannot help. The workload was changed outside this run, such as by a recovery by hand, and the run's plan may be stale: see docs/runbooks/abandon-run.md",
-				s.Name, what, s.Summary, to, s.Name)
+				"site %s %s (%s). Promoting %s gives two primaries, and no step of this run is left to fence %s, so --fence cannot help. The workload was changed outside this run, such as by a recovery by hand, and the run's plan may be stale: see %s",
+				s.Name, what, s.Summary, to, s.Name, version.DocLink("docs/runbooks/abandon-run.md"))
 		case !fences:
 			return stop.Ask(failoverv1.ReasonFencedSiteIsPrimary,
-				"site %s %s (%s), and so does %s, which this run promoted: two primaries. No step of this run is left to fence %s, so --fence cannot help. The workload was changed outside this run, such as by a recovery by hand: see docs/runbooks/abandon-run.md",
-				s.Name, what, s.Summary, to, s.Name)
+				"site %s %s (%s), and so does %s, which this run promoted: two primaries. No step of this run is left to fence %s, so --fence cannot help. The workload was changed outside this run, such as by a recovery by hand: see %s",
+				s.Name, what, s.Summary, to, s.Name, version.DocLink("docs/runbooks/abandon-run.md"))
 		case !fence && !promoted:
 			return stop.Ask(failoverv1.ReasonFencedSiteIsPrimary,
 				"site %s %s (%s), and this run fences it only after it promotes %s. Check it, then resume with --fence %s: %s and %s are then both primary until the run fences %s",
@@ -749,8 +750,8 @@ func (r *runner) readOthers(ctx context.Context, i int) error {
 		// site is primary: both may take writes until the run fences it
 		// (#46).
 		fenced = append(fenced, failoverv1.FollowUp{Site: s.Name, Action: FollowUpRebuild,
-			Reason: fmt.Sprintf("site %s %s while this run promoted %s, which the operator let go on with --fence %s, so %s may hold writes that %s lacks: recreate its member from %s (docs/runbooks/rebuild-old-primary.md)",
-				s.Name, what, to, s.Name, s.Name, to, to)})
+			Reason: fmt.Sprintf("site %s %s while this run promoted %s, which the operator let go on with --fence %s, so %s may hold writes that %s lacks: recreate its member from %s (%s)",
+				s.Name, what, to, s.Name, s.Name, to, to, version.DocLink("docs/runbooks/rebuild-old-primary.md"))})
 	}
 	if i == p {
 		if err := r.checkCaptured(ctx, i); err != nil {
@@ -821,8 +822,8 @@ func (r *runner) checkCaptured(ctx context.Context, i int) error {
 				now = "no value"
 			}
 			return stop.Ask(failoverv1.ReasonTokenMissing,
-				"%s now has %s at %s, not the value step %s captured as %s: the workload was changed outside this run, such as a demotion by hand after a promotion by hand, and the run must not promote with %s. The run's plan may be stale: see docs/runbooks/abandon-run.md",
-				refString(c.Object), now, c.JSONPath, s.ID, c.Into, c.Into)
+				"%s now has %s at %s, not the value step %s captured as %s: the workload was changed outside this run, such as a demotion by hand after a promotion by hand, and the run must not promote with %s. The run's plan may be stale: see %s",
+				refString(c.Object), now, c.JSONPath, s.ID, c.Into, c.Into, version.DocLink("docs/runbooks/abandon-run.md"))
 		}
 	}
 	return nil

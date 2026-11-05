@@ -10,6 +10,7 @@ import (
 	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/driver"
 	"github.com/takodotid/tack/internal/engine"
+	"github.com/takodotid/tack/internal/version"
 )
 
 // #38 item 8. A lost site behind a load balancer answers 503. An answer
@@ -27,7 +28,7 @@ func TestSiteLossPlanRefusesSiteThatAnswers503(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "no healthy upstream") {
 			t.Fatalf("%s: plan: %v, want a refusal with the site's answer", mode, err)
 		}
-		runbook := strings.Contains(err.Error(), "docs/runbooks/site-loss.md#when-tack-refuses-the-lost-site")
+		runbook := strings.Contains(err.Error(), version.DocLink("docs/runbooks/site-loss.md#when-tack-refuses-the-lost-site"))
 		if runbook != (mode == failoverv1.ModeSiteLoss) {
 			t.Errorf("%s: plan: %v; names the runbook: %v", mode, err, runbook)
 		}

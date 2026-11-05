@@ -21,6 +21,7 @@ import (
 	"github.com/takodotid/tack/internal/config"
 	"github.com/takodotid/tack/internal/redact"
 	"github.com/takodotid/tack/internal/stop"
+	"github.com/takodotid/tack/internal/version"
 )
 
 // FieldManager is the field manager of Tack's changes to live objects.
@@ -401,8 +402,8 @@ func (r *runner) checkHeld(ctx context.Context, site string, obj failoverv1.Obje
 		return nil
 	case by == "":
 		return stop.Ask(failoverv1.ReasonStepFailed,
-			"%s at site %s is no longer held by this run, so Flux may apply Git over the change. Find who removed the hold, and why. If the workload was changed by hand, such as by a recovery after the run stopped, the run's plan may be stale: do not resume it, see docs/runbooks/abandon-run.md. Only if nothing else changed, annotate it again with kustomize.toolkit.fluxcd.io/reconcile=disabled and failover.tako.id/held-by=%s, then resume",
-			refString(obj), site, r.sf.Name)
+			"%s at site %s is no longer held by this run, so Flux may apply Git over the change. Find who removed the hold, and why. If the workload was changed by hand, such as by a recovery after the run stopped, the run's plan may be stale: do not resume it, see %s. Only if nothing else changed, annotate it again with kustomize.toolkit.fluxcd.io/reconcile=disabled and failover.tako.id/held-by=%s, then resume",
+			refString(obj), site, version.DocLink("docs/runbooks/abandon-run.md"), r.sf.Name)
 	}
 	return stop.Ask(failoverv1.ReasonHeldByAnotherRun,
 		"%s at site %s is held by run %s, which took it over: this run must not change it. See tack status %s", refString(obj), site, by, by)

@@ -9,6 +9,7 @@ import (
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/engine"
+	"github.com/takodotid/tack/internal/version"
 )
 
 // diesAt runs sf toward b in a process that dies as it starts step: every
@@ -65,7 +66,7 @@ func TestResumeAfterHandRecoveryStopsAfterDemotion(t *testing.T) {
 			if !strings.HasPrefix(sf.Status.Message, "step "+tt.step+": site a answers as primary") {
 				t.Errorf("message %q, want a stop before %s naming site a", sf.Status.Message, tt.step)
 			}
-			if !strings.Contains(sf.Status.Message, "docs/runbooks/abandon-run.md") || strings.Contains(sf.Status.Message, "resume with --fence") {
+			if !strings.Contains(sf.Status.Message, version.DocLink("docs/runbooks/abandon-run.md")) || strings.Contains(sf.Status.Message, "resume with --fence") {
 				t.Errorf("message %q: want the abandon runbook, and no --fence", sf.Status.Message)
 			}
 			if st := stepState(sf, tt.step); st != want {
@@ -89,7 +90,7 @@ func TestResumeAfterPromotionStopsWhenOldPrimaryIsPrimaryAgain(t *testing.T) {
 	if !errors.Is(err, engine.ErrStopped) || sf.Status.Reason != failoverv1.ReasonFencedSiteIsPrimary {
 		t.Fatalf("err %v, %s %s: %s", err, sf.Status.State, sf.Status.Reason, sf.Status.Message)
 	}
-	for _, want := range []string{"step wait-promoted-b: site a answers as primary", "which this run promoted: two primaries", "docs/runbooks/abandon-run.md"} {
+	for _, want := range []string{"step wait-promoted-b: site a answers as primary", "which this run promoted: two primaries", version.DocLink("docs/runbooks/abandon-run.md")} {
 		if !strings.Contains(sf.Status.Message, want) {
 			t.Errorf("message %q lacks %q", sf.Status.Message, want)
 		}

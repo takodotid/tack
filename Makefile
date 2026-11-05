@@ -3,7 +3,7 @@ SHELL := /usr/bin/env bash -o pipefail
 GO ?= go
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 SOURCE_DATE_EPOCH ?= $(shell git log -1 --format=%ct 2>/dev/null || date +%s)
-LDFLAGS := -s -w -X github.com/takodotid/tack/internal/cli.Version=$(VERSION)
+LDFLAGS := -s -w -X github.com/takodotid/tack/internal/version.Version=$(VERSION)
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 
 .PHONY: all build dist generate verify test e2e e2e-up e2e-down tools clean

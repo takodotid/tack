@@ -15,6 +15,7 @@ import (
 	"github.com/takodotid/tack/internal/driver"
 	"github.com/takodotid/tack/internal/engine"
 	"github.com/takodotid/tack/internal/testenv"
+	"github.com/takodotid/tack/internal/version"
 )
 
 // diesBeforePromotion runs sf toward b in a process that dies as it starts
@@ -112,7 +113,7 @@ func TestResumeAfterHandRecoveryStopsBeforePromotion(t *testing.T) {
 				}
 			}
 			msg := f.stopsBeforePromotion("a", tt.opts)
-			for _, want := range []string{"site a answers as primary", "docs/runbooks/abandon-run.md"} {
+			for _, want := range []string{"site a answers as primary", version.DocLink("docs/runbooks/abandon-run.md")} {
 				if !strings.Contains(msg, want) {
 					t.Errorf("message %q lacks %q", msg, want)
 				}

@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra/doc"
+
+	"github.com/takodotid/tack/internal/version"
 )
 
 // WriteMan writes tack(1) and one page per subcommand into dir.
@@ -14,6 +16,6 @@ func WriteMan(dir string, date time.Time) error {
 	}
 	root := NewRoot(nil)
 	root.DisableAutoGenTag = true
-	header := &doc.GenManHeader{Title: "TACK", Section: "1", Date: &date, Source: "tack " + Version, Manual: "Tack Manual"}
+	header := &doc.GenManHeader{Title: "TACK", Section: "1", Date: &date, Source: "tack " + version.Version, Manual: "Tack Manual"}
 	return doc.GenManTree(root, header, dir)
 }
