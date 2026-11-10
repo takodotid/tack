@@ -590,7 +590,7 @@ func TestRunRefusesPlanThatWentStale(t *testing.T) {
 			`{"spec":{"replica":{"primary":"pg-b"}},"status":{"lastPromotionToken":"token-used","instancesReportedState":{"pg-b-1":{"isPrimary":true}}}}`)
 		done := siteLossRun("a", fixedNow)
 		done.Name, done.Spec.Mode, done.Status.FollowUps = "pg-main-other", failoverv1.ModePlanned, nil
-		if err := f.clients.Sites["b"].Create(context.Background(), done); err != nil {
+		if err := testenv.CreateLedger(context.Background(), f.clients.Sites["b"], done); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -612,7 +612,7 @@ func TestRunRefusesPlanAfterAnotherRun(t *testing.T) {
 	typeAfter(t, func() {
 		other := siteLossRun("a", fixedNow)
 		other.Name, other.Spec.Mode, other.Status.FollowUps = "pg-main-other", failoverv1.ModePlanned, nil
-		if err := f.clients.Sites["a"].Create(context.Background(), other); err != nil {
+		if err := testenv.CreateLedger(context.Background(), f.clients.Sites["a"], other); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -635,7 +635,7 @@ func TestRunIgnoresAbandonedRunAtConfirmation(t *testing.T) {
 		other := siteLossRun("a", fixedNow)
 		other.Name, other.Spec.Mode = "pg-main-other", failoverv1.ModePlanned
 		other.Status = failoverv1.SiteFailoverStatus{Abandoned: &failoverv1.Abandonment{At: metav1.NewTime(fixedNow), Reason: "run X of the workload (Running) was created at the same time"}}
-		if err := f.clients.Sites["a"].Create(context.Background(), other); err != nil {
+		if err := testenv.CreateLedger(context.Background(), f.clients.Sites["a"], other); err != nil {
 			t.Fatal(err)
 		}
 	})

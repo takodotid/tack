@@ -187,7 +187,7 @@ func TestPruneSearchesAgainAfterConfirmation(t *testing.T) {
 		"b": append(testenv.Site("b", "a", 0), doneRun(t, "pg-main-new", time.Minute), doneRun(t, "pg-main-old", 2*time.Hour)),
 	})
 	typeAfter(t, func() {
-		if err := f.clients.Sites["b"].Create(context.Background(), stoppedRun(t, "pg-main-started")); err != nil {
+		if err := testenv.CreateLedger(context.Background(), f.clients.Sites["b"], stoppedRun(t, "pg-main-started")); err != nil {
 			t.Fatal(err)
 		}
 	})

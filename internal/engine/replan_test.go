@@ -141,9 +141,11 @@ func TestResumeRefusesStepsTheDriverDoesNotPlan(t *testing.T) {
 			sf.Status.State = failoverv1.RunStopped
 			sf.Status.Reason = failoverv1.ReasonStepFailed
 			tt.change(sf)
+			status := sf.Status
 			if err := f.env("b").Ledger.Create(context.Background(), sf); err != nil {
 				t.Fatal(err)
 			}
+			sf.Status = status
 			if err := f.env("b").Ledger.UpdateStatus(context.Background(), sf); err != nil {
 				t.Fatal(err)
 			}

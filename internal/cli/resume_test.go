@@ -94,7 +94,7 @@ func TestResumeSearchesAgainAfterConfirmation(t *testing.T) {
 	typeAfter(t, func() {
 		later := stoppedRun(t, "pg-main-later")
 		later.Spec.TakeOver, later.Spec.To = "pg-main-earlier", "a"
-		if err := f.clients.Sites["a"].Create(context.Background(), later); err != nil {
+		if err := testenv.CreateLedger(context.Background(), f.clients.Sites["a"], later); err != nil {
 			t.Fatal(err)
 		}
 	})
