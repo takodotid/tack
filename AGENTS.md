@@ -131,6 +131,7 @@ Commit and push only when the operator asks.
 |---|---|
 | `make build` | builds `bin/tack` |
 | `make test` | unit and golden tests; `go test ./internal/cli -update` rewrites the golden files |
+| `make test-race` | the same tests with the race detector; about ten times slower |
 | `make verify` | regenerates the CRD and deepcopy code, checks gofmt and vet, fails on stale generated files |
 | `make dist` | static binaries for Linux, macOS and Windows, man pages, the CRD; the same bytes for the same commit |
 | `make sbom` | after `make dist`, a CycloneDX SBOM per archive |

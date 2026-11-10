@@ -6,7 +6,7 @@ SOURCE_DATE_EPOCH ?= $(shell git log -1 --format=%ct 2>/dev/null || date +%s)
 LDFLAGS := -s -w -X github.com/takodotid/tack/internal/version.Version=$(VERSION)
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 
-.PHONY: all build dist sbom lint generate verify test e2e e2e-up e2e-down tools clean
+.PHONY: all build dist sbom lint generate verify test test-race e2e e2e-up e2e-down tools clean
 
 all: verify test build
 
@@ -64,6 +64,10 @@ verify: generate
 ## test: unit and golden tests
 test: tools-go
 	$(GO) test ./...
+
+## test-race: the same tests with the race detector, which makes them about ten times slower
+test-race: tools-go
+	$(GO) test -race -timeout 50m ./...
 
 ## e2e: the end-to-end tests on kind clusters; see test/e2e/env/README.md
 e2e: tools-go
