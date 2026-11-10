@@ -173,3 +173,43 @@ func TestEventsUseFieldManagerTack(t *testing.T) {
 		t.Errorf("writes %s, want create Event: tack", got)
 	}
 }
+
+// RFC0003 Requirement 27: tack prune deletes a ledger only while it is the
+// object it read. A ledger written since, or another ledger with the name,
+// is not deleted.
+func TestDeleteNeedsTheLedgerRead(t *testing.T) {
+	ctx := context.Background()
+	c := fake.NewClientBuilder().WithScheme(kube.Scheme).WithStatusSubresource(&failoverv1.SiteFailover{}).Build()
+	s := &Store{Client: c, Namespace: "tack-system"}
+	if err := s.Create(ctx, &failoverv1.SiteFailover{ObjectMeta: metav1.ObjectMeta{Name: "run-1"}}); err != nil {
+		t.Fatal(err)
+	}
+	read, err := s.Get(ctx, "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	written := read.DeepCopy()
+	written.Status.State = failoverv1.RunSucceeded
+	if err := s.UpdateStatus(ctx, written); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Delete(ctx, read); !apierrors.IsConflict(err) {
+		t.Errorf("delete of a ledger written since it was read: %v, want a conflict", err)
+	}
+	if _, err := s.Get(ctx, "run-1"); err != nil {
+		t.Fatalf("the ledger is gone: %v", err)
+	}
+	if err := s.Delete(ctx, &failoverv1.SiteFailover{ObjectMeta: metav1.ObjectMeta{Name: "run-1"}}); err == nil {
+		t.Error("a delete without a resourceVersion went through")
+	}
+	current, err := s.Get(ctx, "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Delete(ctx, current); err != nil {
+		t.Fatalf("delete of the ledger as read: %v", err)
+	}
+	if _, err := s.Get(ctx, "run-1"); !apierrors.IsNotFound(err) {
+		t.Errorf("the ledger is still there: %v", err)
+	}
+}
