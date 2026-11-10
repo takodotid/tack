@@ -1132,7 +1132,7 @@ func TestUnreachableSiteDuringStatusAbandonAndGet(t *testing.T) {
 	if len(lines) != 2 || col < 0 || len(lines[1]) <= col {
 		t.Fatalf("kubectl get sfo %s has no ABANDONED column:\n%s", run, strings.Join(lines, "\n"))
 	}
-	if v := strings.Fields(lines[1][col:])[0]; v == "<none>" || v == "<unknown>" {
+	if v := strings.Fields(lines[1][col:]); len(v) == 0 || v[0] == "<none>" || v[0] == "<unknown>" {
 		t.Errorf("kubectl get sfo %s: ABANDONED %q, want the mark's age:\n%s", run, v, strings.Join(lines, "\n"))
 	}
 	out, code = tack(t, nil, "status", "-f", workload)
