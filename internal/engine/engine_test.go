@@ -341,13 +341,14 @@ func TestSiteLossHoldsWithoutGit(t *testing.T) {
 	f.clients.SetDown("a", true)
 	f.git.Unreachable = true
 	f.flux.GitDown = true // a fetch hangs for 2.5s, half the Flux timeout
-	start := time.Now()
 	sf, err := f.start("b", failoverv1.ModeSiteLoss, engine.Options{})
 	if !errors.Is(err, engine.ErrWaiting) || sf.Status.Reason != failoverv1.ReasonGitUnreachable {
 		t.Fatalf("err %v, state %s %s", err, sf.Status.State, sf.Status.Reason)
 	}
-	if took := time.Since(start); took >= 2500*time.Millisecond {
-		t.Errorf("the run took %s to reach the Git step: it waited on a Git fetch", took)
+	// A count, not the run's time: the race detector makes the run itself
+	// take longer than a fetch hangs (#58).
+	if f.flux.Hung != 0 {
+		t.Errorf("the run waited on %d Git fetches before the Git step", f.flux.Hung)
 	}
 	if field(f.cluster("b"), "status", "instancesReportedState", "pg-b-1", "isPrimary") != true {
 		t.Fatal("site b was not promoted")

@@ -271,6 +271,8 @@ type Flux struct {
 	// GitDown makes a Git fetch hang for half the timeout, as a
 	// GitRepository does when it cannot reach Git.
 	GitDown bool
+	// Hung counts the fetches that hung because of GitDown.
+	Hung int
 }
 
 // NewFlux returns a fake Flux at a revision.
@@ -363,6 +365,9 @@ func (f *Flux) Reconcile(ctx context.Context, site string, _ []failoverv1.Object
 	down := f.GitDown
 	f.mu.Unlock()
 	if fetchGit && down {
+		f.mu.Lock()
+		f.Hung++
+		f.mu.Unlock()
 		select {
 		case <-ctx.Done():
 			return "", nil, ctx.Err()
