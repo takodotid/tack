@@ -19,7 +19,7 @@ func (f *fixture) existing(site string, state failoverv1.RunState) *failoverv1.S
 	other := f.plan(site, failoverv1.ModePlanned)
 	ctx := context.Background()
 	l := f.env(site).Ledger
-	if err := createDropsStatus(ctx, l, other); err != nil {
+	if err := l.Create(ctx, other); err != nil {
 		f.t.Fatal(err)
 	}
 	if state != "" {
@@ -111,7 +111,7 @@ func TestRunNamesAllTaken(t *testing.T) {
 	for n := 2; n <= engine.MaxRunNames; n++ {
 		other := f.plan("b", failoverv1.ModePlanned)
 		other.Name = "run-1-" + string(rune('0'+n))
-		if err := createDropsStatus(context.Background(), f.env("b").Ledger, other); err != nil {
+		if err := f.env("b").Ledger.Create(context.Background(), other); err != nil {
 			t.Fatal(err)
 		}
 		other.Status.State = failoverv1.RunSucceeded

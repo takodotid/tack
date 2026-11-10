@@ -49,6 +49,7 @@ const (
 // name no ConfigMap or Secret (row 12).
 const rbacValues = `rbac:
   create: true
+  prune: true
   subjects:
   - {kind: ServiceAccount, name: ` + operator + `, namespace: ` + ledgerNS + `}
   objects:
@@ -428,7 +429,8 @@ func TestPlannedSwitchover(t *testing.T) {
 // assertRecorded checks, against a real API server, what a planned run
 // that succeeded in one process records: each progress line's time, the
 // ledger's history with the user the API server names, the tack that
-// wrote it, its Events, the field manager tack, and the column Reason
+// wrote it, its Events, the field manager tack, and the columns Reason and
+// Abandoned
 // ([RFC#0003] Requirements 22 to 25, [RFC#0009] Requirement 27).
 func assertRecorded(t *testing.T, run, out string) {
 	t.Helper()
@@ -454,8 +456,8 @@ func assertRecorded(t *testing.T, run, out string) {
 			t.Errorf("no Event %s on the ledger:\n%s", want, events)
 		}
 	}
-	if head := strings.SplitN(kubectl(t, "b", "-n", ledgerNS, "get", "sfo", run), "\n", 2)[0]; !regexp.MustCompile(`STATE\s+REASON\s+PHASE`).MatchString(head) {
-		t.Errorf("kubectl get sfo prints %q, want the column REASON after STATE", head)
+	if head := strings.SplitN(kubectl(t, "b", "-n", ledgerNS, "get", "sfo", run), "\n", 2)[0]; !regexp.MustCompile(`STATE\s+REASON\s+ABANDONED\s+PHASE\s+AGE`).MatchString(head) {
+		t.Errorf("kubectl get sfo prints %q, want the columns STATE, REASON, ABANDONED, PHASE, AGE ([RFC#0003] Requirement 15)", head)
 	}
 	status := tackOK(t, "status", run, "-f", workload)
 	if !strings.Contains(status, "History:\n") || !strings.Contains(status, "Written by: tack "+version.Version) || !strings.Contains(status, ", attempts 1\n") {
@@ -1042,5 +1044,136 @@ func TestGitDiffersFromLive(t *testing.T) {
 	assertPrimary(t, "a", "b")
 	if head := assertGitMatches(t, "a", "a", "b"); head != fixed {
 		t.Errorf("Git head %s, want %s", head, fixed)
+	}
+}
+
+// #59, observed in a two-site test of v1.3.0: with a site down, tack status
+// left out its runs and exited 0, and kubectl get sfo showed an abandoned
+// run as Stopped. Pausing a site's node stands in for a site that gives no
+// answer. A run dies before its first step, with its ledger at b and no
+// hold. With b down, tack status and tack abandon name b. With a down,
+// tack status lists the run and names a, tack abandon marks the run, and
+// kubectl get sfo at b shows the mark in its Abandoned column ([RFC#0003]
+// Requirement 15). Site a is the primary before the run.
+func TestUnreachableSiteDuringStatusAbandonAndGet(t *testing.T) {
+	_, code := tack(t, []string{"TACK_FAULT=hold-a-cluster-pg-a:before"}, "run", "-f", workload, "--to", "b", "--yes")
+	if code != exitFault {
+		t.Fatalf("exit %d, want the fault exit %d", code, exitFault)
+	}
+	run := runName(latestRun(t, "b"))
+
+	down := func(site string) (up func()) {
+		t.Helper()
+		docker(t, "pause", node(site))
+		paused := true
+		t.Cleanup(func() {
+			if paused {
+				exec.Command("docker", "unpause", node(site)).Run()
+			}
+		})
+		return func() {
+			t.Helper()
+			docker(t, "unpause", node(site))
+			paused = false
+			eventually(t, 3*time.Minute, "site "+site+" is healthy again", func() string {
+				if _, err := kubectlE(site, "get", "--raw", "/readyz"); err != nil {
+					return err.Error()
+				}
+				if p := jsonpath(t, site, "cluster", clusterName(site), "{.status.phase}"); p != "Cluster in healthy state" {
+					return "phase " + p
+				}
+				return ""
+			})
+		}
+	}
+	wants := func(what, out string, want ...string) {
+		t.Helper()
+		for _, w := range want {
+			if !strings.Contains(out, w) {
+				t.Errorf("%s lacks %q", what, w)
+			}
+		}
+	}
+
+	// The ledger's site gives no answer.
+	up := down("b")
+	out, code := tack(t, nil, "status", "-f", workload)
+	if code != 1 {
+		t.Errorf("status with b down: exit %d, want 1", code)
+	}
+	wants("status with b down", out, "Sites that gave no answer; their runs are not listed:\n  site b: ",
+		"the list of runs is incomplete: site b gave no answer")
+	out, code = tack(t, nil, "abandon", run, "-f", workload, "--yes")
+	if code != 1 {
+		t.Errorf("abandon with b down: exit %d, want 1", code)
+	}
+	wants("abandon with b down", out, fmt.Sprintf("run %q not found at any reachable site; site b gave no answer, so its runs were not read: ", run))
+	up()
+	if a := strings.TrimSpace(kubectl(t, "b", "-n", ledgerNS, "get", "sitefailover", run, "-o", "jsonpath={.status.abandoned}")); a != "" {
+		t.Fatalf("run %s was abandoned while its site gave no answer: %s", run, a)
+	}
+
+	// Another site gives no answer.
+	up = down("a")
+	out, code = tack(t, nil, "status", "-f", workload)
+	if code != 1 {
+		t.Errorf("status with a down: exit %d, want 1", code)
+	}
+	wants("status with a down", out, run, "Sites that gave no answer; their runs are not listed:\n  site a: ",
+		"the list of runs is incomplete: site a gave no answer")
+	out, code = tack(t, nil, "abandon", run, "-f", workload, "--reason", "e2e: a site gives no answer", "--yes")
+	if code != 0 {
+		t.Fatalf("abandon with a down: exit %d, want 0", code)
+	}
+	wants("abandon with a down", out, "run "+run+" abandoned", "kubectl get sfo shows the mark in its Abandoned column")
+	// The table, as an operator reads it: the column by its header, not
+	// the field by its path.
+	lines := strings.Split(strings.TrimSpace(kubectl(t, "b", "-n", ledgerNS, "get", "sfo", run)), "\n")
+	col := strings.Index(lines[0], "ABANDONED")
+	if len(lines) != 2 || col < 0 || len(lines[1]) <= col {
+		t.Fatalf("kubectl get sfo %s has no ABANDONED column:\n%s", run, strings.Join(lines, "\n"))
+	}
+	if v := strings.Fields(lines[1][col:]); len(v) == 0 || v[0] == "<none>" || v[0] == "<unknown>" {
+		t.Errorf("kubectl get sfo %s: ABANDONED %q, want the mark's age:\n%s", run, v, strings.Join(lines, "\n"))
+	}
+	out, code = tack(t, nil, "status", "-f", workload)
+	if code != 1 || !regexp.MustCompile(`(?m)^b\s+`+regexp.QuoteMeta(run)+`\s.*\sAbandoned\s`).MatchString(out) {
+		t.Errorf("status after the abandon, a down: exit %d, want 1 listing %s as Abandoned", code, run)
+	}
+	up()
+}
+
+// #58 row 1. Every run of the e2e is finished by now: tack prune deletes the
+// ledgers of old runs that succeeded, through the API servers'
+// preconditions, and keeps the newest and every abandoned or taken-over run
+// ([RFC#0003] Requirement 27). It runs as the ServiceAccount operator,
+// bound to the chart's roles with rbac.prune: row 16 is enough.
+func TestPrune(t *testing.T) {
+	abandoned := runName(latestRun(t, "b"))
+	restricted := operatorKubeconfig(t)
+	out, code := tack(t, nil, "prune", "--kubeconfig", restricted, "-f", workload, "--keep", "2", "--yes")
+	if code != 0 {
+		t.Fatalf("prune: exit %d, want 0", code)
+	}
+	deleted := regexp.MustCompile(`(?m)^`+stamp+`deleted   ledger `+ledgerNS+`/(\S+) at site (\S+)$`).FindAllStringSubmatch(out, -1)
+	if len(deleted) == 0 {
+		t.Fatal("prune deleted no ledger")
+	}
+	for _, d := range deleted {
+		if _, err := kubectlE(d[2], "-n", ledgerNS, "get", "sfo", d[1]); err == nil {
+			t.Errorf("run %s is still at site %s", d[1], d[2])
+		}
+	}
+	for _, want := range []string{abandoned + " ", "keep: abandoned", "keep: taken over", "keep: one of the 2 newest"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("prune lacks %q", want)
+		}
+	}
+	if _, err := kubectlE("b", "-n", ledgerNS, "get", "sfo", abandoned); err != nil {
+		t.Errorf("the abandoned run %s is gone: %v", abandoned, err)
+	}
+	out, code = tack(t, nil, "prune", "--kubeconfig", restricted, "-f", workload, "--keep", "2")
+	if code != 0 || !strings.Contains(out, "Nothing to delete.") {
+		t.Errorf("second prune: exit %d, want 0 with nothing to delete", code)
 	}
 }

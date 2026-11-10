@@ -27,8 +27,9 @@ ledger records them, and does not read the objects: a hold removed by hand
 is still listed. The runbook:
   ` + version.DocLink("docs/runbooks/abandon-run.md") + `
 
-kubectl get sfo still shows an abandoned run's last state, such as Stopped:
-tack status lists it as Abandoned.
+kubectl get sfo shows when the run was abandoned in its Abandoned column,
+from the CRD of tack v1.4.0 on. Its State column keeps the run's last
+state, such as Stopped. tack status lists the run as Abandoned.
 
 Abandon does not stop a tack process that runs the run: check first that
 none does. A step that runs, such as a promotion, still changes the
@@ -131,12 +132,13 @@ func newAbandon(o *options) *cobra.Command {
 			}
 			fmt.Fprintf(out, "run %s abandoned: tack resume refuses it, and a new run no longer waits for it\n", sf.Name)
 			// The State column reads status.state, which the mark leaves
-			// as it was ([RFC#0003] Limitations).
-			state := "empty"
+			// as it was; the Abandoned column reads the mark, at a site
+			// whose CRD has it ([RFC#0003] Requirement 15).
+			state := "stays empty"
 			if s := back.Status.State; s != "" {
-				state = "as " + string(s)
+				state = "keeps " + string(s)
 			}
-			fmt.Fprintf(out, "kubectl get sfo still shows its State %s: status.abandoned marks the run, and tack status lists it as Abandoned (%s)\n", state, version.DocLink("docs/operations.md#reading-a-run"))
+			fmt.Fprintf(out, "kubectl get sfo shows the mark in its Abandoned column, with the CRD of tack v1.4.0 or later at the ledger's site; its State column %s (%s)\n", state, version.DocLink("docs/operations.md#reading-a-run"))
 			return nil
 		},
 	}

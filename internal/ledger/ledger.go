@@ -63,6 +63,22 @@ func (s *Store) UpdateStatus(ctx context.Context, sf *failoverv1.SiteFailover) e
 	return served(s.Client.Status().Update(ctx, sf, client.FieldOwner(kube.FieldManager)))
 }
 
+// Delete deletes the ledger sf names, only while it is the object that was
+// read: the same resourceVersion, and the same UID when sf has one, as
+// every object an API server returns does ([RFC#0003] Requirement 27).
+func (s *Store) Delete(ctx context.Context, sf *failoverv1.SiteFailover) error {
+	if sf.ResourceVersion == "" {
+		return fmt.Errorf("ledger %s has no resourceVersion", sf.Name)
+	}
+	pre := client.Preconditions{ResourceVersion: &sf.ResourceVersion}
+	if sf.UID != "" {
+		pre.UID = &sf.UID
+	}
+	obj := &failoverv1.SiteFailover{}
+	obj.Namespace, obj.Name = s.Namespace, sf.Name
+	return served(s.Client.Delete(ctx, obj, pre))
+}
+
 // ListPage is the most ledgers List asks for in one request
 // ([RFC#0003] Requirement 26). The largest ledger of a run on 10 sites,
 // with a full history, is about 200 KB, so one answer holds at most about

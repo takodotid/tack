@@ -41,6 +41,7 @@ var Phases = []Phase{PhaseHold, PhaseFailover, PhasePromoteToGitOps, PhaseReleas
 // +kubebuilder:printcolumn:name="To",type=string,JSONPath=`.spec.to`
 // +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
 // +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.reason`
+// +kubebuilder:printcolumn:name="Abandoned",type=date,JSONPath=`.status.abandoned.at`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 type SiteFailover struct {

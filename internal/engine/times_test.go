@@ -129,9 +129,11 @@ func TestResumeEndsPhasesLeftUnfinished(t *testing.T) {
 		t.Fatalf("the v1.2.0 ledger has %d unfinished phases, want 3", unfinished)
 	}
 	ledger := f.env("a").Ledger
+	status := sf.Status
 	if err := ledger.Create(context.Background(), sf); err != nil {
 		t.Fatal(err)
 	}
+	sf.Status = status
 	if err := ledger.UpdateStatus(context.Background(), sf); err != nil {
 		t.Fatal(err)
 	}

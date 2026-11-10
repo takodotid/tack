@@ -9,17 +9,6 @@ import (
 	"github.com/takodotid/tack/internal/engine"
 )
 
-// createDropsStatus creates a ledger without its status, as the API server
-// does: the status subresource ignores status on create. The fake client
-// keeps it.
-func createDropsStatus(ctx context.Context, l engine.Ledger, sf *failoverv1.SiteFailover) error {
-	status := sf.Status
-	sf.Status = failoverv1.SiteFailoverStatus{}
-	err := l.Create(ctx, sf)
-	sf.Status = status
-	return err
-}
-
 // diesAfterCreate is a ledger whose process dies right after it created
 // the ledger: the first status write never happens.
 type diesAfterCreate struct {
@@ -28,7 +17,7 @@ type diesAfterCreate struct {
 }
 
 func (l *diesAfterCreate) Create(ctx context.Context, sf *failoverv1.SiteFailover) error {
-	return createDropsStatus(ctx, l.Ledger, sf)
+	return l.Ledger.Create(ctx, sf)
 }
 
 func (l *diesAfterCreate) UpdateStatus(ctx context.Context, sf *failoverv1.SiteFailover) error {
@@ -48,7 +37,7 @@ type interruptedAtCreate struct {
 }
 
 func (l *interruptedAtCreate) Create(ctx context.Context, sf *failoverv1.SiteFailover) error {
-	err := createDropsStatus(ctx, l.Ledger, sf)
+	err := l.Ledger.Create(ctx, sf)
 	l.cancel()
 	return err
 }

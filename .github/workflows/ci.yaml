@@ -26,6 +26,21 @@ jobs:
       - run: make test
       # The release's build, as its job test runs it, at a version that is no release.
       - run: hack/release/build.sh v0.0.0-ci
+  # The unit tests with the race detector: sites are checked at once ([RFC#0007] Requirement 10). About ten times
+  # slower than make test.
+  race:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: helm, pinned
+        run: hack/tools/install.sh "$RUNNER_TEMP/tools" helm && echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
+      - run: make test-race
   # The module's checksums, known vulnerabilities, the chart, and the pins ([RFC#0009] Requirements 25 and 26).
   lint:
     runs-on: ubuntu-26.04

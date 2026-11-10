@@ -54,6 +54,12 @@ rules:
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create"]
+  {{- if $rbac.prune }}
+  # Row 16, only with rbac.prune
+  - apiGroups: ["failover.tako.id"]
+    resources: ["sitefailovers"]
+    verbs: ["delete"]
+  {{- end }}
 {{- $namespaces := dict }}
 {{- range $i, $o := $rbac.objects | default list }}
 {{- if not $o.namespace }}

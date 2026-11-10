@@ -9,8 +9,9 @@
 | `tack status [RUN] --context site-b` | the same from one context, without the Workload file; `--namespace` when the ledger namespace is not `tack-system` |
 | `tack status RUN -f workload.yaml -o yaml` | the whole `SiteFailover` object |
 | `tack abandon RUN -f workload.yaml --reason TEXT` | marks a run that must never go on: [runbooks/abandon-run.md](runbooks/abandon-run.md) |
-| `kubectl --context site-b -n tack-system get sfo` | the ledgers at one site, with workload, mode, from, to, state, reason and phase. The State column of an abandoned run shows its last state, such as `Stopped`: `status.abandoned` marks it apart from `status.state` ([RFC#0003](../rfcs/RFC0003.md#limitations)) |
-| `kubectl --context site-b -n tack-system get sfo -o custom-columns=NAME:.metadata.name,STATE:.status.state,REASON:.status.reason,ABANDONED:.status.abandoned.at,TAKEN-OVER-BY:.status.supersededBy` | the ledgers at one site, with the time each was abandoned and the run that took each over, `<none>` otherwise |
+| `tack prune -f workload.yaml --keep N` | lists the workload's runs, and deletes the ledgers of old runs that succeeded: [Old ledgers](#old-ledgers) |
+| `kubectl --context site-b -n tack-system get sfo` | the ledgers at one site, with workload, mode, from, to, state, reason, how long ago each was abandoned (empty otherwise), phase and age. The State column of an abandoned run keeps its last state, such as `Stopped`: `status.abandoned` marks it apart from `status.state`. The Abandoned column comes with the CRD of v1.4.0 ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 15) |
+| `kubectl --context site-b -n tack-system get sfo -o custom-columns=NAME:.metadata.name,STATE:.status.state,REASON:.status.reason,ABANDONED:.status.abandoned.at,TAKEN-OVER-BY:.status.supersededBy` | the ledgers at one site, with the time each was abandoned and the run that took each over, `<none>` otherwise, with a CRD of any v1.3.0 or later release |
 | `kubectl --context site-b -n tack-system describe sfo RUN` | also the ledger's Events: each step's start and end, and each change of the run's state, for as long as the API server keeps Events (1 h by default) |
 
 Every `tack` command starts each progress line, such as a step or a retried check, with its time in UTC (`2026-10-27T10:15:00Z`), so a terminal's log lines up with the ledger and the API servers' audit logs ([RFC#0009](../rfcs/RFC0009.md#progress-and-status), Requirement 27). A read checks all its sites at once; the lines of its checks come grouped by site, in the order of the Workload's sites, each with the time it was printed, so a later site's lines can carry earlier times ([RFC#0007](../rfcs/RFC0007.md#requirements), Requirement 10). The credential plugins of the sites' contexts start at once too: when one prompts on the terminal, such as an OIDC login, log in to each context first, such as with `kubectl --context CTX get --raw /readyz` for each site ([RFC#0007](../rfcs/RFC0007.md#limitations)). The history in `status.history` keeps at most 100 entries: the first, and the newest ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 22).
@@ -106,7 +107,7 @@ The old primary may hold writes the new one lacks, and cannot follow it. Rebuild
 
 ## Old ledgers
 
-Tack never deletes a ledger. Each search for runs reads every ledger of the workload at each site that answers, in pages of 100 ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 26). `tack plan` and `tack status -f` search once, `tack resume` three times, `tack run` four times. The cost grows with the number of runs.
+Each search for runs reads every ledger of the workload at each site that answers, in pages of 100 ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 26). `tack plan` and `tack status -f` search once, `tack resume` three times, `tack run` four times. The cost grows with the number of runs.
 
 | Measured for #35 row 47 | Size |
 |---|---|
@@ -116,26 +117,27 @@ Tack never deletes a ledger. Each search for runs reads every ledger of the work
 | A search at one site with 1,000 ledgers of 13.5 KB | 13.5 MB, in 10 answers of 1.35 MB |
 | The list of `tack status -f` once its search is done, for 10,000 runs | 28 ms |
 
-Delete old ledgers by hand when their number slows the searches. Delete only what these rules allow:
+`tack prune -f workload.yaml --keep N` deletes the ledgers of old runs when their number slows the searches. It lists every run of the workload, newest first, with `delete` or why it keeps it, asks for the workload's name, searches again, then deletes one ledger at a time, oldest first. It needs row 16 of the [permissions](#permissions). The rules ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 27):
 
 | Rule | Why |
 |---|---|
-| Every site of the workload answers, and every run of the workload at every site is finished: `Succeeded` with no `Deferred` step, `Abandoned` or `TakenOver`. | Deleting a newer run lets an older unfinished run resume on a plan that no longer fits the sites ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 18). |
-| Delete only a `Succeeded` run with no `Deferred` step. Keep `Abandoned` and `TakenOver` runs. | They record holds that may be left in the cluster, and the take-over that ended them ([runbooks/abandon-run.md](runbooks/abandon-run.md), step 6). A `TakenOver` run whose mark did not land counts as ended only through the spec of the run that took it over. |
-| Keep the newest run of the workload. | It records the last switch. |
-| Keep a run with a follow-up `Rebuild` until the site's member was created again after the run started. | `tack plan` refuses a planned switchover to that member while such a run says it diverged ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 14). Deleting the ledger lifts the refusal. |
-| Delete by name, one run at a time, never by label selector or `--all`. | A selector also matches the runs these rules keep. |
+| Every site of the workload answers, and every run of the workload at every site is finished: `Succeeded` with no `Deferred` step, `Abandoned` or `TakenOver`. Otherwise prune deletes nothing. | Deleting a newer run lets an older unfinished run resume on a plan that no longer fits the sites ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 18). |
+| Delete only a `Succeeded` run with no `Deferred` step. Keep `Abandoned` and `TakenOver` runs. | They record holds that may be left in the cluster, and the take-over that ended them ([runbooks/abandon-run.md](runbooks/abandon-run.md), step 6). |
+| Keep the `--keep` newest runs that succeeded, at least 1. Abandoned and taken-over runs do not count among them: they are kept anyway. | The newest that succeeded records the last switch. |
+| Keep a run with a follow-up `Rebuild`. | `tack plan` refuses a planned switchover to that member while such a run says it diverged ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 14). Prune does not read the member: delete such a run by hand once the member was created again after the run started. |
+| Keep a run whose spec takes over a run that is kept, not abandoned, and not marked `status.supersededBy`. | That run counts as taken over only through this run's spec; without it, it would block every new run. |
+| Keep a run that a newer `tack` last wrote (`status.writtenBy`). | A newer release may need what it recorded. |
+| Delete by name, each only while it is the object that was read; stop at the first error. | A run that started, or a ledger written, while the operator confirmed is not deleted on a stale list. |
+
+To delete a kept `Rebuild` run by hand, once its member was rebuilt:
 
 ```sh
-# At every site: every run of the workload, its state, and whether it is abandoned or taken over
-kubectl --context "$ctx" -n tack-system get sfo -l failover.tako.id/workload=pg-main \
-  -o custom-columns=NAME:.metadata.name,STATE:.status.state,REASON:.status.reason,ABANDONED:.status.abandoned.at,TAKEN-OVER-BY:.status.supersededBy
-# One run: Succeeded, no Deferred step, no follow-up Rebuild
+# The run: Succeeded, no Deferred step, its follow-up Rebuild, and when the run started
 tack status RUN -f workload.yaml
+# The member at that site, created after the run started
+kubectl --context "$ctx" -n db get cluster pg-a -o jsonpath='{.metadata.creationTimestamp}'
 kubectl --context "$ctx" -n tack-system delete sfo RUN
 ```
-
-Deleting needs `delete` on `sitefailovers`, which the permissions table and the chart's roles do not grant: Tack itself never deletes.
 
 ## Permissions
 
@@ -143,7 +145,7 @@ Tack acts with the operator's credentials for each site's kube context. Every si
 
 | # | Resource | Verbs | Namespace | Commands | For |
 |---|---|---|---|---|---|
-| 1 | non-resource URL `/readyz` | get | | `plan`, `run`, `resume`, `status -f`, `abandon -f` | the check of a site's API ([RFC#0007](../rfcs/RFC0007.md#requirements), Requirement 5) |
+| 1 | non-resource URL `/readyz` | get | | `plan`, `run`, `resume`, `status -f`, `abandon -f`, `prune` | the check of a site's API ([RFC#0007](../rfcs/RFC0007.md#requirements), Requirement 5) |
 | 2 | non-resource URLs `/api`, `/apis` and below | get | | all | API discovery: the client maps each kind to its resource |
 | 3 | `namespaces`, name `kube-system` | get | | `plan`, `run`, `resume` | the site's cluster ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 19) |
 | 4 | `sitefailovers` (`failover.tako.id`) | list | the ledger's | all | the search for runs |
@@ -158,29 +160,32 @@ Tack acts with the operator's credentials for each site's kube context. Every si
 | 13 | `siteservices` (`strait.tako.id`) named in `spec.routing` | get | the SiteService's | `run`, `resume` | the routing check |
 | 14 | `events` | create | the ledger's | `run`, `resume`, `abandon` | the ledger's Events. Optional: without it, a run goes on without Events, and says so once ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 23) |
 | 15 | `selfsubjectreviews` (`authentication.k8s.io`) | create | | `run`, `resume`, `abandon` | the user in the ledger's history. Without it, the history names no user, and the run says so once |
+| 16 | `sitefailovers` | delete | the ledger's | `prune` | deleting the ledgers of old runs ([Old ledgers](#old-ledgers)) |
 
 | Fact | Detail |
 |---|---|
 | A read-only role | Rows 1 to 4 and the `get` of row 7 are enough for `tack plan` and `tack status`. |
+| Row 16 | Only `tack prune` needs it. The chart grants it only with `rbac.prune`. |
 | Rows 1, 2 and 15 | Kubernetes grants them to every authenticated user through the default ClusterRoleBindings `system:public-info-viewer`, `system:discovery` and `system:basic-user`. A cluster without those bindings must grant them. |
 | `resourceNames` | Rows 3 and 7 to 13 can name their objects. Rows 4 to 6 cannot: run names are generated, and `list` and `create` take no name. |
-| Checked | On the e2e's kind clusters, a ServiceAccount with exactly these rows, each named where the table allows, ran `tack plan`, `tack status`, a planned run with the routing check and a Kustomization with `postBuild`, a resume, a run with `--take-over`, and a site-loss run. Without row 3, `tack plan` fails with `namespaces "kube-system" is forbidden`; without the ConfigMap of row 12, the check before release stops with `StepFailed`. Rows 14 and 15 came after that check, with v1.3.0. The e2e's `TestRoutingFromStrait` now runs `tack plan`, a planned run with the routing check and `tack status` as a ServiceAccount bound to [the chart's roles](#the-charts-roles) and Kubernetes' default bindings only: the run records its Events (row 14) and the ServiceAccount as its history's user (row 15). The e2e has no `postBuild`, so it does not use row 12. |
+| Checked | On the e2e's kind clusters, a ServiceAccount with exactly these rows, each named where the table allows, ran `tack plan`, `tack status`, a planned run with the routing check and a Kustomization with `postBuild`, a resume, a run with `--take-over`, and a site-loss run. Without row 3, `tack plan` fails with `namespaces "kube-system" is forbidden`; without the ConfigMap of row 12, the check before release stops with `StepFailed`. Rows 14 and 15 came after that check, with v1.3.0, and row 16 with v1.4.0. The e2e's `TestRoutingFromStrait` now runs `tack plan`, a planned run with the routing check and `tack status` as a ServiceAccount bound to [the chart's roles](#the-charts-roles) and Kubernetes' default bindings only: the run records its Events (row 14) and the ServiceAccount as its history's user (row 15). The e2e has no `postBuild`, so it does not use row 12. Its `TestPrune` runs `tack prune` as that ServiceAccount, with `rbac.prune`, and deletes ledgers through row 16. |
 
 The runbooks' own `kubectl` commands need more, such as `patch` on `sitefailovers/status`; each runbook says so.
 
 ### The chart's roles
 
-The chart creates roles that grant exactly the rows above when `rbac.create` is `true`. It creates none by default ([RFC#0009](../rfcs/RFC0009.md#the-chart), Requirement 29).
+The chart creates roles that grant exactly the rows above when `rbac.create` is `true`, row 16 only when `rbac.prune` is `true` too. It creates none by default ([RFC#0009](../rfcs/RFC0009.md#the-chart), Requirement 29).
 
 | Role | Kind, namespace | Rows |
 |---|---|---|
 | `<release>-cluster` | ClusterRole | 1, 2, 3 and 15 |
-| `<release>-ledger` | Role, the release's namespace: install the chart in the ledger namespace | 4, 5, 6 and 14 |
+| `<release>-ledger` | Role, the release's namespace: install the chart in the ledger namespace | 4, 5, 6 and 14; 16 with `rbac.prune` |
 | `<release>-objects` | Role, each namespace of `rbac.objects` | 7 to 13, for the objects that entry names |
 
 | Value | Default | Meaning |
 |---|---|---|
 | `rbac.create` | `false` | Create the roles. |
+| `rbac.prune` | `false` | Also grant row 16, for `tack prune`. |
 | `rbac.subjects` | `[]` | Bind each role to these subjects, such as the operators' group: a ClusterRoleBinding, and a RoleBinding next to each Role. Empty binds nothing. |
 | `rbac.objects` | `[]` | Per namespace, the names of the Workload files' objects: `clusters`, `poolers`, `kustomizations`, `gitRepositories`, `configMaps`, `secrets`, `siteServices`. Each list is optional. `poolers` also grants `get` on the Deployment of the same name (row 9). A kind without names gets no rule. The chart fails on an entry without a namespace or without names, and on a namespace listed twice. Each namespace must exist before the install: Helm does not create it. |
 

@@ -73,6 +73,7 @@ func TestHelpLinksReleaseTag(t *testing.T) {
 	for cmd, want := range map[string]string{
 		"run":     "https://github.com/takodotid/tack/blob/v1.3.0/docs/runbooks/site-loss.md",
 		"abandon": "https://github.com/takodotid/tack/blob/v1.3.0/docs/runbooks/abandon-run.md",
+		"prune":   "https://github.com/takodotid/tack/blob/v1.3.0/docs/operations.md#old-ledgers",
 	} {
 		if !strings.Contains(help[cmd], want) {
 			t.Errorf("tack %s --help lacks %s:\n%s", cmd, want, help[cmd])

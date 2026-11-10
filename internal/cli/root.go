@@ -123,7 +123,7 @@ func NewRoot(f Factory) *cobra.Command {
 	}
 	root.PersistentFlags().StringVar(&o.kubeconfig, "kubeconfig", "", "kubeconfig file holding every site's context (default: the standard kubeconfig loading rules)")
 	root.Flags().BoolVar(&o.skill, "skill", false, "print a guide for AI agents as a skill document and exit")
-	root.AddCommand(newPlan(o), newRun(o), newResume(o), newStatus(o), newAbandon(o))
+	root.AddCommand(newPlan(o), newRun(o), newResume(o), newStatus(o), newAbandon(o), newPrune(o))
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return usageError{err} })
 	root.CompletionOptions.DisableDefaultCmd = true
 	return root

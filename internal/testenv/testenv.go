@@ -117,7 +117,10 @@ const User = "operator@example.com"
 
 // NewClient returns a fake client that knows the GVKs, takes Events, and
 // answers a SelfSubjectReview with User, as an API server does, without
-// storing it.
+// storing it. Like an API server, it drops a SiteFailover's status on
+// create, in the store and in the object it returns: the status
+// subresource ignores it (#38 item 4). Objects seeded with objs keep
+// theirs: they stand for ledgers written before.
 func NewClient(objs ...client.Object) client.Client {
 	mapper := meta.NewDefaultRESTMapper(nil)
 	for _, gvk := range GVKs {
@@ -137,10 +140,24 @@ func NewClient(objs ...client.Object) client.Client {
 					r.Status.UserInfo.Username = User
 					return nil
 				}
+				if sf, ok := o.(*failoverv1.SiteFailover); ok {
+					sf.Status = failoverv1.SiteFailoverStatus{}
+				}
 				return c.Create(ctx, o, opts...)
 			},
 		}).
 		Build()
+}
+
+// CreateLedger creates sf with its status, as a run writes a ledger: the
+// create, which drops the status, then a status write.
+func CreateLedger(ctx context.Context, c client.Client, sf *failoverv1.SiteFailover) error {
+	status := sf.Status
+	if err := c.Create(ctx, sf); err != nil {
+		return err
+	}
+	sf.Status = status
+	return c.Status().Update(ctx, sf)
 }
 
 // Events returns the Events recorded on the ledger run at the client c,
@@ -271,6 +288,8 @@ type Flux struct {
 	// GitDown makes a Git fetch hang for half the timeout, as a
 	// GitRepository does when it cannot reach Git.
 	GitDown bool
+	// Hung counts the fetches that hung because of GitDown.
+	Hung int
 }
 
 // NewFlux returns a fake Flux at a revision.
@@ -363,6 +382,9 @@ func (f *Flux) Reconcile(ctx context.Context, site string, _ []failoverv1.Object
 	down := f.GitDown
 	f.mu.Unlock()
 	if fetchGit && down {
+		f.mu.Lock()
+		f.Hung++
+		f.mu.Unlock()
 		select {
 		case <-ctx.Done():
 			return "", nil, ctx.Err()

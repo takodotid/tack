@@ -13,6 +13,7 @@ import (
 	"github.com/takodotid/tack/internal/engine"
 	"github.com/takodotid/tack/internal/kube"
 	"github.com/takodotid/tack/internal/ledger"
+	"github.com/takodotid/tack/internal/testenv"
 )
 
 // #38 item 7. A run's creation time comes from the API server of its
@@ -47,7 +48,7 @@ func TestResumeOrdersRunsAcrossSites(t *testing.T) {
 				Spec:       failoverv1.SiteFailoverSpec{Mode: failoverv1.ModeSiteLoss, From: "a", To: tt.site},
 				Status:     failoverv1.SiteFailoverStatus{State: failoverv1.RunStopped},
 			}
-			if err := f.clients.Sites[tt.site].Create(ctx, other); err != nil {
+			if err := testenv.CreateLedger(ctx, f.clients.Sites[tt.site], other); err != nil {
 				t.Fatal(err)
 			}
 			var opts engine.Options

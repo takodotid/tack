@@ -213,13 +213,20 @@ func newRun(o *options) *cobra.Command {
 
 // confirm asks the operator to type the workload's name.
 func (o *options) confirm(out io.Writer, yes bool, workload string) error {
+	return o.confirmThat(out, yes, workload, "This changes live clusters and Git.", "this run")
+}
+
+// confirmThat asks the operator to type the workload's name after what,
+// which says what the command changes. approved names what a human
+// approves with --yes.
+func (o *options) confirmThat(out io.Writer, yes bool, workload, what, approved string) error {
 	if yes {
 		return nil
 	}
 	if !o.isTerminal() {
-		return usagef("no terminal to confirm on: pass --yes once a human approved this run")
+		return usagef("no terminal to confirm on: pass --yes once a human approved %s", approved)
 	}
-	fmt.Fprintf(out, "\nThis changes live clusters and Git. Type the workload name %q to go on: ", workload)
+	fmt.Fprintf(out, "\n%s Type the workload name %q to go on: ", what, workload)
 	line, err := bufio.NewReader(o.stdin).ReadString('\n')
 	if err != nil && line == "" {
 		return fmt.Errorf("no confirmation: %w", err)
