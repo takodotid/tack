@@ -1044,3 +1044,99 @@ func TestGitDiffersFromLive(t *testing.T) {
 		t.Errorf("Git head %s, want %s", head, fixed)
 	}
 }
+
+// #59, observed in a two-site test of v1.3.0: with a site down, tack status
+// left out its runs and exited 0, and kubectl get sfo showed an abandoned
+// run as Stopped. Pausing a site's node stands in for a site that gives no
+// answer. A run dies before its first step, with its ledger at b and no
+// hold. With b down, tack status and tack abandon name b. With a down,
+// tack status lists the run and names a, tack abandon marks the run, and
+// kubectl get sfo at b shows the mark in its Abandoned column ([RFC#0003]
+// Requirement 15). Site a is the primary before the run.
+func TestUnreachableSiteDuringStatusAbandonAndGet(t *testing.T) {
+	_, code := tack(t, []string{"TACK_FAULT=hold-a-cluster-pg-a:before"}, "run", "-f", workload, "--to", "b", "--yes")
+	if code != exitFault {
+		t.Fatalf("exit %d, want the fault exit %d", code, exitFault)
+	}
+	run := runName(latestRun(t, "b"))
+
+	down := func(site string) (up func()) {
+		t.Helper()
+		docker(t, "pause", node(site))
+		paused := true
+		t.Cleanup(func() {
+			if paused {
+				exec.Command("docker", "unpause", node(site)).Run()
+			}
+		})
+		return func() {
+			t.Helper()
+			docker(t, "unpause", node(site))
+			paused = false
+			eventually(t, 3*time.Minute, "site "+site+" is healthy again", func() string {
+				if _, err := kubectlE(site, "get", "--raw", "/readyz"); err != nil {
+					return err.Error()
+				}
+				if p := jsonpath(t, site, "cluster", clusterName(site), "{.status.phase}"); p != "Cluster in healthy state" {
+					return "phase " + p
+				}
+				return ""
+			})
+		}
+	}
+	wants := func(what, out string, want ...string) {
+		t.Helper()
+		for _, w := range want {
+			if !strings.Contains(out, w) {
+				t.Errorf("%s lacks %q", what, w)
+			}
+		}
+	}
+
+	// The ledger's site gives no answer.
+	up := down("b")
+	out, code := tack(t, nil, "status", "-f", workload)
+	if code != 1 {
+		t.Errorf("status with b down: exit %d, want 1", code)
+	}
+	wants("status with b down", out, "Sites that gave no answer; their runs are not listed:\n  site b: ",
+		"the list of runs is incomplete: site b gave no answer")
+	out, code = tack(t, nil, "abandon", run, "-f", workload, "--yes")
+	if code != 1 {
+		t.Errorf("abandon with b down: exit %d, want 1", code)
+	}
+	wants("abandon with b down", out, fmt.Sprintf("run %q not found at any reachable site; site b gave no answer, so its runs were not read: ", run))
+	up()
+	if a := jsonpath(t, "b", "sitefailover", run, "{.status.abandoned}"); a != "" {
+		t.Fatalf("run %s was abandoned while its site gave no answer: %s", run, a)
+	}
+
+	// Another site gives no answer.
+	up = down("a")
+	out, code = tack(t, nil, "status", "-f", workload)
+	if code != 1 {
+		t.Errorf("status with a down: exit %d, want 1", code)
+	}
+	wants("status with a down", out, run, "Sites that gave no answer; their runs are not listed:\n  site a: ",
+		"the list of runs is incomplete: site a gave no answer")
+	out, code = tack(t, nil, "abandon", run, "-f", workload, "--reason", "e2e: a site gives no answer", "--yes")
+	if code != 0 {
+		t.Fatalf("abandon with a down: exit %d, want 0", code)
+	}
+	wants("abandon with a down", out, "run "+run+" abandoned", "kubectl get sfo shows the mark in its Abandoned column")
+	// The table, as an operator reads it: the column by its header, not
+	// the field by its path.
+	lines := strings.Split(strings.TrimSpace(kubectl(t, "b", "-n", ledgerNS, "get", "sfo", run)), "\n")
+	col := strings.Index(lines[0], "ABANDONED")
+	if len(lines) != 2 || col < 0 || len(lines[1]) <= col {
+		t.Fatalf("kubectl get sfo %s has no ABANDONED column:\n%s", run, strings.Join(lines, "\n"))
+	}
+	if v := strings.Fields(lines[1][col:])[0]; v == "<none>" || v == "<unknown>" {
+		t.Errorf("kubectl get sfo %s: ABANDONED %q, want the mark's age:\n%s", run, v, strings.Join(lines, "\n"))
+	}
+	out, code = tack(t, nil, "status", "-f", workload)
+	if code != 1 || !regexp.MustCompile(`(?m)^b\s+`+regexp.QuoteMeta(run)+`\s.*\sAbandoned\s`).MatchString(out) {
+		t.Errorf("status after the abandon, a down: exit %d, want 1 listing %s as Abandoned", code, run)
+	}
+	up()
+}
