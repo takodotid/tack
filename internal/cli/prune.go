@@ -24,7 +24,8 @@ func pruneLong() string {
 for runs reads at every site. It deletes only a run that succeeded with no
 Deferred step, and keeps:
 
-  - the newest --keep runs of the workload;
+  - the newest --keep runs that succeeded, so the record of the last
+    switch stays;
   - every abandoned run, and every run that another run took over;
   - every run with a follow-up Rebuild: delete it by hand once the site's
     member was rebuilt;
@@ -57,7 +58,7 @@ func newPrune(o *options) *cobra.Command {
 		Use:   "prune -f WORKLOAD --keep N",
 		Short: "Delete the ledgers of old runs that succeeded",
 		Long:  pruneLong(),
-		Example: `  # Keep the 20 newest runs of the workload, and those prune must keep
+		Example: `  # Keep the 20 newest runs that succeeded, and those prune must keep
   tack prune -f workload.yaml --keep 20`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -115,7 +116,7 @@ func newPrune(o *options) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&file, "file", "f", "", "the Workload file: prune reads every site of the workload")
-	cmd.Flags().IntVar(&keep, "keep", 0, "keep this many of the newest runs, 1 or more")
+	cmd.Flags().IntVar(&keep, "keep", 0, "keep this many of the newest runs that succeeded, 1 or more")
 	cmd.Flags().BoolVar(&yes, "yes", false, "skip the confirmation; only when a human approved deleting these ledgers")
 	return cmd
 }
@@ -195,16 +196,19 @@ func decidePrune(found []foundRun, keep int) (*prunePlan, error) {
 		byName[all[i].Name] = &all[i]
 	}
 	p := &prunePlan{}
-	for i, r := range runs {
+	newest := 0
+	for _, r := range runs {
 		sf := r.sf
 		why := ""
 		switch {
-		case i < keep:
-			why = fmt.Sprintf("one of the %d newest", keep)
 		case sf.Status.Abandoned != nil:
 			why = "abandoned"
 		case takenOver(sf, takers):
 			why = "taken over"
+		case newest < keep:
+			// Only runs that succeeded count: the others are kept anyway.
+			newest++
+			why = fmt.Sprintf("one of the %d newest that succeeded", keep)
 		case rebuild(sf) != "":
 			why = "follow-up Rebuild for site " + rebuild(sf) + ": delete it by hand once that member was rebuilt"
 		case marks(sf, byName) != "":
@@ -303,7 +307,7 @@ func (p *prunePlan) differs(q *prunePlan) string {
 
 // print lists the runs, newest first, with what prune does to each.
 func (p *prunePlan) print(w io.Writer, workload string, keep int) {
-	fmt.Fprintf(w, "Runs of workload %s, newest first; prune keeps the %d newest:\n", workload, keep)
+	fmt.Fprintf(w, "Runs of workload %s, newest first; prune keeps the %d newest that succeeded:\n", workload, keep)
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "SITE\tRUN\tSTATE\tCREATED\tPRUNE")
 	takers := takers(p.found())

@@ -123,7 +123,7 @@ Each search for runs reads every ledger of the workload at each site that answer
 |---|---|
 | Every site of the workload answers, and every run of the workload at every site is finished: `Succeeded` with no `Deferred` step, `Abandoned` or `TakenOver`. Otherwise prune deletes nothing. | Deleting a newer run lets an older unfinished run resume on a plan that no longer fits the sites ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 18). |
 | Delete only a `Succeeded` run with no `Deferred` step. Keep `Abandoned` and `TakenOver` runs. | They record holds that may be left in the cluster, and the take-over that ended them ([runbooks/abandon-run.md](runbooks/abandon-run.md), step 6). |
-| Keep the `--keep` newest runs of the workload, at least 1. | The newest records the last switch. |
+| Keep the `--keep` newest runs that succeeded, at least 1. Abandoned and taken-over runs do not count among them: they are kept anyway. | The newest that succeeded records the last switch. |
 | Keep a run with a follow-up `Rebuild`. | `tack plan` refuses a planned switchover to that member while such a run says it diverged ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 14). Prune does not read the member: delete such a run by hand once the member was created again after the run started. |
 | Keep a run whose spec takes over a run that is kept, not abandoned, and not marked `status.supersededBy`. | That run counts as taken over only through this run's spec; without it, it would block every new run. |
 | Keep a run that a newer `tack` last wrote (`status.writtenBy`). | A newer release may need what it recorded. |

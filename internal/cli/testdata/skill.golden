@@ -141,7 +141,8 @@ Prune deletes the ledgers of old runs of a workload, which every search
 for runs reads at every site. It deletes only a run that succeeded with no
 Deferred step, and keeps:
 
-  - the newest --keep runs of the workload;
+  - the newest --keep runs that succeeded, so the record of the last
+    switch stays;
   - every abandoned run, and every run that another run took over;
   - every run with a follow-up Rebuild: delete it by hand once the site's
     member was rebuilt;
@@ -171,13 +172,13 @@ Usage: `tack prune -f WORKLOAD --keep N [flags]`
 | Flag | Meaning |
 |---|---|
 | `-f`, `--file` | the Workload file: prune reads every site of the workload |
-| `--keep` | keep this many of the newest runs, 1 or more (default `0`) |
+| `--keep` | keep this many of the newest runs that succeeded, 1 or more (default `0`) |
 | `--yes` | skip the confirmation; only when a human approved deleting these ledgers |
 
 Examples:
 
 ```sh
-  # Keep the 20 newest runs of the workload, and those prune must keep
+  # Keep the 20 newest runs that succeeded, and those prune must keep
   tack prune -f workload.yaml --keep 20
 ```
 

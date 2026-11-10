@@ -43,9 +43,13 @@ func runsAt(t *testing.T, f *testFactory, site string) []string {
 
 // #58 row 1 (#35 row 47). Ledgers were never deleted, and every search for
 // runs reads all of them. tack prune deletes only runs that succeeded with
-// no Deferred step, past the newest --keep, and keeps every run that a
-// rule of [RFC#0003] Requirement 27 keeps.
+// no Deferred step, past the newest --keep that succeeded, and keeps every
+// run that a rule of [RFC#0003] Requirement 27 keeps. An abandoned run,
+// here the newest, does not count among the --keep: it is kept anyway.
 func TestPrune(t *testing.T) {
+	lastAbandoned := stoppedRun(t, "pg-main-last-abandoned")
+	lastAbandoned.CreationTimestamp = metav1.NewTime(fixedNow.Add(-30 * time.Minute))
+	lastAbandoned.Status.Abandoned = &failoverv1.Abandonment{At: metav1.NewTime(fixedNow), Reason: "by hand"}
 	newest := doneRun(t, "pg-main-newest", 1*time.Hour)
 	second := doneRun(t, "pg-main-second", 2*time.Hour)
 	old := doneRun(t, "pg-main-old", 3*time.Hour)
@@ -68,26 +72,27 @@ func TestPrune(t *testing.T) {
 	version.Version = "v1.4.0"
 	f := newFactory(map[string][]client.Object{
 		"a": append(testenv.Site("a", "a", 2), oldAtA),
-		"b": append(testenv.Site("b", "a", 0), newest, second, old, abandoned, marked, unmarked, taker, rebuild, newer),
+		"b": append(testenv.Site("b", "a", 0), lastAbandoned, newest, second, old, abandoned, marked, unmarked, taker, rebuild, newer),
 	})
 	out, code := run(t, f, "prune", "-f", "testdata/workload.yaml", "--keep", "2", "--yes")
 	if code != ExitOK {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
 	for _, want := range []string{
-		"Runs of workload pg-main, newest first; prune keeps the 2 newest:\n",
-		"pg-main-newest      Succeeded  ",
-		"keep: one of the 2 newest\n",
-		"pg-main-old         Succeeded  2026-10-27 07:15:00Z  delete\n",
-		"pg-main-abandoned   Abandoned  2026-10-27 05:15:00Z  keep: abandoned\n",
-		"pg-main-marked      TakenOver  2026-10-27 04:15:00Z  keep: taken over\n",
-		"pg-main-taker       Succeeded  2026-10-27 03:45:00Z  keep: only its spec marks run pg-main-unmarked as taken over\n",
-		"pg-main-unmarked    TakenOver  2026-10-27 03:15:00Z  keep: taken over\n",
+		"Runs of workload pg-main, newest first; prune keeps the 2 newest that succeeded:\n",
+		"pg-main-last-abandoned  Abandoned  2026-10-27 09:45:00Z  keep: abandoned\n",
+		"pg-main-newest          Succeeded  2026-10-27 09:15:00Z  keep: one of the 2 newest that succeeded\n",
+		"pg-main-second          Succeeded  2026-10-27 08:15:00Z  keep: one of the 2 newest that succeeded\n",
+		"pg-main-old             Succeeded  2026-10-27 07:15:00Z  delete\n",
+		"pg-main-abandoned       Abandoned  2026-10-27 05:15:00Z  keep: abandoned\n",
+		"pg-main-marked          TakenOver  2026-10-27 04:15:00Z  keep: taken over\n",
+		"pg-main-taker           Succeeded  2026-10-27 03:45:00Z  keep: only its spec marks run pg-main-unmarked as taken over\n",
+		"pg-main-unmarked        TakenOver  2026-10-27 03:15:00Z  keep: taken over\n",
 		"keep: follow-up Rebuild for site a: delete it by hand once that member was rebuilt\n",
 		"keep: written by tack v99.0.0, newer than this tack v1.4.0\n",
 		"deleted   ledger tack-system/pg-main-old-at-a at site a\n",
 		"deleted   ledger tack-system/pg-main-old at site b\n",
-		"Deleted 2 ledgers of workload pg-main; kept 8.\n",
+		"Deleted 2 ledgers of workload pg-main; kept 9.\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
@@ -100,7 +105,7 @@ func TestPrune(t *testing.T) {
 		t.Errorf("site a keeps %v", got)
 	}
 	got := strings.Join(runsAt(t, f, "b"), " ")
-	for _, name := range []string{"pg-main-newest", "pg-main-second", "pg-main-abandoned", "pg-main-marked", "pg-main-unmarked", "pg-main-taker", "pg-main-rebuild", "pg-main-newer-tack"} {
+	for _, name := range []string{"pg-main-last-abandoned", "pg-main-newest", "pg-main-second", "pg-main-abandoned", "pg-main-marked", "pg-main-unmarked", "pg-main-taker", "pg-main-rebuild", "pg-main-newer-tack"} {
 		if !strings.Contains(got+" ", name+" ") {
 			t.Errorf("site b lost %s: %s", name, got)
 		}
