@@ -35,14 +35,14 @@ spec:
     - jsonPath: .status.reason
       name: Reason
       type: string
+    - jsonPath: .status.abandoned.at
+      name: Abandoned
+      type: date
     - jsonPath: .status.phase
       name: Phase
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
-      type: date
-    - jsonPath: .status.abandoned.at
-      name: Abandoned
       type: date
     name: v1
     schema:
@@ -1227,14 +1227,14 @@ spec:
     - jsonPath: .status.reason
       name: Reason
       type: string
+    - jsonPath: .status.abandoned.at
+      name: Abandoned
+      type: date
     - jsonPath: .status.phase
       name: Phase
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
-      type: date
-    - jsonPath: .status.abandoned.at
-      name: Abandoned
       type: date
     deprecated: true
     deprecationWarning: failover.tako.id/v1alpha1 SiteFailover is deprecated; use
