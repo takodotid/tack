@@ -1108,7 +1108,7 @@ func TestUnreachableSiteDuringStatusAbandonAndGet(t *testing.T) {
 	}
 	wants("abandon with b down", out, fmt.Sprintf("run %q not found at any reachable site; site b gave no answer, so its runs were not read: ", run))
 	up()
-	if a := jsonpath(t, "b", "sitefailover", run, "{.status.abandoned}"); a != "" {
+	if a := strings.TrimSpace(kubectl(t, "b", "-n", ledgerNS, "get", "sitefailover", run, "-o", "jsonpath={.status.abandoned}")); a != "" {
 		t.Fatalf("run %s was abandoned while its site gave no answer: %s", run, a)
 	}
 
