@@ -87,7 +87,7 @@ func newPrune(o *options) *cobra.Command {
 				fmt.Fprintln(out, "Nothing to delete.")
 				return nil
 			}
-			if err := o.confirmThat(out, yes, w.Name, fmt.Sprintf("This deletes %d ledgers.", len(del)), "deleting these ledgers"); err != nil {
+			if err := o.confirmThat(out, yes, w.Name, "This deletes "+ledgers(len(del))+".", "deleting these ledgers"); err != nil {
 				return err
 			}
 			// A run can start, or a ledger change, while the operator
@@ -110,7 +110,7 @@ func newPrune(o *options) *cobra.Command {
 				}
 				fmt.Fprintf(progress, "deleted   ledger %s/%s at site %s\n", w.Spec.Ledger.Namespace, r.sf.Name, r.site)
 			}
-			fmt.Fprintf(out, "Deleted %d ledgers of workload %s; kept %d.\n", len(del), w.Name, len(p.runs)-len(del))
+			fmt.Fprintf(out, "Deleted %s of workload %s; kept %d.\n", ledgers(len(del)), w.Name, len(p.runs)-len(del))
 			return nil
 		},
 	}
@@ -122,7 +122,15 @@ func newPrune(o *options) *cobra.Command {
 
 // deleted is the error of a delete that failed after done deletes.
 func deleted(done, of int, err error) error {
-	return fmt.Errorf("%w. Deleted %d of %d ledgers; the others stay: prune again once the cause is fixed", err, done, of)
+	return fmt.Errorf("%w. Deleted %d of %s; the others stay: prune again once the cause is fixed", err, done, ledgers(of))
+}
+
+// ledgers counts ledgers: "1 ledger", "2 ledgers".
+func ledgers(n int) string {
+	if n == 1 {
+		return "1 ledger"
+	}
+	return fmt.Sprintf("%d ledgers", n)
 }
 
 // prunePlan is what tack prune does to each run of a workload.

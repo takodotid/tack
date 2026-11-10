@@ -99,7 +99,7 @@ func TestLedgersOfV131(t *testing.T) {
 	}
 
 	out, code = run(t, f, "prune", "-f", "testdata/workload.yaml", "--keep", "1", "--yes")
-	if code != ExitOK || !strings.Contains(out, "deleted   ledger tack-system/"+succeeded.Name+" at site b\n") || !strings.Contains(out, "Deleted 1 ledgers") {
+	if code != ExitOK || !strings.Contains(out, "deleted   ledger tack-system/"+succeeded.Name+" at site b\n") || !strings.Contains(out, "Deleted 1 ledger of workload pg-main; kept 2.") {
 		t.Errorf("prune: exit %d:\n%s", code, out)
 	}
 	if left := append(runsAt(t, f, "a"), runsAt(t, f, "b")...); !slices.Equal(left, []string{stopped.Name, abandoned.Name}) {

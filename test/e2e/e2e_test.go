@@ -49,6 +49,7 @@ const (
 // name no ConfigMap or Secret (row 12).
 const rbacValues = `rbac:
   create: true
+  prune: true
   subjects:
   - {kind: ServiceAccount, name: ` + operator + `, namespace: ` + ledgerNS + `}
   objects:
@@ -1144,10 +1145,12 @@ func TestUnreachableSiteDuringStatusAbandonAndGet(t *testing.T) {
 // #58 row 1. Every run of the e2e is finished by now: tack prune deletes the
 // ledgers of old runs that succeeded, through the API servers'
 // preconditions, and keeps the newest and every abandoned or taken-over run
-// ([RFC#0003] Requirement 27).
+// ([RFC#0003] Requirement 27). It runs as the ServiceAccount operator,
+// bound to the chart's roles with rbac.prune: row 16 is enough.
 func TestPrune(t *testing.T) {
 	abandoned := runName(latestRun(t, "b"))
-	out, code := tack(t, nil, "prune", "-f", workload, "--keep", "2", "--yes")
+	restricted := operatorKubeconfig(t)
+	out, code := tack(t, nil, "prune", "--kubeconfig", restricted, "-f", workload, "--keep", "2", "--yes")
 	if code != 0 {
 		t.Fatalf("prune: exit %d, want 0", code)
 	}
@@ -1168,7 +1171,7 @@ func TestPrune(t *testing.T) {
 	if _, err := kubectlE("b", "-n", ledgerNS, "get", "sfo", abandoned); err != nil {
 		t.Errorf("the abandoned run %s is gone: %v", abandoned, err)
 	}
-	out, code = tack(t, nil, "prune", "-f", workload, "--keep", "2")
+	out, code = tack(t, nil, "prune", "--kubeconfig", restricted, "-f", workload, "--keep", "2")
 	if code != 0 || !strings.Contains(out, "Nothing to delete.") {
 		t.Errorf("second prune: exit %d, want 0 with nothing to delete", code)
 	}
