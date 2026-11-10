@@ -164,15 +164,16 @@ func TestStatusListsRunTakenOver(t *testing.T) {
 // every hold, tack abandon listed each object "(held)" and said "the run's
 // holds stay after it is abandoned", from the ledger. It says that the
 // list is the ledger's record, reads and changes no object of the
-// workload, and says that kubectl get sfo still shows the run's state.
+// workload, and says where kubectl get sfo shows the mark: in its
+// Abandoned column, as the State column keeps the run's state.
 func TestAbandonListsHoldsAsRecorded(t *testing.T) {
 	for _, tt := range []struct {
 		name  string
 		state failoverv1.RunState
 		want  string
 	}{
-		{name: "stopped", state: failoverv1.RunStopped, want: "kubectl get sfo still shows its State as Stopped: "},
-		{name: "never started", want: "kubectl get sfo still shows its State empty: "},
+		{name: "stopped", state: failoverv1.RunStopped, want: "kubectl get sfo shows the mark in its Abandoned column, with the CRD of tack v1.4.0 or later at the ledger's site; its State column keeps Stopped ("},
+		{name: "never started", want: "kubectl get sfo shows the mark in its Abandoned column, with the CRD of tack v1.4.0 or later at the ledger's site; its State column stays empty ("},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			sf := heldRun(t, "pg-main-earlier")

@@ -41,6 +41,9 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    - jsonPath: .status.abandoned.at
+      name: Abandoned
+      type: date
     name: v1
     schema:
       openAPIV3Schema:
@@ -1229,6 +1232,9 @@ spec:
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
+      type: date
+    - jsonPath: .status.abandoned.at
+      name: Abandoned
       type: date
     deprecated: true
     deprecationWarning: failover.tako.id/v1alpha1 SiteFailover is deprecated; use

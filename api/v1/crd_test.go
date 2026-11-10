@@ -80,3 +80,22 @@ func TestCRDPrintsReason(t *testing.T) {
 		}
 	}
 }
+
+// #59 item 3. kubectl get sfo showed an abandoned run as Stopped, its last
+// state, with nothing that said it was abandoned. Every version lists the
+// columns of [RFC#0003] Requirement 15 in order, the Abandoned column last,
+// so a script that reads the earlier columns by position still reads them.
+func TestCRDPrintsAbandoned(t *testing.T) {
+	want := "Workload string .spec.workload.name, Mode string .spec.mode, From string .spec.from, " +
+		"To string .spec.to, State string .status.state, Reason string .status.reason, " +
+		"Phase string .status.phase, Age date .metadata.creationTimestamp, Abandoned date .status.abandoned.at"
+	for _, v := range readCRD(t).Spec.Versions {
+		var cols []string
+		for _, c := range v.AdditionalPrinterColumns {
+			cols = append(cols, c.Name+" "+c.Type+" "+c.JSONPath)
+		}
+		if got := strings.Join(cols, ", "); got != want {
+			t.Errorf("version %s: columns\n  %s\nwant\n  %s", v.Name, got, want)
+		}
+	}
+}

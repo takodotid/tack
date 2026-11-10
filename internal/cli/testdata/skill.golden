@@ -62,8 +62,9 @@ ledger records them, and does not read the objects: a hold removed by hand
 is still listed. The runbook:
   https://github.com/takodotid/tack/blob/main/docs/runbooks/abandon-run.md
 
-kubectl get sfo still shows an abandoned run's last state, such as Stopped:
-tack status lists it as Abandoned.
+kubectl get sfo shows when the run was abandoned in its Abandoned column,
+from the CRD of tack v1.4.0 on. Its State column keeps the run's last
+state, such as Stopped. tack status lists the run as Abandoned.
 
 Abandon does not stop a tack process that runs the run: check first that
 none does. A step that runs, such as a promotion, still changes the
