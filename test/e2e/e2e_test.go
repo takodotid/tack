@@ -429,7 +429,8 @@ func TestPlannedSwitchover(t *testing.T) {
 // assertRecorded checks, against a real API server, what a planned run
 // that succeeded in one process records: each progress line's time, the
 // ledger's history with the user the API server names, the tack that
-// wrote it, its Events, the field manager tack, and the column Reason
+// wrote it, its Events, the field manager tack, and the columns Reason and
+// Abandoned
 // ([RFC#0003] Requirements 22 to 25, [RFC#0009] Requirement 27).
 func assertRecorded(t *testing.T, run, out string) {
 	t.Helper()
@@ -455,8 +456,8 @@ func assertRecorded(t *testing.T, run, out string) {
 			t.Errorf("no Event %s on the ledger:\n%s", want, events)
 		}
 	}
-	if head := strings.SplitN(kubectl(t, "b", "-n", ledgerNS, "get", "sfo", run), "\n", 2)[0]; !regexp.MustCompile(`STATE\s+REASON\s+PHASE`).MatchString(head) {
-		t.Errorf("kubectl get sfo prints %q, want the column REASON after STATE", head)
+	if head := strings.SplitN(kubectl(t, "b", "-n", ledgerNS, "get", "sfo", run), "\n", 2)[0]; !regexp.MustCompile(`STATE\s+REASON\s+ABANDONED\s+PHASE\s+AGE`).MatchString(head) {
+		t.Errorf("kubectl get sfo prints %q, want the columns STATE, REASON, ABANDONED, PHASE, AGE ([RFC#0003] Requirement 15)", head)
 	}
 	status := tackOK(t, "status", run, "-f", workload)
 	if !strings.Contains(status, "History:\n") || !strings.Contains(status, "Written by: tack "+version.Version) || !strings.Contains(status, ", attempts 1\n") {
