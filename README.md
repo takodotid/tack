@@ -257,6 +257,9 @@ tack status pg-main-20261027-101500 -f workload.yaml
 
 # Continue a run that stopped (exit code 3) or waits (exit code 4).
 tack resume pg-main-20261027-101500 -f workload.yaml
+
+# Delete the ledgers of old runs that succeeded, keeping the 20 newest.
+tack prune -f workload.yaml --keep 20
 ```
 
 After a site loss, add `--mode site-loss` to `plan` and `run`. [docs/operations.md](docs/operations.md) covers stopped runs and break-glass.

@@ -7,6 +7,8 @@ rbac:
   # Create the roles of the permissions table in docs/operations.md#permissions: a ClusterRole, a Role in the
   # release's namespace, which is the ledger namespace, and a Role in each namespace of rbac.objects.
   create: false
+  # Also grant delete on sitefailovers in the ledger Role, for tack prune: row 16 of the permissions table.
+  prune: false
   # Bind each role to these subjects, such as the operators' group. Empty binds nothing.
   subjects: []
   # - {apiGroup: rbac.authorization.k8s.io, kind: Group, name: dba-oncall}

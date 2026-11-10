@@ -1140,3 +1140,36 @@ func TestUnreachableSiteDuringStatusAbandonAndGet(t *testing.T) {
 	}
 	up()
 }
+
+// #58 row 1. Every run of the e2e is finished by now: tack prune deletes the
+// ledgers of old runs that succeeded, through the API servers'
+// preconditions, and keeps the newest and every abandoned or taken-over run
+// ([RFC#0003] Requirement 27).
+func TestPrune(t *testing.T) {
+	abandoned := runName(latestRun(t, "b"))
+	out, code := tack(t, nil, "prune", "-f", workload, "--keep", "2", "--yes")
+	if code != 0 {
+		t.Fatalf("prune: exit %d, want 0", code)
+	}
+	deleted := regexp.MustCompile(`(?m)^`+stamp+`deleted   ledger `+ledgerNS+`/(\S+) at site (\S+)$`).FindAllStringSubmatch(out, -1)
+	if len(deleted) == 0 {
+		t.Fatal("prune deleted no ledger")
+	}
+	for _, d := range deleted {
+		if _, err := kubectlE(d[2], "-n", ledgerNS, "get", "sfo", d[1]); err == nil {
+			t.Errorf("run %s is still at site %s", d[1], d[2])
+		}
+	}
+	for _, want := range []string{abandoned + " ", "keep: abandoned", "keep: taken over", "keep: one of the 2 newest"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("prune lacks %q", want)
+		}
+	}
+	if _, err := kubectlE("b", "-n", ledgerNS, "get", "sfo", abandoned); err != nil {
+		t.Errorf("the abandoned run %s is gone: %v", abandoned, err)
+	}
+	out, code = tack(t, nil, "prune", "-f", workload, "--keep", "2")
+	if code != 0 || !strings.Contains(out, "Nothing to delete.") {
+		t.Errorf("second prune: exit %d, want 0 with nothing to delete", code)
+	}
+}

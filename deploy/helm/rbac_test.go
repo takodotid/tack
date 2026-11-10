@@ -29,6 +29,10 @@ const (
 	tableHead = "| # | Resource | Verbs | Namespace | Commands | For |"
 	// namedFact is the table's fact on resourceNames, which the test checks word for word.
 	namedFact = "| `resourceNames` | Rows 3 and 7 to 13 can name their objects."
+	// pruneFact is the table's fact on row 16, which the test checks word for word.
+	pruneFact = "| Row 16 | Only `tack prune` needs it. The chart grants it only with `rbac.prune`. |"
+	// pruneRow is the row that only rbac.prune grants.
+	pruneRow = 16
 )
 
 // namedRows are the rows whose rules name their objects, as namedFact says.
@@ -37,6 +41,7 @@ var namedRows = []int{3, 7, 8, 9, 10, 11, 12, 13}
 // values names objects in two namespaces, every kind of rbac.objects among them.
 const values = `rbac:
   create: true
+  prune: true
   subjects:
   - {apiGroup: rbac.authorization.k8s.io, kind: Group, name: operators}
   objects:
@@ -141,6 +146,9 @@ func table(t *testing.T) []row {
 	}
 	if !bytes.Contains(b, []byte(namedFact)) {
 		t.Fatalf("%s no longer says %q: update namedRows and this test", tableDoc, namedFact)
+	}
+	if !bytes.Contains(b, []byte(pruneFact)) {
+		t.Fatalf("%s no longer says %q: update pruneRow and this test", tableDoc, pruneFact)
 	}
 	var rows []row
 	groups := map[string]string{}
@@ -382,6 +390,30 @@ func diff(a, b []grant) []string {
 		}
 	}
 	return out
+}
+
+// TestPruneIsOptional: row 16, delete on sitefailovers for tack prune, is granted only with rbac.prune, and then in
+// the ledger Role ([RFC#0003] Requirement 27, [RFC#0009] Requirement 29).
+func TestPruneIsOptional(t *testing.T) {
+	var row16 []grant
+	for _, g := range want(t, table(t)) {
+		if g.Verb == "delete" {
+			row16 = append(row16, g)
+		}
+	}
+	if len(row16) != 1 || row16[0] != (grant{Scope: "ledger", Group: "failover.tako.id", Resource: "sitefailovers", Verb: "delete"}) {
+		t.Fatalf("row %d of the table: %v, want delete on sitefailovers in the ledger namespace", pruneRow, row16)
+	}
+	without := strings.Replace(values, "  prune: true\n", "", 1)
+	for name, vals := range map[string]string{"no prune": without, "prune false": strings.Replace(values, "prune: true", "prune: false", 1)} {
+		got := rendered(t, render(t, vals))
+		if slices.Contains(got, row16[0]) {
+			t.Errorf("%s: the chart grants %s", name, row16[0])
+		}
+		if exp := slices.DeleteFunc(want(t, table(t)), func(g grant) bool { return g == row16[0] }); !reflect.DeepEqual(sorted(got), exp) {
+			t.Errorf("%s: the roles differ from the table without row %d", name, pruneRow)
+		}
+	}
 }
 
 // TestRolesAreOptional: the chart creates no role by default, also from a release whose values have no rbac key,

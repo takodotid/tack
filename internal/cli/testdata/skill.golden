@@ -132,6 +132,55 @@ Examples:
   tack plan -f workload.yaml --to b -o yaml
 ```
 
+### tack prune
+
+Delete the ledgers of old runs that succeeded.
+
+```text
+Prune deletes the ledgers of old runs of a workload, which every search
+for runs reads at every site. It deletes only a run that succeeded with no
+Deferred step, and keeps:
+
+  - the newest --keep runs of the workload;
+  - every abandoned run, and every run that another run took over;
+  - every run with a follow-up Rebuild: delete it by hand once the site's
+    member was rebuilt;
+  - every run whose spec records that it took over a run that is kept and
+    is not marked as taken over: without it, that run would block new runs;
+  - every run that a newer tack than this one last wrote.
+
+Prune acts only when every site of the workload answers and every run of
+the workload is finished: succeeded with no Deferred step, abandoned or
+taken over. It lists each run with what it does to it, asks for the
+workload's name, searches again, and stops, deleting nothing, when anything
+changed. It then deletes the ledgers one at a time, by name, oldest first,
+each only while it is the object that was read, and stops at the first
+error. It changes nothing else.
+
+Prune needs delete on sitefailovers in the ledger namespace at each site,
+row 16 of the permissions table. The rules, and how to delete a kept run by
+hand:
+  https://github.com/takodotid/tack/blob/main/docs/operations.md#old-ledgers
+
+An agent never starts "tack prune" without an explicit instruction from a
+human for that workload.
+```
+
+Usage: `tack prune -f WORKLOAD --keep N [flags]`
+
+| Flag | Meaning |
+|---|---|
+| `-f`, `--file` | the Workload file: prune reads every site of the workload |
+| `--keep` | keep this many of the newest runs, 1 or more (default `0`) |
+| `--yes` | skip the confirmation; only when a human approved deleting these ledgers |
+
+Examples:
+
+```sh
+  # Keep the 20 newest runs of the workload, and those prune must keep
+  tack prune -f workload.yaml --keep 20
+```
+
 ### tack resume
 
 Continue a run from its ledger.
