@@ -469,3 +469,36 @@ func TestChartLints(t *testing.T) {
 		t.Fatalf("helm lint: %v\n%s", err, out)
 	}
 }
+
+// TestNotesNameTheWriteCheck (#62): each install and upgrade prints the check of who may write ledgers, with a link at
+// the chart's release tag, or at main for a chart that is not of a release ([RFC#0009] Requirement 29). The roles
+// only grant access, so they cannot keep a GitOps controller from writing ledgers: only that check finds it.
+func TestNotesNameTheWriteCheck(t *testing.T) {
+	const anchor = "docs/operations.md#who-may-write-ledgers"
+	doc, err := os.ReadFile(tableDoc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(doc), "\n### Who may write ledgers\n") {
+		t.Fatalf("%s has no heading for %s", tableDoc, anchor)
+	}
+	packaged := t.TempDir()
+	if out, err := helm(t, "", "package", chart, "--version", "1.5.0", "--app-version", "1.5.0", "-d", packaged); err != nil {
+		t.Fatalf("helm package: %v\n%s", err, out)
+	}
+	for ref, c := range map[string]string{"main": chart, "v1.5.0": filepath.Join(packaged, "tack-1.5.0.tgz")} {
+		out, err := helm(t, "", "install", release, c, "--dry-run=client", "--namespace", ledgerNS)
+		if err != nil {
+			t.Fatalf("helm install --dry-run: %v\n%s", err, out)
+		}
+		_, notes, _ := strings.Cut(out, "\nNOTES:\n")
+		for _, want := range []string{
+			"only the operators may create, update, patch or delete sitefailovers, or update or patch sitefailovers/status, in namespace " + ledgerNS,
+			"https://github.com/takodotid/tack/blob/" + ref + "/" + anchor,
+		} {
+			if !strings.Contains(notes, want) {
+				t.Errorf("%s: the notes lack %q:\n%s", ref, want, notes)
+			}
+		}
+	}
+}

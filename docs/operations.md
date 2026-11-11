@@ -213,13 +213,37 @@ Each site's chart may name every site's objects, so one values file serves all s
 
 ### Who may write ledgers
 
-Writing a ledger is privileged. A ledger names the steps, the kube contexts and the Git URL that `tack resume` uses with the operator's credentials, so anyone who may create `sitefailovers`, or update their status, can plant a run, or change one, for an operator to resume.
+Writing a ledger is privileged. A ledger names the steps, the kube contexts and the Git URL that `tack resume` uses with the operator's credentials. Each search for runs selects ledgers by the label `failover.tako.id/workload`, and decides on what it finds whether a run starts or resumes ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirements 8 and 18).
+
+| Access | What it lets its holder do |
+|---|---|
+| `create` on `sitefailovers` | plant a run for an operator to resume |
+| `update`, `patch` on `sitefailovers/status` | change a run's state, captured values, holds and follow-ups |
+| `update`, `patch` on `sitefailovers` | change a ledger's labels: a run without its workload's label is left out of every search, so a second run starts, or an older run resumes, while it is not done |
+| `delete`, `deletecollection` on `sitefailovers` | remove a run's record, with the same effect |
 
 | Rule | Why |
 |---|---|
-| Grant rows 5 and 6 to the operators only, in the ledger namespace at every site. | Rows 5 and 6 are the write access. |
+| Grant rows 5 and 6 to the operators only, and row 16 only to the operators who prune, in the ledger namespace at every site. | They are the only writes Tack needs. Tack never needs `update` or `patch` on `sitefailovers`, nor `deletecollection`. |
 | Keep the ledger namespace out of every Flux path, and keep `SiteFailover` objects out of Git. | A Kustomization applies what Git holds with kustomize-controller's service account, or the one its `spec.serviceAccountName` names. |
-| Check who else may write: `kubectl --context CTX auth can-i create sitefailovers.failover.tako.id -n tack-system --as system:serviceaccount:NS:NAME`, and the same for `update` on `sitefailovers/status`. | A role with a wildcard resource or verb, such as `cluster-admin`, includes them. |
+| Run the check below at every site: before the first run, and after each change of who is bound to which role. | A role with a wildcard resource or verb, such as `cluster-admin`, includes every access above. RBAC only adds: neither the chart nor Tack can take it away. |
+
+The check, as a cluster admin, since `--as` needs `impersonate`. First list who is bound, then ask for each subject that is not an operator, such as a GitOps controller's or a CI system's ServiceAccount. Every answer must be `no`:
+
+```sh
+ns=tack-system   # the ledger namespace
+kubectl --context "$ctx" get clusterrolebindings -o wide
+kubectl --context "$ctx" -n "$ns" get rolebindings -o wide
+as=system:serviceaccount:flux-system:kustomize-controller   # repeat for each such subject
+for verb in create update patch delete deletecollection; do
+  echo "$verb: $(kubectl --context "$ctx" -n "$ns" auth can-i "$verb" sitefailovers.failover.tako.id --as "$as")"
+done
+for verb in update patch; do
+  echo "$verb status: $(kubectl --context "$ctx" -n "$ns" auth can-i "$verb" sitefailovers.failover.tako.id --subresource=status --as "$as")"
+done
+```
+
+For a group, pass a user name and the group: `--as someone --as-group GROUP`.
 
 A Role with rows 4 to 6, for a RoleBinding to the operators' group:
 
