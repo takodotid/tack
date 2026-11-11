@@ -165,6 +165,9 @@ type Env struct {
 	// ReachWaits are the pauses between the checks of a site's API before
 	// it counts as unreachable. Nil uses DefaultReachWaits.
 	ReachWaits []time.Duration
+	// LeaseRenew is the pause between the renewals of a run's Lease. Zero
+	// uses LeaseRenew.
+	LeaseRenew time.Duration
 
 	// proc is what this process records of itself in a ledger's history.
 	proc process

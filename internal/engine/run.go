@@ -36,6 +36,9 @@ type Options struct {
 	TakeOver []string
 	// Yes is set when the operator skipped the confirmation with --yes.
 	Yes bool
+	// Force is set when the operator took over a run that a tack process
+	// may still run, with --force ([RFC#0003] Requirement 28).
+	Force bool
 }
 
 // ErrStopped is returned when the run stops for the operator.
@@ -79,6 +82,9 @@ func (e *Env) Start(ctx context.Context, sf *failoverv1.SiteFailover, opts Optio
 	if err := e.checkStarted(ctx, sf, opts); err != nil {
 		return err
 	}
+	// The process holds the run's Lease from its first status write until
+	// it returns ([RFC#0003] Requirement 28).
+	defer e.holdLease(ctx, sf)()
 	// The status subresource ignores status on create. The first write
 	// outlives a cancelled run: without it the ledger has no follow-ups.
 	sf.Status = *status
@@ -380,6 +386,9 @@ const ClockSkew = 10 * time.Second
 // resume runs the remaining steps. A resume, as opposed to the start
 // that Start already recorded, appends its entry Running to the history.
 func (e *Env) resume(ctx context.Context, sf *failoverv1.SiteFailover, opts Options, resumed bool) error {
+	if resumed {
+		defer e.holdLease(ctx, sf)()
+	}
 	head, err := e.AcceptHead(ctx, sf, opts.AcceptGitHead)
 	if err != nil {
 		return err

@@ -30,8 +30,8 @@ Rules for AI agents:
   - An agent never starts "tack run" or "tack resume" without an explicit
     instruction from a human for that run.
   - "tack plan" comes first. Show its output to the human before any run.
-  - An agent never passes --yes, --fence, --accept-git-head or --take-over
-    unless the human's instruction for that run names it.
+  - An agent never passes --yes, --fence, --accept-git-head, --take-over or
+    --force unless the human's instruction for that run names it.
   - "tack plan" and "tack status" only read; an agent may run them freely.
   - When a run stops, report its reason and message to the human and wait.
 
@@ -68,8 +68,11 @@ state, such as Stopped. tack status lists the run as Abandoned.
 
 Abandon does not stop a tack process that runs the run: check first that
 none does. A step that runs, such as a promotion, still changes the
-workload. Only tack v1.3.0 and later honour the mark: an older tack resumes
-the run, and drops the mark.
+workload. Abandon refuses while the run's lease says that a tack process
+runs it, or, for a run without a lease, while the run is Running and its
+ledger was written within its step's timeout and 5 minutes; --force goes on
+all the same. Only tack v1.3.0 and later honour the mark: an older tack
+resumes the run, and drops the mark.
 
 An agent never starts "tack abandon" without an explicit instruction from a
 human for that run.
@@ -81,6 +84,7 @@ Usage: `tack abandon RUN (-f WORKLOAD | --context CONTEXT) [flags]`
 |---|---|
 | `--context` | a kube context to read runs from, instead of --file |
 | `-f`, `--file` | the Workload file: search every site of the workload for its runs |
+| `--force` | go on although a tack process may still run the run: its lease is fresh, or its ledger was just written; only once a human checked that none does |
 | `--namespace` | the ledger namespace, with --context (default `tack-system`) |
 | `--reason` | why the run is abandoned, recorded in its ledger (default `abandoned by the operator with tack abandon`) |
 | `--yes` | skip the confirmation; only when a human approved abandoning this run |
@@ -275,6 +279,7 @@ Usage: `tack run -f WORKLOAD --to SITE [--mode planned|site-loss] [flags]`
 | Flag | Meaning |
 |---|---|
 | `-f`, `--file` | the Workload file (required) |
+| `--force` | with --take-over: go on although a tack process may still run the run: its lease is fresh, or its ledger was just written; only once a human checked that none does |
 | `--from` | the site of the current primary (default: the primary the target site declares) |
 | `--mode` | planned: the old primary demotes and hands over its token; site-loss: promote without a token after the old site is lost (default `planned`) |
 | `--take-over` | take over the holds of this earlier run, which can no longer finish; repeat it for each run |

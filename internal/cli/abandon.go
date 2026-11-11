@@ -1,8 +1,11 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -33,8 +36,11 @@ state, such as Stopped. tack status lists the run as Abandoned.
 
 Abandon does not stop a tack process that runs the run: check first that
 none does. A step that runs, such as a promotion, still changes the
-workload. Only tack v1.3.0 and later honour the mark: an older tack resumes
-the run, and drops the mark.
+workload. Abandon refuses while the run's lease says that a tack process
+runs it, or, for a run without a lease, while the run is Running and its
+ledger was written within its step's timeout and 5 minutes; --force goes on
+all the same. Only tack v1.3.0 and later honour the mark: an older tack
+resumes the run, and drops the mark.
 
 An agent never starts "tack abandon" without an explicit instruction from a
 human for that run.`
@@ -47,6 +53,7 @@ func newAbandon(o *options) *cobra.Command {
 	var l ledgerFlags
 	var yes bool
 	var reason string
+	var force bool
 	cmd := &cobra.Command{
 		Use:   "abandon RUN (-f WORKLOAD | --context CONTEXT)",
 		Short: "Mark a run that must never go on",
@@ -101,14 +108,26 @@ func newAbandon(o *options) *cobra.Command {
 				}
 				fmt.Fprintf(out, "Abandon does not read the objects: a hold removed by hand is still listed. A hold still on an object stays after the run is abandoned: remove it once Git equals live (%s), or start the next run with --take-over %s.\n", version.DocLink("docs/runbooks/abandon-run.md"), sf.Name)
 			}
+			// A process that runs the run holds its lease (#65): abandon
+			// checks it before it asks, and again after.
+			store, _ := env.Ledger.(engine.Leaser)
+			if err := o.checkLive(ctx, progress, store, sf, force); err != nil {
+				return err
+			}
 			fmt.Fprintf(out, "Check that no tack process runs %s: abandon does not stop one. Only tack v1.3.0 and later honour the mark.\n", sf.Name)
 			if err := o.confirm(out, yes, sf.Spec.Workload.Name); err != nil {
+				return err
+			}
+			if err := o.checkLive(ctx, progress, store, sf, force); err != nil {
 				return err
 			}
 			sf.Status.Abandoned = &failoverv1.Abandonment{At: metav1.NewTime(o.now()), Reason: reason}
 			var flags []string
 			if yes {
-				flags = []string{"--yes"}
+				flags = append(flags, "--yes")
+			}
+			if force {
+				flags = append(flags, "--force")
 			}
 			entry := env.Entry(ctx, sf, failoverv1.HistoryAbandoned, flags)
 			entry.Reason, entry.Message = "", reason
@@ -145,7 +164,30 @@ func newAbandon(o *options) *cobra.Command {
 	l.add(cmd)
 	cmd.Flags().BoolVar(&yes, "yes", false, "skip the confirmation; only when a human approved abandoning this run")
 	cmd.Flags().StringVar(&reason, "reason", defaultAbandonReason, "why the run is abandoned, recorded in its ledger")
+	cmd.Flags().BoolVar(&force, "force", false, forceHelp)
 	return cmd
+}
+
+// forceHelp is the help of --force, on tack abandon and tack run.
+const forceHelp = "go on although a tack process may still run the run: its lease is fresh, or its ledger was just written; only once a human checked that none does"
+
+// checkLive refuses to mark or take over run sf while a tack process may
+// still run it ([RFC#0003] Requirement 28), unless force, which goes on
+// with a line that says so. store reads the run's lease at its ledger's
+// site; nil judges by the ledger alone. It changes nothing.
+func (o *options) checkLive(ctx context.Context, progress io.Writer, store engine.Leaser, sf *failoverv1.SiteFailover, force bool) error {
+	note, err := engine.CheckLive(ctx, store, sf, o.now())
+	if note != "" {
+		fmt.Fprintf(progress, "  note      %s: the ledger tells instead\n", note)
+	}
+	switch {
+	case err == nil:
+		return nil
+	case !force:
+		return fmt.Errorf("%w. Nothing was changed", err)
+	}
+	fmt.Fprintf(progress, "  note      --force: going on, although %v\n", strings.TrimPrefix(err.Error(), engine.ErrMayRun.Error()+": "))
+	return nil
 }
 
 // hasDeferred tells whether a step of the run waits for its site.

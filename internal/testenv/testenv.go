@@ -10,6 +10,7 @@ import (
 	"time"
 
 	authenticationv1 "k8s.io/api/authentication/v1"
+	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -129,6 +130,7 @@ func NewClient(objs ...client.Object) client.Client {
 	mapper.Add(corev1.SchemeGroupVersion.WithKind("Namespace"), meta.RESTScopeRoot)
 	mapper.Add(corev1.SchemeGroupVersion.WithKind("Event"), meta.RESTScopeNamespace)
 	mapper.Add(authenticationv1.SchemeGroupVersion.WithKind("SelfSubjectReview"), meta.RESTScopeRoot)
+	mapper.Add(coordinationv1.SchemeGroupVersion.WithKind("Lease"), meta.RESTScopeNamespace)
 	return fake.NewClientBuilder().
 		WithScheme(kube.Scheme).
 		WithRESTMapper(mapper).
