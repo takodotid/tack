@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -57,6 +58,9 @@ type watchedLeases struct {
 	// steal makes another process take the Lease at this status write.
 	steal int
 	n     int
+	// collect deletes the Lease right before its first update, as the
+	// garbage collector deletes the Lease of a deleted ledger.
+	collect bool
 }
 
 func (w *watchedLeases) UpdateStatus(ctx context.Context, sf *failoverv1.SiteFailover) error {
@@ -100,7 +104,13 @@ func (w *watchedLeases) CreateLease(ctx context.Context, l *coordinationv1.Lease
 func (w *watchedLeases) UpdateLease(ctx context.Context, l *coordinationv1.Lease) error {
 	w.mu.Lock()
 	w.writes++
+	collect := w.collect && w.writes == 1
 	w.mu.Unlock()
+	if collect {
+		if err := w.Store.Client.Delete(ctx, l.DeepCopy()); err != nil {
+			return err
+		}
+	}
 	return w.Store.UpdateLease(ctx, l)
 }
 
@@ -218,6 +228,56 @@ func TestResumeTakesOverLease(t *testing.T) {
 	}
 	if l := f.leaseOf("b"); holder(l) != "" || l.Spec.LeaseTransitions == nil || *l.Spec.LeaseTransitions < 1 {
 		t.Errorf("after the resume: holder %q, transitions %v", holder(l), l.Spec.LeaseTransitions)
+	}
+}
+
+// Review of #67. A Lease of the run's name is left by a deleted ledger of
+// that name, which the garbage collector has not deleted yet. The run
+// takes it as its own: its ledger becomes the Lease's owner, in place of
+// the deleted one, so that the collector does not delete it mid-run and
+// CheckLive counts it as the run's. An owner of another kind stays. When
+// the collector deletes it between the read and the write, the run creates
+// its own.
+func TestRunOwnsLeaseOfDeletedLedger(t *testing.T) {
+	for _, collect := range []bool{false, true} {
+		t.Run(map[bool]string{false: "kept", true: "collected before the write"}[collect], func(t *testing.T) {
+			f := newFixture(t)
+			released, d := "", int32(30)
+			renewed := metav1.NewMicroTime(time.Now().Add(-time.Hour))
+			other := metav1.OwnerReference{APIVersion: "v1", Kind: "ConfigMap", Name: "keep", UID: "uid-of-a-config-map"}
+			if err := f.clients.Sites["b"].Create(context.Background(), &coordinationv1.Lease{
+				ObjectMeta: metav1.ObjectMeta{Name: "run-1", Namespace: "tack-system", Labels: map[string]string{engine.LabelWorkload: "pg-other", "keep": "yes"},
+					OwnerReferences: []metav1.OwnerReference{{APIVersion: "failover.tako.id/v1", Kind: "SiteFailover", Name: "run-1", UID: "uid-of-a-deleted-ledger"}, other}},
+				Spec: coordinationv1.LeaseSpec{HolderIdentity: &released, RenewTime: &renewed, AcquireTime: &renewed, LeaseDurationSeconds: &d},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			w := &watchedLeases{collect: collect}
+			out, err := f.startWatched(w, time.Hour)
+			if err != nil {
+				t.Fatalf("run: %v\n%s", err, out)
+			}
+			if strings.Contains(out, "holds no lease") {
+				t.Errorf("the run held no lease:\n%s", out)
+			}
+			sf := f.ledger("b")
+			l := f.leaseOf("b")
+			want := []metav1.OwnerReference{{APIVersion: "failover.tako.id/v1", Kind: "SiteFailover", Name: "run-1", UID: sf.UID}}
+			if !collect {
+				want = append(want, other)
+			}
+			if fmt.Sprint(l.OwnerReferences) != fmt.Sprint(want) || l.Labels[engine.LabelWorkload] != "pg-main" || (!collect && l.Labels["keep"] != "yes") {
+				t.Errorf("after the run: owners %v, labels %v; want owners %v", l.OwnerReferences, l.Labels, want)
+			}
+			for i, h := range w.seen {
+				if !strings.HasPrefix(h, "tack "+version.Version+", process ") {
+					t.Fatalf("write %d: the Lease's holder is %q", i+2, h)
+				}
+			}
+			if note, err := engine.CheckLive(context.Background(), w, sf, time.Now()); note != "" || err != nil {
+				t.Errorf("CheckLive after the run: note %q, err %v", note, err)
+			}
+		})
 	}
 }
 

@@ -91,20 +91,7 @@ func (e *Env) holdLease(ctx context.Context, sf *failoverv1.SiteFailover) (relea
 	now := metav1.NewMicroTime(e.now())
 	seconds := int32(LeaseDuration / time.Second)
 	l, err := store.Lease(wctx, sf.Name)
-	switch {
-	case apierrors.IsNotFound(err):
-		l = &coordinationv1.Lease{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: sf.Name, Namespace: sf.Namespace,
-				Labels: map[string]string{LabelWorkload: sf.Spec.Workload.Name},
-				OwnerReferences: []metav1.OwnerReference{{
-					APIVersion: failoverv1.GroupVersion.String(), Kind: "SiteFailover", Name: sf.Name, UID: sf.UID,
-				}},
-			},
-			Spec: coordinationv1.LeaseSpec{HolderIdentity: &h.holder, LeaseDurationSeconds: &seconds, AcquireTime: &now, RenewTime: &now},
-		}
-		err = store.CreateLease(wctx, l)
-	case err == nil:
+	if err == nil {
 		if by := holderOf(l); by != "" && fresh(l, e.now()) {
 			e.printf("  note      run %s's lease was held by %s, renewed at %s: that process may still run it, and the ledger's writes stop one of the two\n",
 				sf.Name, by, l.Spec.RenewTime.UTC().Format(time.RFC3339))
@@ -116,8 +103,25 @@ func (e *Env) holdLease(ctx context.Context, sf *failoverv1.SiteFailover) (relea
 			}
 			l.Spec.LeaseTransitions = &n
 		}
+		if !ownedBy(l, sf) {
+			// The Lease of a deleted ledger of the same name, or one
+			// whose owner was removed: this run owns it from now on, or
+			// the garbage collector deletes it while the run runs, and
+			// CheckLive does not count it as this run's.
+			ownBy(l, sf)
+		}
 		l.Spec.HolderIdentity, l.Spec.LeaseDurationSeconds, l.Spec.AcquireTime, l.Spec.RenewTime = &h.holder, &seconds, &now, &now
+		// The garbage collector may delete such a Lease between the read
+		// and the write: this run then creates its own.
 		err = store.UpdateLease(wctx, l)
+	}
+	if apierrors.IsNotFound(err) {
+		l = &coordinationv1.Lease{
+			ObjectMeta: metav1.ObjectMeta{Name: sf.Name, Namespace: sf.Namespace},
+			Spec:       coordinationv1.LeaseSpec{HolderIdentity: &h.holder, LeaseDurationSeconds: &seconds, AcquireTime: &now, RenewTime: &now},
+		}
+		ownBy(l, sf)
+		err = store.CreateLease(wctx, l)
 	}
 	if err != nil {
 		e.printf("  note      run %s holds no lease (%v): tack abandon and tack run --take-over judge by its ledger whether a tack process runs it\n", sf.Name, err)
@@ -310,6 +314,22 @@ func ownedBy(l *coordinationv1.Lease, sf *failoverv1.SiteFailover) bool {
 		}
 	}
 	return false
+}
+
+// ownBy makes a Lease run sf's: sf's ledger is its one SiteFailover owner,
+// and it carries sf's workload label. An owner of another kind stays.
+func ownBy(l *coordinationv1.Lease, sf *failoverv1.SiteFailover) {
+	owners := []metav1.OwnerReference{{APIVersion: failoverv1.GroupVersion.String(), Kind: "SiteFailover", Name: sf.Name, UID: sf.UID}}
+	for _, o := range l.OwnerReferences {
+		if o.Kind != "SiteFailover" {
+			owners = append(owners, o)
+		}
+	}
+	l.OwnerReferences = owners
+	if l.Labels == nil {
+		l.Labels = map[string]string{}
+	}
+	l.Labels[LabelWorkload] = sf.Spec.Workload.Name
 }
 
 // lastWrite returns the newest time sf's ledger records, and its step
