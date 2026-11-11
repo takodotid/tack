@@ -617,14 +617,15 @@ var errUnread = errors.New("the site did not answer the read before its steps")
 //
 // The read checks the site up to 3 times, in every mode: the site has just
 // answered the check before its step, so a failed check is a blip, not a
-// lost site. The read's other sites get one check; gate does not use them.
+// lost site. Its reads are repeated as its checks are. It reads no other
+// site: gate does not use them, and an error there stopped the run (#64).
 func (r *runner) gate(ctx context.Context, site string) error {
 	if r.gated[site] {
 		return nil
 	}
 	checks := r.SiteChecks(r.sf.Spec.Mode, r.sf.Spec.To)
-	checks.Once = func(s string) bool { return s != site }
-	topo, err := r.discover(ctx, &r.sf.Spec.Workload.Spec, checks)
+	checks.Once = nil
+	topo, err := r.discover(ctx, &r.sf.Spec.Workload.Spec, oneSite{SiteChecks: checks, site: site})
 	if note := checks.Note(site); note != "" {
 		r.note(site, "the read before its steps: "+note)
 	}
@@ -825,7 +826,7 @@ func (r *runner) checkCaptured(ctx context.Context, i int) error {
 			r.printf("  note      site %s gave no answer: %s is not compared with %s\n", s.Site, c.Into, refString(c.Object))
 			continue
 		}
-		cl, err := r.Clients.Client(s.Site)
+		cl, err := r.checks.Client(s.Site)
 		if err != nil {
 			return fmt.Errorf("the read before the promotion: site %s: %w", s.Site, err)
 		}
@@ -882,6 +883,24 @@ func (c runChecks) Reachable(ctx context.Context, site string) error {
 func (c runChecks) ahead(ctx context.Context, sites []string) func() {
 	return c.r.checks.checkAhead(ctx, sites, c.Reachable)
 }
+
+// oneSite are the kube.Clients of a read of one site, the read before a
+// site's steps: every other site reports no answer, with no check and no
+// read.
+type oneSite struct {
+	*SiteChecks
+	site string
+}
+
+func (c oneSite) Reachable(ctx context.Context, site string) error {
+	if site != c.site {
+		return errNotRead
+	}
+	return c.SiteChecks.Reachable(ctx, site)
+}
+
+// ahead checks nothing at once: the read checks its one site itself.
+func (c oneSite) ahead(context.Context, []string) func() { return func() {} }
 
 // identify checks, once per process, that the site's context reaches the
 // cluster the run recorded for the site. A site the run has no record of,

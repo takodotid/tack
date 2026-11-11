@@ -65,27 +65,3 @@ func TestResumeAfterWaitingStopsWhenGitChanged(t *testing.T) {
 		t.Errorf("released after Git changed: %v", got)
 	}
 }
-
-// RFC0007 Requirement 5, the read before a site's steps: it checks the
-// site it reads up to 3 times, and every other site once, since it does
-// not use their state. Site b fails its one check; a's steps still run.
-func TestReadChecksOtherSitesOnce(t *testing.T) {
-	f := newFixture(t)
-	f.clients.SetDown("a", true)
-	if sf, err := f.start("b", failoverv1.ModeSiteLoss, engine.Options{}); err != nil {
-		t.Fatalf("run: %v %s", err, sf.Status.Message)
-	}
-	f.clients.SetDown("a", false)
-	before := f.clients.Checks["b"]
-	f.clients.Flap("b", false, false, false)
-	sf, err := f.resume("b", engine.Options{Fence: []string{"a"}})
-	if err != nil || sf.Status.State != failoverv1.RunSucceeded {
-		t.Fatalf("resume: %v %s %s", err, sf.Status.State, sf.Status.Message)
-	}
-	if n := f.clients.Checks["b"] - before; n != 1 {
-		t.Errorf("site b checked %d times by the read before a's steps, want 1", n)
-	}
-	if st := stepState(sf, "fence-a"); st != failoverv1.StepSucceeded {
-		t.Errorf("fence-a is %s", st)
-	}
-}

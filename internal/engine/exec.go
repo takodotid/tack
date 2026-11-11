@@ -396,7 +396,12 @@ func (r *runner) checkHeld(ctx context.Context, site string, obj failoverv1.Obje
 	if !planned {
 		return nil
 	}
-	by, err := r.Flux.HeldBy(ctx, site, obj)
+	var by string
+	err := r.checks.Read(ctx, site, "read the hold on "+refString(obj), func() error {
+		var err error
+		by, err = r.Flux.HeldBy(ctx, site, obj)
+		return err
+	})
 	switch {
 	case err != nil:
 		return err
@@ -482,7 +487,7 @@ func (r *runner) conditionsHold(u *unstructured.Unstructured, conds []failoverv1
 }
 
 func (r *runner) capture(ctx context.Context, s *failoverv1.Step) (string, error) {
-	c, err := r.Clients.Client(s.Site)
+	c, err := r.checks.Client(s.Site)
 	if err != nil {
 		return "", err
 	}

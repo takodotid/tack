@@ -47,35 +47,6 @@ func TestPlanChecksSitesAtOnce(t *testing.T) {
 	}
 }
 
-// The read before a site's steps checks every site at once: in a resume of
-// a site-loss run whose lost site came back, the read before its steps
-// checks b and c, which the resume did not check before.
-func TestReadBeforeStepsChecksSitesAtOnce(t *testing.T) {
-	s := newSites3(t)
-	ctx := context.Background()
-	s.clients.SetDown("a", true)
-	env := s.env("b")
-	p, err := env.MakePlan(ctx, engine.Request{Run: "run-1", Workload: s.w.Name, Spec: &s.w.Spec,
-		Request: driver.Request{From: "a", To: "b", Mode: failoverv1.ModeSiteLoss}})
-	if err != nil {
-		t.Fatalf("plan: %v", err)
-	}
-	if err := env.Start(ctx, p.SiteFailover, engine.Options{}); err != nil {
-		t.Fatalf("run: %v", err)
-	}
-	// Site a comes back still primary: the read before its steps stops the
-	// run there.
-	s.clients.SetDown("a", false)
-	env = s.env("b")
-	env.Runs = nil
-	env.Clients = testenv.NewAtOnce(s.clients, "b", "c")
-	err = env.Resume(ctx, s.ledger("b", "run-1"), engine.Options{})
-	sf := s.ledger("b", "run-1")
-	if !errors.Is(err, engine.ErrStopped) || sf.Status.Reason != failoverv1.ReasonFencedSiteIsPrimary {
-		t.Fatalf("err %v, %s %s: %s", err, sf.Status.State, sf.Status.Reason, sf.Status.Message)
-	}
-}
-
 // The read of the other sites checks the sites the process did not check
 // before at once: in a resume before the promotion, a and c.
 func TestReadOfOtherSitesChecksSitesAtOnce(t *testing.T) {
