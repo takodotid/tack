@@ -87,6 +87,52 @@ func TestAbandonRefusesRunWithFreshLease(t *testing.T) {
 	}
 }
 
+// Review of #67. A tack process takes the run's Lease while the operator
+// answers abandon's question, such as a tack resume started meanwhile: the
+// check before the question passed, and the check after it refuses, exits
+// 1 and leaves the ledger unchanged. --force goes on, and says once what it
+// goes on despite.
+func TestAbandonChecksLeaseAgainAfterQuestion(t *testing.T) {
+	for _, force := range []bool{false, true} {
+		t.Run(map[bool]string{false: "refused", true: "--force"}[force], func(t *testing.T) {
+			f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": append(testenv.Site("b", "a", 0), stoppedRun(t, "pg-main-earlier"))})
+			sf := ledgerAt(t, f, "b", "pg-main-earlier")
+			typeAfter(t, func() {
+				if err := f.clients.Sites["b"].Create(context.Background(), leaseFor(sf, otherProcess, fixedNow.Add(-time.Second))); err != nil {
+					t.Fatal(err)
+				}
+			})
+			args := []string{"abandon", sf.Name, "-f", "testdata/workload.yaml"}
+			if force {
+				args = append(args, "--force")
+			}
+			out, code := run(t, f, args...)
+			got := ledgerAt(t, f, "b", sf.Name)
+			question := strings.Index(out, "Type the workload name")
+			if question < 0 {
+				t.Fatalf("exit %d, no question:\n%s", code, out)
+			}
+			after := out[question:]
+			if !force {
+				if code != ExitError || !strings.Contains(after, "a tack process may still run the run: run pg-main-earlier is run by "+otherProcess+", whose lease on it was renewed at 2026-10-27T10:14:59Z") ||
+					!strings.Contains(after, "--force goes on all the same. Nothing was changed") {
+					t.Fatalf("exit %d, want %d with the refusal after the question:\n%s", code, ExitError, out)
+				}
+				if got.Status.Abandoned != nil || got.ResourceVersion != sf.ResourceVersion {
+					t.Errorf("the refused abandon changed the ledger: %+v", got.Status.Abandoned)
+				}
+				return
+			}
+			if code != ExitOK || got.Status.Abandoned == nil {
+				t.Fatalf("exit %d, abandoned %v:\n%s", code, got.Status.Abandoned, out)
+			}
+			if n := strings.Count(out, "  note      --force: going on, although run pg-main-earlier is run by "+otherProcess); n != 1 || !strings.Contains(after, "--force: going on") {
+				t.Errorf("%d notes of --force, want 1 after the question:\n%s", n, out)
+			}
+		})
+	}
+}
+
 // #65. tack run --take-over refuses a run whose Lease another process
 // renewed a moment ago: that process may still change the workload. It
 // refuses after the confirmation, before the ledger exists. --force goes

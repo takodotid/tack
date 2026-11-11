@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -111,16 +112,24 @@ func newAbandon(o *options) *cobra.Command {
 			// A process that runs the run holds its lease (#65): abandon
 			// checks it before it asks, and again after.
 			store, _ := env.Ledger.(engine.Leaser)
-			if err := o.checkLive(ctx, progress, store, sf, force); err != nil {
+			var said bytes.Buffer
+			if err := o.checkLive(ctx, io.MultiWriter(progress, &said), store, sf, force); err != nil {
 				return err
 			}
 			fmt.Fprintf(out, "Check that no tack process runs %s: abandon does not stop one. Only tack v1.3.0 and later honour the mark.\n", sf.Name)
 			if err := o.confirmThat(out, yes, sf.Spec.Workload.Name, "This changes only the run's ledger, at site "+sf.Spec.To+".", "abandoning this run"); err != nil {
 				return err
 			}
-			// The lines of the check before said it all; a refusal now
-			// still says why.
-			if err := o.checkLive(ctx, io.Discard, store, sf, force); err != nil {
+			// A process may have taken the run's lease during the question.
+			// The check prints only lines the check before did not: a
+			// refusal still says why, and --force says once what it goes on
+			// despite.
+			var again bytes.Buffer
+			err = o.checkLive(ctx, &again, store, sf, force)
+			if again.String() != said.String() {
+				_, _ = again.WriteTo(progress)
+			}
+			if err != nil {
 				return err
 			}
 			sf.Status.Abandoned = &failoverv1.Abandonment{At: metav1.NewTime(o.now()), Reason: reason}
