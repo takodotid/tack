@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/engine"
@@ -250,5 +251,31 @@ func TestAbandonedAfterCreateRecordsHistory(t *testing.T) {
 	}
 	if !f.hasEvent("b", "Warning RunAbandoned: the search for other runs after the ledger's creation failed") {
 		t.Errorf("no Event RunAbandoned: %v", testenv.Events(f.clients.Sites["b"], "tack-system", "run-1"))
+	}
+}
+
+// #66. A step's message from outside Tack, such as Flux's, has no bound,
+// and the ledger kept it whole, as it kept the run's message that quotes
+// it. Each is cut to MaxMessage bytes in the ledger; the progress line
+// keeps the whole message.
+func TestLongMessagesAreCut(t *testing.T) {
+	f := newFixture(t)
+	long := "Flux says: " + strings.Repeat("ö", 10<<10)
+	f.flux.Fail["Reconcile"] = errors.New(long)
+	var out bytes.Buffer
+	env := f.env("b")
+	env.Out = &out
+	if err := env.Start(context.Background(), f.plan("b", failoverv1.ModePlanned), engine.Options{}); !errors.Is(err, engine.ErrStopped) {
+		t.Fatalf("run: %v", err)
+	}
+	sf := f.ledger("b")
+	msg := stepMessage(sf, "reconcile-hold-a")
+	for what, m := range map[string]string{"the step's message": msg, "the run's message": sf.Status.Message} {
+		if len(m) > 8<<10 || !strings.HasSuffix(m, " [cut]") || !utf8.ValidString(m) {
+			t.Errorf("%s: %d bytes, ends %q, want at most %d ending with [cut]", what, len(m), m[max(0, len(m)-12):], 8<<10)
+		}
+	}
+	if !strings.Contains(msg, "Flux says: ööö") || !strings.Contains(out.String(), long) {
+		t.Errorf("the message lost its start, or the progress line its end")
 	}
 }

@@ -564,14 +564,20 @@ func CheckWriter(sf *failoverv1.SiteFailover) error {
 		ErrNewerLedger, sf.Name, by, version.Version, by)
 }
 
-// CleanStatus cleans every message of a status: the run's, each step's,
-// the reason it was abandoned, and each history entry's, which it then
-// cuts to MaxHistoryMessage bytes ([RFC#0003] Requirement 22). Every
-// ledger write applies it.
+// MaxMessage is the most bytes of the run's message and of each step's in
+// the ledger ([RFC#0003] Requirement 4): a message from outside Tack, such
+// as Flux's, has no bound, and a ledger must stay well within what the API
+// server stores (#66). The progress line keeps the whole message.
+const MaxMessage = 8 << 10
+
+// CleanStatus cleans every message of a status: the run's and each
+// step's, which it cuts to MaxMessage bytes, the reason it was abandoned,
+// and each history entry's, which it cuts to MaxHistoryMessage bytes
+// ([RFC#0003] Requirement 22). Every ledger write applies it.
 func CleanStatus(st *failoverv1.SiteFailoverStatus) {
-	st.Message = Clean(st.Captured, st.Message)
+	st.Message = cut(Clean(st.Captured, st.Message), MaxMessage)
 	for i := range st.Steps {
-		st.Steps[i].Message = Clean(st.Captured, st.Steps[i].Message)
+		st.Steps[i].Message = cut(Clean(st.Captured, st.Steps[i].Message), MaxMessage)
 	}
 	if a := st.Abandoned; a != nil {
 		a.Reason = Clean(st.Captured, a.Reason)
