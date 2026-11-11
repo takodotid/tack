@@ -118,7 +118,9 @@ func newAbandon(o *options) *cobra.Command {
 			if err := o.confirmThat(out, yes, sf.Spec.Workload.Name, "This changes only the run's ledger, at site "+sf.Spec.To+".", "abandoning this run"); err != nil {
 				return err
 			}
-			if err := o.checkLive(ctx, progress, store, sf, force); err != nil {
+			// The lines of the check before said it all; a refusal now
+			// still says why.
+			if err := o.checkLive(ctx, io.Discard, store, sf, force); err != nil {
 				return err
 			}
 			sf.Status.Abandoned = &failoverv1.Abandonment{At: metav1.NewTime(o.now()), Reason: reason}
@@ -184,7 +186,7 @@ func (o *options) checkLive(ctx context.Context, progress io.Writer, store engin
 	case err == nil:
 		return nil
 	case !force:
-		return fmt.Errorf("%w. Nothing was changed", err)
+		return fmt.Errorf("%w. --force goes on all the same. Nothing was changed", err)
 	}
 	fmt.Fprintf(progress, "  note      --force: going on, although %v\n", strings.TrimPrefix(err.Error(), engine.ErrMayRun.Error()+": "))
 	return nil

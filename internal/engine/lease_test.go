@@ -297,7 +297,7 @@ func TestCheckLive(t *testing.T) {
 			switch {
 			case tt.refuse == "" && err != nil:
 				t.Errorf("refused: %v", err)
-			case tt.refuse != "" && (!errors.Is(err, engine.ErrMayRun) || !strings.Contains(err.Error(), tt.refuse) || !strings.Contains(err.Error(), "--force goes on all the same")):
+			case tt.refuse != "" && (!errors.Is(err, engine.ErrMayRun) || !strings.Contains(err.Error(), tt.refuse)):
 				t.Errorf("err %v, want a refusal with %q", err, tt.refuse)
 			}
 		})

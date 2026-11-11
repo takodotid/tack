@@ -279,7 +279,7 @@ func CheckLive(ctx context.Context, store Leaser, sf *failoverv1.SiteFailover, n
 			if by == "" || !fresh(l, now) {
 				return "", nil
 			}
-			return "", fmt.Errorf("%w: run %s is run by %s, whose lease on it was renewed at %s and holds until %s. Stop that process, or wait until then: tack abandon does not stop it, and its step in flight can land after a new run starts. --force goes on all the same",
+			return "", fmt.Errorf("%w: run %s is run by %s, whose lease on it was renewed at %s and holds until %s. Stop that process, or wait until then: tack abandon does not stop it, and its step in flight can land after a new run starts",
 				ErrMayRun, sf.Name, by, l.Spec.RenewTime.UTC().Format(time.RFC3339), expiry(l).UTC().Format(time.RFC3339))
 		case !apierrors.IsNotFound(err):
 			note = fmt.Sprintf("run %s's lease could not be read (%v)", sf.Name, err)
@@ -297,7 +297,7 @@ func CheckLive(ctx context.Context, store Leaser, sf *failoverv1.SiteFailover, n
 	if step != nil {
 		in = "in step " + step.ID
 	}
-	return note, fmt.Errorf("%w: run %s is Running with no lease that tells, and its ledger was last written at %s by tack %s: a tack process may still run it, %s, until %s. Check that no tack process runs it, then wait until then: tack abandon does not stop one, and its step in flight can land after a new run starts. --force goes on all the same",
+	return note, fmt.Errorf("%w: run %s is Running with no lease that tells, and its ledger was last written at %s by tack %s: a tack process may still run it, %s, until %s. Check that no tack process runs it, then wait until then: tack abandon does not stop one, and its step in flight can land after a new run starts",
 		ErrMayRun, sf.Name, last.UTC().Format(time.RFC3339), orUnknown(sf.Status.WrittenBy), in, until.UTC().Format(time.RFC3339))
 }
 

@@ -79,7 +79,8 @@ func TestAbandonRefusesRunWithFreshLease(t *testing.T) {
 				t.Fatalf("exit %d, abandoned %v:\n%s", code, got.Status.Abandoned, out)
 			}
 			flags := got.Status.History[len(got.Status.History)-1].Flags
-			if tt.force != slices.Contains(flags, "--force") || tt.force != strings.Contains(out, "  note      --force: going on, although run pg-main-earlier is run by "+otherProcess) {
+			notes := strings.Count(out, "  note      --force: going on, although run pg-main-earlier is run by "+otherProcess)
+			if tt.force != slices.Contains(flags, "--force") || tt.force != (notes == 1) || notes > 1 || strings.Contains(out, "all the same\n") {
 				t.Errorf("--force %v: history flags %v:\n%s", tt.force, flags, out)
 			}
 		})
