@@ -115,7 +115,7 @@ func newAbandon(o *options) *cobra.Command {
 				return err
 			}
 			fmt.Fprintf(out, "Check that no tack process runs %s: abandon does not stop one. Only tack v1.3.0 and later honour the mark.\n", sf.Name)
-			if err := o.confirm(out, yes, sf.Spec.Workload.Name); err != nil {
+			if err := o.confirmThat(out, yes, sf.Spec.Workload.Name, "This changes only the run's ledger, at site "+sf.Spec.To+".", "abandoning this run"); err != nil {
 				return err
 			}
 			if err := o.checkLive(ctx, progress, store, sf, force); err != nil {
