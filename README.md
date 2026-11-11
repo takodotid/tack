@@ -181,6 +181,7 @@ Tack also needs:
 | A kube context per site | All in one kubeconfig (`--kubeconfig`, or the standard loading rules). To combine one file per cluster, see [docs/workload.md](docs/workload.md#every-sites-context-in-one-kubeconfig). The permissions are listed in [docs/operations.md](docs/operations.md#permissions). |
 | Git access | Through the operator's `git` configuration, such as an SSH agent or a credential helper. Tack runs `git` with `GIT_TERMINAL_PROMPT=0` and stores no credential. The branch must accept a push from those credentials. |
 | A Workload file | The sites, their contexts, the Git repository and where each field lives in it: [docs/workload.md](docs/workload.md). |
+| Clocks kept by NTP | Every site's API server, and every host that runs `tack`, within a few seconds of each other. Tack orders the runs of different sites by each ledger's creation time, from its site's API server, with a margin of 10 s ([RFC#0003](rfcs/RFC0003.md#requirements), Requirement 18), and a run's Lease, timed by the host that renews it, holds 10 s past its duration (Requirement 28). Clocks further apart can let an older run resume after a newer one, or let `tack abandon` mark a run that a process still runs. |
 
 ### Verify a release
 
