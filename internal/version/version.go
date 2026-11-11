@@ -15,10 +15,18 @@ import (
 // (FromModule). Otherwise it stays dev.
 var Version = "dev"
 
-func init() {
-	if info, ok := debug.ReadBuildInfo(); ok && Version == "dev" {
-		Version = FromModule(info.Main.Version, Version)
+func init() { Version = resolve(Version, debug.ReadBuildInfo) }
+
+// resolve returns the binary's version: v, as -X set it, or else, for a
+// v of dev, the module version that read gives, when FromModule takes it.
+func resolve(v string, read func() (*debug.BuildInfo, bool)) string {
+	if v != "dev" {
+		return v
 	}
+	if info, ok := read(); ok {
+		return FromModule(info.Main.Version, v)
+	}
+	return v
 }
 
 // pseudo matches the version Go records for a build of a commit after the

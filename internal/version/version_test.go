@@ -1,6 +1,9 @@
 package version
 
-import "testing"
+import (
+	"runtime/debug"
+	"testing"
+)
 
 // A release build links the docs at its tag. Every other build links
 // main: git describe names a build after a tag, or a dirty one, with no
@@ -116,5 +119,31 @@ func TestFromModule(t *testing.T) {
 	// go test records no module version: the tests run as dev.
 	if Version != "dev" {
 		t.Errorf("Version = %q in a test binary, want dev", Version)
+	}
+}
+
+// #63. The version a binary takes: -X's, or else Go's record of the
+// module version when it names a release or a build after one.
+func TestResolve(t *testing.T) {
+	built := func(v string) func() (*debug.BuildInfo, bool) {
+		return func() (*debug.BuildInfo, bool) {
+			return &debug.BuildInfo{Main: debug.Module{Path: "github.com/takodotid/tack", Version: v}}, true
+		}
+	}
+	none := func() (*debug.BuildInfo, bool) { return nil, false }
+	for _, tt := range []struct {
+		name, x string
+		read    func() (*debug.BuildInfo, bool)
+		want    string
+	}{
+		{name: "go install of a tag", x: "dev", read: built("v1.4.0"), want: "v1.4.0"},
+		{name: "go build after a tag", x: "dev", read: built("v1.4.1-0.20261111112249-8392d126c7c4+dirty"), want: "v1.4.1-0.20261111112249-8392d126c7c4+dirty"},
+		{name: "go run, or no version control", x: "dev", read: built("(devel)"), want: "dev"},
+		{name: "no build information", x: "dev", read: none, want: "dev"},
+		{name: "-X of make build", x: "v1.4.0-11-gdbe1a2e", read: built("v1.4.0"), want: "v1.4.0-11-gdbe1a2e"},
+	} {
+		if got := resolve(tt.x, tt.read); got != tt.want {
+			t.Errorf("%s: resolve = %q, want %q", tt.name, got, tt.want)
+		}
 	}
 }
