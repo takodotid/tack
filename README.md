@@ -212,7 +212,7 @@ Upgrade in this order:
 
 1. **Finish or stop every run.** `tack status -f workload.yaml`, for each workload, lists every run `Succeeded`, or `Stopped` or `Waiting` with no `tack` process running it. A run that resumes after the upgrade runs its remaining steps by the new CLI's rules.
 2. **The CRD at every site,** the way it was installed: the `helm upgrade --install` above, or `kubectl apply --server-side` of the new CRD. Do this before any operator runs the new CLI against the site. A CRD older than the CLI drops the fields it does not know, without an error: `tack run` refuses to create a ledger at such a site, and status writes there lose those fields.
-3. **Every operator's CLI together,** and every script that runs `tack`. A CLI drops the status fields it does not know when it writes a ledger. From v1.3.0, each write records its CLI's version in `status.writtenBy`, and a CLI of an older release refuses to resume or abandon that run, and names the version to use ([RFC#0003](rfcs/RFC0003.md#requirements), Requirement 24). A CLI older than v1.3.0 does not check.
+3. **Every operator's CLI together,** and every script that runs `tack`. A CLI drops the status fields it does not know when it writes a ledger. From v1.3.0, each write records its CLI's version in `status.writtenBy`, and a CLI of an older release refuses to resume or abandon that run, and names the version to use ([RFC#0003](rfcs/RFC0003.md#requirements), Requirement 24). So does a build whose version names no release, such as `dev` from `go build -buildvcs=false`; `go install` of a release tag takes that tag's version. A CLI older than v1.3.0 does not check.
 
 Each release also needs:
 

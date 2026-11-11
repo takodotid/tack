@@ -269,7 +269,11 @@ func printStatus(w io.Writer, sf *failoverv1.SiteFailover) {
 	}
 	if st.WrittenBy != "" {
 		fmt.Fprintf(w, "Written by: tack %s", st.WrittenBy)
-		if version.Newer(st.WrittenBy, version.Version) {
+		switch {
+		case !version.Newer(st.WrittenBy, version.Version):
+		case !version.Named(version.Version):
+			fmt.Fprintf(w, ", a release, and this tack %s names none: tack resume and tack abandon refuse the run, and this output may leave out fields this tack does not know", version.Version)
+		default:
 			fmt.Fprintf(w, ", newer than this tack %s: tack resume and tack abandon refuse the run, and this output leaves out the fields this tack does not know", version.Version)
 		}
 		fmt.Fprintln(w)

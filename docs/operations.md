@@ -126,7 +126,7 @@ Each search for runs reads every ledger of the workload at each site that answer
 | Keep the `--keep` newest runs that succeeded, at least 1. Abandoned and taken-over runs do not count among them: they are kept anyway. | The newest that succeeded records the last switch. |
 | Keep a run with a follow-up `Rebuild`. | `tack plan` refuses a planned switchover to that member while such a run says it diverged ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 14). Prune does not read the member: delete such a run by hand once the member was created again after the run started. |
 | Keep a run whose spec takes over a run that is kept, not abandoned, and not marked `status.supersededBy`. | That run counts as taken over only through this run's spec; without it, it would block every new run. |
-| Keep a run that a newer `tack` last wrote (`status.writtenBy`). | A newer release may need what it recorded. |
+| Keep a run that a newer `tack` last wrote (`status.writtenBy`). A `tack` whose version names no release, such as `dev`, keeps every run that a release wrote. | A newer release may need what it recorded. |
 | Delete by name, each only while it is the object that was read; stop at the first error. | A run that started, or a ledger written, while the operator confirmed is not deleted on a stale list. |
 
 To delete a kept `Rebuild` run by hand, once its member was rebuilt:

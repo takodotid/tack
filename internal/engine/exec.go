@@ -543,14 +543,20 @@ var ErrNewerLedger = errors.New("a newer tack wrote the ledger")
 
 // CheckWriter refuses a ledger that a newer release of tack wrote last
 // ([RFC#0003] Requirement 24): this tack's writes would drop the status
-// fields that it does not know. A version that names no release, on
-// either side, is not compared (version.Newer).
+// fields that it does not know. A tack whose version names no release,
+// such as dev, refuses a ledger that a release wrote (#63); a ledger whose
+// writer names no release is not refused (version.Newer).
 func CheckWriter(sf *failoverv1.SiteFailover) error {
-	if by := sf.Status.WrittenBy; version.Newer(by, version.Version) {
-		return fmt.Errorf("%w: run %s was last written by tack %s, and this tack is %s, which is older: its writes would drop the status fields that it does not know. Nothing was changed: use tack %s or later",
+	by := sf.Status.WrittenBy
+	switch {
+	case !version.Newer(by, version.Version):
+		return nil
+	case !version.Named(version.Version):
+		return fmt.Errorf("%w: run %s was last written by tack %s, and this tack is %s, which names no release, so it cannot tell which status fields that ledger holds: its writes could drop them. Nothing was changed: use tack %s or later",
 			ErrNewerLedger, sf.Name, by, version.Version, by)
 	}
-	return nil
+	return fmt.Errorf("%w: run %s was last written by tack %s, and this tack is %s, which is older: its writes would drop the status fields that it does not know. Nothing was changed: use tack %s or later",
+		ErrNewerLedger, sf.Name, by, version.Version, by)
 }
 
 // CleanStatus cleans every message of a status: the run's, each step's,

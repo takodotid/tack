@@ -213,6 +213,8 @@ func decidePrune(found []foundRun, keep int) (*prunePlan, error) {
 			why = "follow-up Rebuild for site " + rebuild(sf) + ": delete it by hand once that member was rebuilt"
 		case marks(sf, byName) != "":
 			why = "only its spec marks run " + marks(sf, byName) + " as taken over"
+		case version.Newer(sf.Status.WrittenBy, version.Version) && !version.Named(version.Version):
+			why = "written by tack " + sf.Status.WrittenBy + ", a release, and this tack " + version.Version + " names none"
 		case version.Newer(sf.Status.WrittenBy, version.Version):
 			why = "written by tack " + sf.Status.WrittenBy + ", newer than this tack " + version.Version
 		}
