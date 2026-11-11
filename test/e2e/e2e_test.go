@@ -102,6 +102,13 @@ func setup() error {
 	if err := build.Run(); err != nil {
 		return fmt.Errorf("build tack: %w", err)
 	}
+	// go build records the module version that Git gives, which the binary
+	// takes as its own (#63): the checks of what it records compare with it.
+	out, err := exec.Command(tackBin, "--version").Output()
+	if err != nil {
+		return fmt.Errorf("tack --version: %w", err)
+	}
+	version.Version = strings.TrimPrefix(strings.TrimSpace(string(out)), "tack version ")
 	values := filepath.Join(work, "chart-values.yaml")
 	if err := os.WriteFile(values, []byte(rbacValues), 0o644); err != nil {
 		return err
