@@ -361,7 +361,7 @@ func TestInstallChecksSHA256(t *testing.T) {
 	}
 	for _, tool := range []string{"kind", "kubectl", "flux", "helm", "cosign"} {
 		for _, arch := range []string{"amd64", "arm64"} {
-			if !regexp.MustCompile(`\[` + tool + `-` + arch + `\]=[0-9a-f]{64}\n`).Match(b) {
+			if !regexp.MustCompile(`(?m)^` + tool + ` +v\d+\.\d+\.\d+ +` + arch + ` +[0-9a-f]{64}$`).Match(b) {
 				t.Errorf("install.sh pins no SHA-256 for %s on %s", tool, arch)
 			}
 		}
@@ -384,6 +384,84 @@ func TestInstallChecksSHA256(t *testing.T) {
 		}
 		if entries, _ := os.ReadDir(dest); len(entries) > 0 {
 			t.Errorf("%v: installed %d files", tt.tools, len(entries))
+		}
+	}
+}
+
+// install.sh refuses a tool whose two lines pin different versions, such as after an update of one line only, and
+// installs nothing.
+func TestInstallRefusesTwoVersions(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("install.sh pins Linux only")
+	}
+	b, err := os.ReadFile("../tools/install.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := regexp.MustCompile(`(?m)^(kind +)v0\.\d+\.\d+( +arm64 )`)
+	if !line.Match(b) {
+		t.Fatal("install.sh pins no kind for arm64")
+	}
+	script := filepath.Join(t.TempDir(), "install.sh")
+	if err := os.WriteFile(script, line.ReplaceAll(b, []byte("${1}v0.1.0${2}")), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dest := t.TempDir()
+	out, err := exec.Command(script, dest, "kind").CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "install.sh: the lines of kind pin versions 'v0.1.0 v0.") {
+		t.Errorf("exit %v, want a refusal: %s", err, out)
+	}
+	if entries, _ := os.ReadDir(dest); len(entries) > 0 {
+		t.Errorf("installed %d files", len(entries))
+	}
+}
+
+// #66. Renovate did not update the tools' pins. renovate.json's custom managers read every line of install.sh: the
+// version of each, and the SHA-256 of kind, flux and cosign, whose downloads are GitHub release assets. kubectl and
+// helm have their SHA-256 copied by hand: no manager reads it, so Renovate never writes something else there.
+func TestRenovateReadsEveryPin(t *testing.T) {
+	var cfg struct {
+		CustomManagers []struct {
+			ManagerFilePatterns []string
+			MatchStrings        []string
+			DatasourceTemplate  string
+		}
+	}
+	readYAML(t, "renovate.json", &cfg)
+	b, err := os.ReadFile("../tools/install.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pins := regexp.MustCompile(`(?m)^(\w+) +(v\S+) +(amd64|arm64) +([0-9a-f]{64})$`).FindAllStringSubmatch(string(b), -1)
+	if len(pins) != 10 {
+		t.Fatalf("install.sh has %d pin lines, want 10", len(pins))
+	}
+	digests := map[string]bool{"kind": true, "flux": true, "cosign": true, "kubectl": false, "helm": false}
+	for _, pin := range pins {
+		var found []string
+		for _, m := range cfg.CustomManagers {
+			if len(m.ManagerFilePatterns) != 1 || m.ManagerFilePatterns[0] != `/^hack/tools/install\.sh$/` {
+				continue
+			}
+			for _, ms := range m.MatchStrings {
+				re := regexp.MustCompile(ms)
+				g := re.FindStringSubmatch(pin[0])
+				if g == nil {
+					continue
+				}
+				dep, value := g[re.SubexpIndex("depName")], g[re.SubexpIndex("currentValue")]
+				digest := ""
+				if i := re.SubexpIndex("currentDigest"); i >= 0 {
+					digest = g[i]
+				}
+				found = append(found, m.DatasourceTemplate)
+				if dep != pin[1] || value != pin[2] || digest != map[bool]string{true: pin[4]}[digests[pin[1]]] {
+					t.Errorf("%s: read as %s %s, digest %q", pin[0], dep, value, digest)
+				}
+			}
+		}
+		if len(found) != 1 {
+			t.Errorf("%s: read by %d match strings (%v), want 1", pin[0], len(found), found)
 		}
 	}
 }

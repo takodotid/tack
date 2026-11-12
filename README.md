@@ -329,7 +329,7 @@ The end-to-end test builds two kind clusters with Flux, CloudNativePG, Strait an
 | git, openssl, curl, sha256sum | any |
 | Internet access | to pull images, and to fetch CloudNativePG's release manifest and Strait's source at the commit pinned in `test/e2e/env/lib.sh` |
 
-`hack/tools/install.sh [DIR]` installs kind, kubectl, flux and helm at these versions into `DIR` (default `bin/tools`), and fails unless each download matches the SHA-256 pinned in the script; add `DIR` to `PATH`. It runs on Linux, amd64 or arm64.
+`hack/tools/install.sh [DIR]` installs kind, kubectl, flux and helm at these versions into `DIR` (default `bin/tools`), and fails unless each download matches the SHA-256 pinned in the script; add `DIR` to `PATH`. It runs on Linux, amd64 or arm64. `TACK_TOOLS_ARCH=arm64` checks the downloads of the other architecture, as CI's `lint` job does.
 
 ```sh
 make e2e
