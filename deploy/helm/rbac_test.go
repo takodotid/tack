@@ -527,7 +527,7 @@ func TestNotesPrintCRDValues(t *testing.T) {
 		if !strings.Contains(notes, tt.want) || !strings.Contains(notes, "helm upgrade without values reuses these") {
 			t.Errorf("%v: the notes lack %q:\n%s", tt.set, tt.want, notes)
 		}
-		if strings.Contains(notes, warning) != tt.warning {
+		if strings.Contains(notes, warning) != tt.warning || strings.Contains(notes, "upgrade with --reset-then-reuse-values --set crds.keep=true") != tt.warning {
 			t.Errorf("%v: the warning: %v, want %v:\n%s", tt.set, !tt.warning, tt.warning, notes)
 		}
 		if strings.Contains(notes, "crds.install is false: this release does not install or upgrade the CRD") == tt.install {

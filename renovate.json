@@ -16,7 +16,7 @@
       "dependencyDashboardApproval": true
     },
     {
-      "description": "The tools of hack/tools/install.sh, in a pull request of their own, apart from group:allNonMajor: a pin that does not match its download fails install.sh, and so CI's jobs, until it is fixed. CI's lint job checks every pin, for amd64 and arm64.",
+      "description": "The tools of hack/tools/install.sh, in a pull request of their own, apart from group:allNonMajor: a pin that does not match its download fails install.sh, and so CI's lint job, which installs every pin for amd64 and arm64, until it is fixed.",
       "matchManagers": [
         "custom.regex"
       ],
@@ -46,7 +46,7 @@
   ],
   "customManagers": [
     {
-      "description": "hack/tools/install.sh: kind, flux and cosign, whose downloads are GitHub release assets. Renovate updates each line's version and its SHA-256 together.",
+      "description": "hack/tools/install.sh: kind, flux and cosign, whose downloads are GitHub release assets. Renovate is asked to update each line's version and its SHA-256 together; CI's lint job fails a SHA-256 that does not match.",
       "customType": "regex",
       "managerFilePatterns": [
         "/^hack/tools/install\\.sh$/"

@@ -12,8 +12,8 @@ tools=("$@")
 [[ ${#tools[@]} -gt 0 ]] || tools=(kind kubectl flux helm)
 
 # One line per tool and architecture: the tool, its version, the architecture, and the SHA-256 of that download, copied
-# from the project's release. Both lines of a tool must name the same version. Renovate updates each line's version, and
-# for kind, flux and cosign its SHA-256 too (renovate.json).
+# from the project's release. Both lines of a tool must name the same version. renovate.json asks Renovate to update
+# each line's version, and for kind, flux and cosign its SHA-256 too ([RFC#0009] Limitations).
 PINS='
 kind     v0.33.0  amd64  aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
 kind     v0.33.0  arm64  20022bee6cfcd5086cb7234d218e3454e6090022f2a8f55d1fa7fcf42c3867a2

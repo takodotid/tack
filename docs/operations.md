@@ -135,7 +135,7 @@ To delete an abandoned or taken-over run by hand, once its record no longer matt
 | Check | How |
 |---|---|
 | No object still names `RUN` as its holder. | `tack status RUN -f workload.yaml` lists each object the run held; for each, `kubectl --context SITE_CTX -n NS get KIND NAME -o jsonpath='{.metadata.annotations.failover\.tako\.id/held-by}{"\n"}'` prints something other than `RUN`. Otherwise remove the hold first ([runbooks/abandon-run.md](runbooks/abandon-run.md#remove-a-hold-left-behind)). |
-| It has no follow-up `Rebuild`, or that site's member was created again 10 s or more after the run started. | `tack status RUN -f workload.yaml` lists its follow-ups and its start; `kubectl --context "$ctx" -n db get cluster pg-a -o jsonpath='{.metadata.creationTimestamp}{"\n"}'` prints the member's creation. |
+| It has no follow-up `Rebuild`, or that site's member was created again 10 s or more after the run started. | `tack status RUN -f workload.yaml` lists its follow-ups and its start; `kubectl --context SITE_CTX -n NS get cluster MEMBER -o jsonpath='{.metadata.creationTimestamp}{"\n"}'` prints the creation of that site's member, as the Workload file names it. |
 | Its spec takes over no run that is still listed, neither abandoned nor marked `status.supersededBy`. | `kubectl --context T_CTX -n tack-system get sfo RUN -o jsonpath='{.spec.takeOver} {.spec.takeOvers}{"\n"}'`, then `tack status` lists each run it names. Deleting `RUN` would make such a run block every new run. |
 
 ```sh
