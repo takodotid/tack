@@ -4,3 +4,11 @@
 {{- end }}
 Writing a SiteFailover ledger is privileged. Check at this site, before the first run and after each change of RBAC, that only the operators may create, update, patch or delete sitefailovers, or update or patch sitefailovers/status, in namespace {{ .Release.Namespace }}:
 https://github.com/takodotid/tack/blob/{{ $ref }}/docs/operations.md#who-may-write-ledgers
+
+The SiteFailover CRD: crds.install={{ .Values.crds.install }}, crds.keep={{ .Values.crds.keep }}. helm upgrade without values reuses these; with --set or -f, and without --reuse-values, each value not given goes back to the chart's default.
+{{- if and .Values.crds.install (not .Values.crds.keep) }}
+WARNING: crds.keep is false, so helm uninstall, or an upgrade with crds.install=false, deletes the CRD and every ledger at this site with it, a run not finished or a Rebuild follow-up not done among them. It stays false across upgrades without values. To keep the CRD, upgrade with --reuse-values --set crds.keep=true.
+{{- end }}
+{{- if not .Values.crds.install }}
+crds.install is false: this release does not install or upgrade the CRD. Apply each release's CRD at this site before its CLI runs against it.
+{{- end }}
