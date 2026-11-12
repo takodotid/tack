@@ -54,6 +54,10 @@ rules:
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create"]
+  # Row 17
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "create", "update"]
   {{- if $rbac.prune }}
   # Row 16, only with rbac.prune
   - apiGroups: ["failover.tako.id"]

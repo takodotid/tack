@@ -250,3 +250,36 @@ func TestPruneStopsAtFirstError(t *testing.T) {
 		t.Errorf("site b holds %s, want pg-main-four deleted, and the rest kept", got)
 	}
 }
+
+// #63. A tack whose version names no release, such as dev, keeps every run
+// that a release wrote: it cannot tell which status fields those ledgers
+// hold. A run that such a build wrote, or a release before v1.3.0, which
+// recorded no version, it may delete.
+func TestPruneByDevBuildKeepsRunsOfReleases(t *testing.T) {
+	defer func(v string) { version.Version = v }(version.Version)
+	version.Version = "dev"
+	release := doneRun(t, "pg-main-release", 3*time.Hour)
+	release.Status.WrittenBy = "v1.4.0"
+	dev := doneRun(t, "pg-main-dev", 4*time.Hour)
+	dev.Status.WrittenBy = "dev"
+	old := doneRun(t, "pg-main-old", 5*time.Hour)
+	old.Status.WrittenBy = ""
+	newest := doneRun(t, "pg-main-newest", time.Hour)
+	newest.Status.WrittenBy = "dev"
+	f := newFactory(map[string][]client.Object{
+		"a": testenv.Site("a", "a", 2),
+		"b": append(testenv.Site("b", "a", 0), newest, release, dev, old),
+	})
+	out, code := run(t, f, "prune", "-f", "testdata/workload.yaml", "--keep", "1", "--yes")
+	if code != ExitOK || !strings.Contains(out, "keep: written by tack v1.4.0, a release, and this tack dev names none\n") ||
+		!strings.Contains(out, "Deleted 2 ledgers of workload pg-main; kept 2.") {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	for name, kept := range map[string]bool{"pg-main-newest": true, "pg-main-release": true, "pg-main-dev": false, "pg-main-old": false} {
+		sf := &failoverv1.SiteFailover{}
+		err := f.clients.Sites["b"].Get(context.Background(), client.ObjectKey{Namespace: "tack-system", Name: name}, sf)
+		if (err == nil) != kept {
+			t.Errorf("%s: read %v, want kept %v", name, err, kept)
+		}
+	}
+}

@@ -45,6 +45,9 @@ func (o Options) Flags() []string {
 	if o.Yes {
 		out = append(out, "--yes")
 	}
+	if o.Force {
+		out = append(out, "--force")
+	}
 	return out
 }
 

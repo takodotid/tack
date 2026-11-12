@@ -396,7 +396,12 @@ func (r *runner) checkHeld(ctx context.Context, site string, obj failoverv1.Obje
 	if !planned {
 		return nil
 	}
-	by, err := r.Flux.HeldBy(ctx, site, obj)
+	var by string
+	err := r.checks.Read(ctx, site, "read the hold on "+refString(obj), func() error {
+		var err error
+		by, err = r.Flux.HeldBy(ctx, site, obj)
+		return err
+	})
 	switch {
 	case err != nil:
 		return err
@@ -482,7 +487,7 @@ func (r *runner) conditionsHold(u *unstructured.Unstructured, conds []failoverv1
 }
 
 func (r *runner) capture(ctx context.Context, s *failoverv1.Step) (string, error) {
-	c, err := r.Clients.Client(s.Site)
+	c, err := r.checks.Client(s.Site)
 	if err != nil {
 		return "", err
 	}
@@ -543,24 +548,36 @@ var ErrNewerLedger = errors.New("a newer tack wrote the ledger")
 
 // CheckWriter refuses a ledger that a newer release of tack wrote last
 // ([RFC#0003] Requirement 24): this tack's writes would drop the status
-// fields that it does not know. A version that names no release, on
-// either side, is not compared (version.Newer).
+// fields that it does not know. A tack whose version names no release,
+// such as dev, refuses a ledger that a release wrote (#63); a ledger whose
+// writer names no release is not refused (version.Newer).
 func CheckWriter(sf *failoverv1.SiteFailover) error {
-	if by := sf.Status.WrittenBy; version.Newer(by, version.Version) {
-		return fmt.Errorf("%w: run %s was last written by tack %s, and this tack is %s, which is older: its writes would drop the status fields that it does not know. Nothing was changed: use tack %s or later",
+	by := sf.Status.WrittenBy
+	switch {
+	case !version.Newer(by, version.Version):
+		return nil
+	case !version.Named(version.Version):
+		return fmt.Errorf("%w: run %s was last written by tack %s, and this tack is %s, which names no release, so it cannot tell which status fields that ledger holds: its writes could drop them. Nothing was changed: use tack %s or later",
 			ErrNewerLedger, sf.Name, by, version.Version, by)
 	}
-	return nil
+	return fmt.Errorf("%w: run %s was last written by tack %s, and this tack is %s, which is older: its writes would drop the status fields that it does not know. Nothing was changed: use tack %s or later",
+		ErrNewerLedger, sf.Name, by, version.Version, by)
 }
 
-// CleanStatus cleans every message of a status: the run's, each step's,
-// the reason it was abandoned, and each history entry's, which it then
-// cuts to MaxHistoryMessage bytes ([RFC#0003] Requirement 22). Every
-// ledger write applies it.
+// MaxMessage is the most bytes of the run's message and of each step's in
+// the ledger ([RFC#0003] Requirement 4): a message from outside Tack, such
+// as Flux's, has no bound, and a ledger must stay well within what the API
+// server stores (#66). The progress line keeps the whole message.
+const MaxMessage = 8 << 10
+
+// CleanStatus cleans every message of a status: the run's and each
+// step's, which it cuts to MaxMessage bytes, the reason it was abandoned,
+// and each history entry's, which it cuts to MaxHistoryMessage bytes
+// ([RFC#0003] Requirement 22). Every ledger write applies it.
 func CleanStatus(st *failoverv1.SiteFailoverStatus) {
-	st.Message = Clean(st.Captured, st.Message)
+	st.Message = cut(Clean(st.Captured, st.Message), MaxMessage)
 	for i := range st.Steps {
-		st.Steps[i].Message = Clean(st.Captured, st.Steps[i].Message)
+		st.Steps[i].Message = cut(Clean(st.Captured, st.Steps[i].Message), MaxMessage)
 	}
 	if a := st.Abandoned; a != nil {
 		a.Reason = Clean(st.Captured, a.Reason)

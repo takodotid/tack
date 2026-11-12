@@ -36,6 +36,9 @@ type Options struct {
 	TakeOver []string
 	// Yes is set when the operator skipped the confirmation with --yes.
 	Yes bool
+	// Force is set when the operator took over a run that a tack process
+	// may still run, with --force ([RFC#0003] Requirement 28).
+	Force bool
 }
 
 // ErrStopped is returned when the run stops for the operator.
@@ -79,6 +82,9 @@ func (e *Env) Start(ctx context.Context, sf *failoverv1.SiteFailover, opts Optio
 	if err := e.checkStarted(ctx, sf, opts); err != nil {
 		return err
 	}
+	// The process holds the run's Lease from its first status write until
+	// it returns ([RFC#0003] Requirement 28).
+	defer e.holdLease(ctx, sf)()
 	// The status subresource ignores status on create. The first write
 	// outlives a cancelled run: without it the ledger has no follow-ups.
 	sf.Status = *status
@@ -380,6 +386,9 @@ const ClockSkew = 10 * time.Second
 // resume runs the remaining steps. A resume, as opposed to the start
 // that Start already recorded, appends its entry Running to the history.
 func (e *Env) resume(ctx context.Context, sf *failoverv1.SiteFailover, opts Options, resumed bool) error {
+	if resumed {
+		defer e.holdLease(ctx, sf)()
+	}
 	head, err := e.AcceptHead(ctx, sf, opts.AcceptGitHead)
 	if err != nil {
 		return err
@@ -617,14 +626,15 @@ var errUnread = errors.New("the site did not answer the read before its steps")
 //
 // The read checks the site up to 3 times, in every mode: the site has just
 // answered the check before its step, so a failed check is a blip, not a
-// lost site. The read's other sites get one check; gate does not use them.
+// lost site. Its reads are repeated as its checks are. It reads no other
+// site: gate does not use them, and an error there stopped the run (#64).
 func (r *runner) gate(ctx context.Context, site string) error {
 	if r.gated[site] {
 		return nil
 	}
 	checks := r.SiteChecks(r.sf.Spec.Mode, r.sf.Spec.To)
-	checks.Once = func(s string) bool { return s != site }
-	topo, err := r.discover(ctx, &r.sf.Spec.Workload.Spec, checks)
+	checks.Once = nil
+	topo, err := r.discover(ctx, &r.sf.Spec.Workload.Spec, oneSite{SiteChecks: checks, site: site})
 	if note := checks.Note(site); note != "" {
 		r.note(site, "the read before its steps: "+note)
 	}
@@ -825,7 +835,7 @@ func (r *runner) checkCaptured(ctx context.Context, i int) error {
 			r.printf("  note      site %s gave no answer: %s is not compared with %s\n", s.Site, c.Into, refString(c.Object))
 			continue
 		}
-		cl, err := r.Clients.Client(s.Site)
+		cl, err := r.checks.Client(s.Site)
 		if err != nil {
 			return fmt.Errorf("the read before the promotion: site %s: %w", s.Site, err)
 		}
@@ -882,6 +892,24 @@ func (c runChecks) Reachable(ctx context.Context, site string) error {
 func (c runChecks) ahead(ctx context.Context, sites []string) func() {
 	return c.r.checks.checkAhead(ctx, sites, c.Reachable)
 }
+
+// oneSite are the kube.Clients of a read of one site, the read before a
+// site's steps: every other site reports no answer, with no check and no
+// read.
+type oneSite struct {
+	*SiteChecks
+	site string
+}
+
+func (c oneSite) Reachable(ctx context.Context, site string) error {
+	if site != c.site {
+		return errNotRead
+	}
+	return c.SiteChecks.Reachable(ctx, site)
+}
+
+// ahead checks nothing at once: the read checks its one site itself.
+func (c oneSite) ahead(context.Context, []string) func() { return func() {} }
 
 // identify checks, once per process, that the site's context reaches the
 // cluster the run recorded for the site. A site the run has no record of,

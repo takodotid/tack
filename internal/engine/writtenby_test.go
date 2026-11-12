@@ -31,6 +31,9 @@ func TestResumeRefusesLedgerOfNewerTack(t *testing.T) {
 	for _, tt := range []struct {
 		tack, writtenBy string
 		refused         bool
+		// which is how the refusal names this tack: older, or naming no
+		// release.
+		which string
 	}{
 		{tack: "v1.3.0", writtenBy: "v1.3.1", refused: true},
 		{tack: "v1.3.0", writtenBy: "v1.4.0", refused: true},
@@ -38,8 +41,17 @@ func TestResumeRefusesLedgerOfNewerTack(t *testing.T) {
 		{tack: "v1.3.0", writtenBy: "v1.3.0"},
 		{tack: "v1.3.1", writtenBy: "v1.3.0"},
 		{tack: "v1.3.0", writtenBy: ""},
-		{tack: "dev", writtenBy: "v1.4.0"},
+		// #63: a build that names no release, such as one without the
+		// release's ldflags, stops on a ledger that a release wrote.
+		{tack: "dev", writtenBy: "v1.4.0", refused: true, which: "which names no release"},
+		{tack: "dev", writtenBy: "v1.0.0", refused: true, which: "which names no release"},
+		{tack: "dev", writtenBy: "v1.4.0-3-gd483d80", refused: true, which: "which names no release"},
+		{tack: "v1.3.0-rc.1", writtenBy: "v1.4.0", refused: true, which: "which names no release"},
+		{tack: "dev", writtenBy: "dev"},
+		{tack: "dev", writtenBy: ""},
 		{tack: "v1.3.0", writtenBy: "dev"},
+		{tack: "v1.4.0", writtenBy: "v1.4.1-0.20261111105842-d483d80abcde", refused: true},
+		{tack: "v1.4.1-0.20261111105842-d483d80abcde", writtenBy: "v1.4.0"},
 	} {
 		t.Run(tt.tack+" over "+tt.writtenBy, func(t *testing.T) {
 			setVersion(t, tt.tack)
@@ -63,8 +75,12 @@ func TestResumeRefusesLedgerOfNewerTack(t *testing.T) {
 				}
 				return
 			}
+			which := tt.which
+			if which == "" {
+				which = "which is older"
+			}
 			if !errors.Is(err, engine.ErrNewerLedger) || !errors.Is(err, engine.ErrCannotResume) ||
-				!strings.Contains(err.Error(), "run run-1 was last written by tack "+tt.writtenBy+", and this tack is "+tt.tack+", which is older") ||
+				!strings.Contains(err.Error(), "run run-1 was last written by tack "+tt.writtenBy+", and this tack is "+tt.tack+", "+which) ||
 				!strings.Contains(err.Error(), "use tack "+tt.writtenBy+" or later") {
 				t.Fatalf("resume: %v, want a refusal that names both versions", err)
 			}

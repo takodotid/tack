@@ -102,6 +102,13 @@ func setup() error {
 	if err := build.Run(); err != nil {
 		return fmt.Errorf("build tack: %w", err)
 	}
+	// go build records the module version that Git gives, which the binary
+	// takes as its own (#63): the checks of what it records compare with it.
+	out, err := exec.Command(tackBin, "--version").Output()
+	if err != nil {
+		return fmt.Errorf("tack --version: %w", err)
+	}
+	version.Version = strings.TrimPrefix(strings.TrimSpace(string(out)), "tack version ")
 	values := filepath.Join(work, "chart-values.yaml")
 	if err := os.WriteFile(values, []byte(rbacValues), 0o644); err != nil {
 		return err
@@ -871,6 +878,13 @@ func TestRoutingFromStrait(t *testing.T) {
 	if got := strings.TrimSpace(kubectl(t, "a", "-n", ledgerNS, "get", "sitefailover", run, "-o", `jsonpath={range .status.history[*]}{.state}/{.user};{end}`)); got != "Running/"+user+";Succeeded/"+user+";" {
 		t.Errorf("history %q, want Running and Succeeded by %s", got, user)
 	}
+	// Row 17 of the permissions: the run held its Lease, and released it.
+	if got := strings.TrimSpace(kubectl(t, "a", "-n", ledgerNS, "get", "lease", run, "-o", `jsonpath={.metadata.ownerReferences[0].name}/{.spec.holderIdentity}/{.spec.leaseDurationSeconds}`)); got != run+"//30" {
+		t.Errorf("the run's Lease: %q, want owned by %s, with no holder and 30 s", got, run)
+	}
+	if got := kubectl(t, "a", "-n", ledgerNS, "get", "lease", run, "-o", `jsonpath={.metadata.managedFields[*].manager}`); strings.Trim(strings.ReplaceAll(got, "tack", ""), " \n") != "" {
+		t.Errorf("the Lease's field managers %q, want tack only", got)
+	}
 	events := kubectl(t, "a", "-n", ledgerNS, "get", "events", "--field-selector", "involvedObject.kind=SiteFailover,involvedObject.name="+run,
 		"-o", `jsonpath={range .items[*]}{.reason}{"\n"}{end}`)
 	for _, want := range []string{"RunRunning", "StepSucceeded", "RunSucceeded"} {
@@ -1095,9 +1109,20 @@ func TestUnreachableSiteDuringStatusAbandonAndGet(t *testing.T) {
 		}
 	}
 
+	// #65: the process was killed a moment ago, and its Lease still holds:
+	// abandon refuses, names the process, and changes nothing.
+	out, code := tack(t, nil, "abandon", run, "-f", workload, "--yes")
+	if code != 1 {
+		t.Errorf("abandon right after the kill: exit %d, want 1", code)
+	}
+	wants("abandon right after the kill", out, "a tack process may still run the run: run "+run+" is run by tack "+version.Version+", process ", "Nothing was changed")
+	if a := strings.TrimSpace(kubectl(t, "b", "-n", ledgerNS, "get", "sitefailover", run, "-o", "jsonpath={.status.abandoned}")); a != "" {
+		t.Fatalf("run %s was abandoned while its Lease held: %s", run, a)
+	}
+
 	// The ledger's site gives no answer.
 	up := down("b")
-	out, code := tack(t, nil, "status", "-f", workload)
+	out, code = tack(t, nil, "status", "-f", workload)
 	if code != 1 {
 		t.Errorf("status with b down: exit %d, want 1", code)
 	}
@@ -1113,7 +1138,19 @@ func TestUnreachableSiteDuringStatusAbandonAndGet(t *testing.T) {
 		t.Fatalf("run %s was abandoned while its site gave no answer: %s", run, a)
 	}
 
-	// Another site gives no answer.
+	// Another site gives no answer. The killed process's Lease has expired
+	// by then: it is not renewed, and holds 30 s and 10 s more.
+	eventually(t, 2*time.Minute, "the Lease of the killed process expired", func() string {
+		renewed := strings.TrimSpace(kubectl(t, "b", "-n", ledgerNS, "get", "lease", run, "-o", "jsonpath={.spec.renewTime}"))
+		at, err := time.Parse(time.RFC3339Nano, renewed)
+		if err != nil {
+			return fmt.Sprintf("renewTime %q: %v", renewed, err)
+		}
+		if left := time.Until(at.Add(41 * time.Second)); left > 0 {
+			return "it holds for " + left.Round(time.Second).String()
+		}
+		return ""
+	})
 	up = down("a")
 	out, code = tack(t, nil, "status", "-f", workload)
 	if code != 1 {

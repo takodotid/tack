@@ -15,8 +15,20 @@ import (
 // they ask the operator and with nothing changed; tack status reads it,
 // and says which tack wrote it.
 func TestOlderTackRefusesNewerLedger(t *testing.T) {
+	refusesNewerLedger(t, "v1.3.0", "which is older", "Written by: tack v1.4.0, newer than this tack v1.3.0: tack resume and tack abandon refuse the run")
+}
+
+// #63. A build that names no release, such as one of go install without
+// a version, or go build without the release's ldflags, refuses a ledger
+// that a release wrote, as an older release does. v1.4.0's dev build
+// resumed it, and its writes dropped the status fields it did not know.
+func TestDevBuildRefusesLedgerOfRelease(t *testing.T) {
+	refusesNewerLedger(t, "dev", "which names no release", "Written by: tack v1.4.0, a release, and this tack dev names none: tack resume and tack abandon refuse the run")
+}
+
+func refusesNewerLedger(t *testing.T, tack, which, status string) {
 	old := version.Version
-	version.Version = "v1.3.0"
+	version.Version = tack
 	t.Cleanup(func() { version.Version = old })
 	sf := stoppedRun(t, "pg-main-earlier")
 	sf.Status.WrittenBy = "v1.4.0"
@@ -30,7 +42,7 @@ func TestOlderTackRefusesNewerLedger(t *testing.T) {
 			isTerminal = func() bool { return false }
 			defer func() { isTerminal = stdinIsTerminal }()
 			out, code := run(t, f, append(args, "-f", "testdata/workload.yaml")...)
-			if code != ExitError || !strings.Contains(out, "run pg-main-earlier was last written by tack v1.4.0, and this tack is v1.3.0, which is older") ||
+			if code != ExitError || !strings.Contains(out, "run pg-main-earlier was last written by tack v1.4.0, and this tack is "+tack+", "+which) ||
 				!strings.Contains(out, "Nothing was changed: use tack v1.4.0 or later") {
 				t.Fatalf("exit %d, want %d with the refusal:\n%s", code, ExitError, out)
 			}
@@ -41,17 +53,24 @@ func TestOlderTackRefusesNewerLedger(t *testing.T) {
 	}
 	f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": append(testenv.Site("b", "a", 0), sf.DeepCopy())})
 	out, code := run(t, f, "status", "pg-main-earlier", "-f", "testdata/workload.yaml")
-	if code != ExitOK || !strings.Contains(out, "Written by: tack v1.4.0, newer than this tack v1.3.0: tack resume and tack abandon refuse the run") {
+	if code != ExitOK || !strings.Contains(out, status) {
 		t.Errorf("status: exit %d:\n%s", code, out)
 	}
 }
 
 // RFC0003 Requirement 24: a run that takes over a run whose ledger a
 // newer tack wrote does not mark it, says so, and goes on: its own spec
-// records the take-over (Requirement 17).
+// records the take-over (Requirement 17). A build that names no release
+// does the same with a release's ledger (#63).
 func TestTakeOverOfNewerLedgerIsNotMarked(t *testing.T) {
+	for _, tack := range []string{"v1.3.0", "dev"} {
+		t.Run(tack, func(t *testing.T) { takeOverOfNewerLedgerIsNotMarked(t, tack) })
+	}
+}
+
+func takeOverOfNewerLedgerIsNotMarked(t *testing.T, tack string) {
 	old := version.Version
-	version.Version = "v1.3.0"
+	version.Version = tack
 	t.Cleanup(func() { version.Version = old })
 	sf := stoppedRun(t, "pg-main-earlier")
 	sf.Status.WrittenBy = "v1.4.0"
@@ -64,7 +83,7 @@ func TestTakeOverOfNewerLedgerIsNotMarked(t *testing.T) {
 	if got := ledgerAt(t, f, "b", "pg-main-earlier").Status; got.SupersededBy != "" || got.WrittenBy != "v1.4.0" {
 		t.Errorf("the newer ledger was written: supersededBy %q, writtenBy %q", got.SupersededBy, got.WrittenBy)
 	}
-	if got := ledgerAt(t, f, "b", "pg-main-20261027-101500").Status.WrittenBy; got != "v1.3.0" {
-		t.Errorf("the new run's writtenBy %q, want v1.3.0", got)
+	if got := ledgerAt(t, f, "b", "pg-main-20261027-101500").Status.WrittenBy; got != tack {
+		t.Errorf("the new run's writtenBy %q, want %s", got, tack)
 	}
 }

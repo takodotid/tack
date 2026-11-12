@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	coordinationv1 "k8s.io/api/coordination/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -137,7 +138,35 @@ func fieldManagers(writes *[]string) client.Client {
 			*writes = append(*writes, "update "+sub+": "+o.FieldManager)
 			return c.SubResource(sub).Update(ctx, obj, opts...)
 		},
+		Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+			o := &client.UpdateOptions{}
+			o.ApplyOptions(opts)
+			*writes = append(*writes, "update "+strings.TrimPrefix(fmt.Sprintf("%T", obj), "*v1.")+": "+o.FieldManager)
+			return c.Update(ctx, obj, opts...)
+		},
 	})
+}
+
+// RFC0003 Requirement 25: the run's Lease names tack too (#65).
+func TestLeaseWritesUseFieldManagerTack(t *testing.T) {
+	ctx := context.Background()
+	var writes []string
+	s := &Store{Client: fieldManagers(&writes), Namespace: "tack-system"}
+	holder := "tack dev, process 1 on host"
+	l := &coordinationv1.Lease{ObjectMeta: metav1.ObjectMeta{Name: "pg-main-20261027-101500"}, Spec: coordinationv1.LeaseSpec{HolderIdentity: &holder}}
+	if err := s.CreateLease(ctx, l); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Lease(ctx, l.Name)
+	if err != nil || got.Namespace != "tack-system" || *got.Spec.HolderIdentity != holder {
+		t.Fatalf("read the Lease back: %v, %+v", err, got)
+	}
+	if err := s.UpdateLease(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(writes, ","); got != "create Lease: tack,update Lease: tack" {
+		t.Errorf("writes %s, want create Lease: tack,update Lease: tack", got)
+	}
 }
 
 // PR #43's finding: ledger writes named no field manager, so the API

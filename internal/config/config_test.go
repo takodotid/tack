@@ -118,6 +118,11 @@ func TestParseSiteNames(t *testing.T) {
 		{name: "a quoted false", src: sites(`"false"`, "b"), names: []string{"false", "b"}},
 		{name: "a reference", src: sites(`"n"`, "b") + "  routing: {strait: {services: [{site: n, namespace: apps, name: pg}], members: [{site: \"n\", member: pg-a}, {site: b, member: pg-b}]}}\n",
 			err: `spec.routing.strait.services[0].site: YAML reads n as "false"; quote it, as "n"`},
+		// #66: a kube context named on became "true", and the error named
+		// a context true that the kubeconfig does not hold.
+		{name: "a kube context", src: strings.Replace(sites("a", "b"), "kubeContext: site-a", "kubeContext: on", 1),
+			err: `spec.sites[0].kubeContext: YAML reads on as "true"; quote it, as "on"`},
+		{name: "a quoted kube context", src: strings.Replace(sites("a", "b"), "kubeContext: site-a", `kubeContext: "on"`, 1), names: []string{"a", "b"}},
 		{name: "a Git mapping", src: strings.Replace(sites(`"y"`, "b"), "branch: main}", "branch: main, fields: [{site: y, object: {kind: Cluster, name: pg}, field: spec.x, file: f.yaml, path: x}]}", 1),
 			err: `spec.git.fields[0].site: YAML reads y as "true"; quote it, as "y"`},
 	} {

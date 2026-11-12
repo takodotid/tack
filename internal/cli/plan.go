@@ -167,7 +167,7 @@ human for that run, and runs "tack plan" first.`
 
 func newRun(o *options) *cobra.Command {
 	var p planFlags
-	var yes bool
+	var yes, force bool
 	var takeOver []string
 	cmd := &cobra.Command{
 		Use:   "run -f WORKLOAD --to SITE [--mode planned|site-loss]",
@@ -180,6 +180,9 @@ func newRun(o *options) *cobra.Command {
   tack run -f workload.yaml --to b --mode site-loss`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if force && len(takeOver) == 0 {
+				return usagef("--force goes with --take-over: it takes over a run that a tack process may still run")
+			}
 			out := cmd.OutOrStdout()
 			plan, env, cleanup, err := o.makePlan(cmd.Context(), &p, o.progress(out))
 			if cleanup != nil {
@@ -195,19 +198,20 @@ func newRun(o *options) *cobra.Command {
 			if err := env.Recheck(cmd.Context(), plan); err != nil {
 				return err
 			}
-			old, err := o.checkNoActiveRun(cmd.Context(), env, plan.SiteFailover, takeOver)
+			old, err := o.checkNoActiveRun(cmd.Context(), env, plan.SiteFailover, takeOver, force)
 			if err != nil {
 				return err
 			}
 			if len(old) > 0 {
 				env.Supersede = supersede(env, old)
 			}
-			return env.Start(cmd.Context(), plan.SiteFailover, engine.Options{TakeOver: takeOver, Yes: yes})
+			return env.Start(cmd.Context(), plan.SiteFailover, engine.Options{TakeOver: takeOver, Yes: yes, Force: force})
 		},
 	}
 	p.add(cmd, false)
 	cmd.Flags().BoolVar(&yes, "yes", false, "skip the confirmation; only when a human approved this run")
 	cmd.Flags().StringSliceVar(&takeOver, "take-over", nil, "take over the holds of this earlier run, which can no longer finish; repeat it for each run")
+	cmd.Flags().BoolVar(&force, "force", false, "with --take-over: "+forceHelp)
 	return cmd
 }
 
@@ -243,8 +247,9 @@ func stdinIsTerminal() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
 // checks the sites again: the plan's checks may be older than the
 // operator's confirmation. A run that another run took over is not active.
 // It names each site it leaves out on the progress lines, and returns the
-// runs to take over that it found.
-func (o *options) checkNoActiveRun(ctx context.Context, env *engine.Env, sf *failoverv1.SiteFailover, takeOver []string) ([]foundRun, error) {
+// runs to take over that it found. It refuses to take over a run that a
+// tack process may still run, unless force ([RFC#0003] Requirement 28).
+func (o *options) checkNoActiveRun(ctx context.Context, env *engine.Env, sf *failoverv1.SiteFailover, takeOver []string, force bool) ([]foundRun, error) {
 	// Start searches again with the same checks once its ledger exists.
 	env.StartChecks = env.SiteChecks(sf.Spec.Mode, sf.Spec.To)
 	found, err := findRuns(ctx, env.StartChecks, &sf.Spec.Workload.Spec, sf.Spec.Workload.Name)
@@ -259,6 +264,13 @@ func (o *options) checkNoActiveRun(ctx context.Context, env *engine.Env, sf *fai
 	var old []foundRun
 	for _, r := range found.runs {
 		if slices.Contains(takeOver, r.sf.Name) {
+			cl, err := env.StartChecks.Client(r.site)
+			if err != nil {
+				return nil, err
+			}
+			if err := o.checkLive(ctx, env.Out, &ledger.Store{Client: cl, Namespace: r.sf.Namespace}, r.sf, force); err != nil {
+				return nil, fmt.Errorf("--take-over %s, at site %s: %w", r.sf.Name, r.site, err)
+			}
 			old = append(old, r)
 			continue
 		}

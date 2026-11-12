@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -207,5 +208,26 @@ func TestAbandonListsHoldsAsRecorded(t *testing.T) {
 				t.Errorf("status.abandoned %+v", a)
 			}
 		})
+	}
+}
+
+// #66. tack abandon asked "This changes live clusters and Git.", the
+// question of run and resume, though it writes only the run's ledger.
+func TestAbandonAsksAboutTheLedgerOnly(t *testing.T) {
+	f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": append(testenv.Site("b", "a", 0), stoppedRun(t, "pg-main-earlier"))})
+	isTerminal = func() bool { return true }
+	stdin = strings.NewReader("pg-main\n")
+	defer func() { isTerminal, stdin = stdinIsTerminal, os.Stdin }()
+	out, code := run(t, f, "abandon", "pg-main-earlier", "-f", "testdata/workload.yaml")
+	if code != ExitOK || !strings.Contains(out, `This changes only the run's ledger, at site b. Type the workload name "pg-main" to go on: `) || strings.Contains(out, "live clusters and Git") {
+		t.Fatalf("exit %d, want the question about the ledger:\n%s", code, out)
+	}
+	isTerminal = func() bool { return false }
+	if out, code := run(t, f, "abandon", "pg-main-earlier", "-f", "testdata/workload.yaml"); code != ExitOK || !strings.Contains(out, "was already abandoned") {
+		t.Fatalf("again: exit %d:\n%s", code, out)
+	}
+	f = newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": append(testenv.Site("b", "a", 0), stoppedRun(t, "pg-main-earlier"))})
+	if out, code := run(t, f, "abandon", "pg-main-earlier", "-f", "testdata/workload.yaml"); code != ExitUsage || !strings.Contains(out, "pass --yes once a human approved abandoning this run") {
+		t.Errorf("without a terminal: exit %d:\n%s", code, out)
 	}
 }

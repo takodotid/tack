@@ -47,32 +47,34 @@ func TestPlanChecksSitesAtOnce(t *testing.T) {
 	}
 }
 
-// The read before a site's steps checks every site at once: in a resume of
-// a site-loss run whose lost site came back, the read before its steps
-// checks b and c, which the resume did not check before.
-func TestReadBeforeStepsChecksSitesAtOnce(t *testing.T) {
+// #64, at three sites: in a resume of a site-loss run whose lost site a
+// came back still primary, the read before a's steps reads a only, and
+// stops the run with FencedSiteIsPrimary before them, a unchanged.
+func TestThreeSiteResumeStopsWhenLostSiteIsPrimary(t *testing.T) {
 	s := newSites3(t)
 	ctx := context.Background()
 	s.clients.SetDown("a", true)
-	env := s.env("b")
-	p, err := env.MakePlan(ctx, engine.Request{Run: "run-1", Workload: s.w.Name, Spec: &s.w.Spec,
-		Request: driver.Request{From: "a", To: "b", Mode: failoverv1.ModeSiteLoss}})
-	if err != nil {
-		t.Fatalf("plan: %v", err)
-	}
-	if err := env.Start(ctx, p.SiteFailover, engine.Options{}); err != nil {
+	if err := s.env("b").Start(ctx, s.plan("run-1", "a", "b"), engine.Options{}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	// Site a comes back still primary: the read before its steps stops the
-	// run there.
 	s.clients.SetDown("a", false)
-	env = s.env("b")
+	holds, checks := holdsAt(s.flux, "a"), s.clients.Checks["c"]
+	env := s.env("b")
 	env.Runs = nil
-	env.Clients = testenv.NewAtOnce(s.clients, "b", "c")
-	err = env.Resume(ctx, s.ledger("b", "run-1"), engine.Options{})
+	err := env.Resume(ctx, s.ledger("b", "run-1"), engine.Options{})
 	sf := s.ledger("b", "run-1")
-	if !errors.Is(err, engine.ErrStopped) || sf.Status.Reason != failoverv1.ReasonFencedSiteIsPrimary {
+	if !errors.Is(err, engine.ErrStopped) || sf.Status.Reason != failoverv1.ReasonFencedSiteIsPrimary || !strings.Contains(sf.Status.Message, ": site a answers as primary") {
 		t.Fatalf("err %v, %s %s: %s", err, sf.Status.State, sf.Status.Reason, sf.Status.Message)
+	}
+	u := testenv.Object("postgresql.cnpg.io/v1", "Cluster", "db", "pg-a", nil)
+	if err := s.clients.Sites["a"].Get(ctx, client.ObjectKeyFromObject(u), u); err != nil {
+		t.Fatal(err)
+	}
+	if field(u.Object, "spec", "replica", "primary") != "pg-a" || !s.isPrimary("a") || holdsAt(s.flux, "a") != holds {
+		t.Errorf("site a changed without --fence: primary %v, %d holds more", field(u.Object, "spec", "replica", "primary"), holdsAt(s.flux, "a")-holds)
+	}
+	if n := s.clients.Checks["c"] - checks; n != 0 {
+		t.Errorf("site c checked %d times in the resume, want 0", n)
 	}
 }
 

@@ -105,6 +105,11 @@ func checkSiteNames(b []byte, s *failoverv1.WorkloadSpec) error {
 	each(child(spec, "sites"), "name", "spec.sites", func(i int) (string, bool) {
 		return at(s.Sites, i, func(x failoverv1.Site) string { return x.Name })
 	})
+	// A context named on became "true", and the error named a context
+	// true that the kubeconfig does not hold (#66).
+	each(child(spec, "sites"), "kubeContext", "spec.sites", func(i int) (string, bool) {
+		return at(s.Sites, i, func(x failoverv1.Site) string { return x.KubeContext })
+	})
 	git := child(spec, "git")
 	each(child(git, "fields"), "site", "spec.git.fields", func(i int) (string, bool) {
 		return at(s.Git.Fields, i, func(x failoverv1.FieldMapping) string { return x.Site })
@@ -124,7 +129,7 @@ func checkSiteNames(b []byte, s *failoverv1.WorkloadSpec) error {
 		})
 	}
 	if len(errs) > 0 {
-		return fmt.Errorf("workload: site names must stay as written:\n  %s", strings.Join(errs, "\n  "))
+		return fmt.Errorf("workload: site names and kube contexts must stay as written:\n  %s", strings.Join(errs, "\n  "))
 	}
 	return nil
 }

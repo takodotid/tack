@@ -1,0 +1,6 @@
+{{- $ref := "main" }}
+{{- if regexMatch "^[0-9]+\\.[0-9]+\\.[0-9]+$" .Chart.AppVersion }}
+{{- $ref = printf "v%s" .Chart.AppVersion }}
+{{- end }}
+Writing a SiteFailover ledger is privileged. Check at this site, before the first run and after each change of RBAC, that only the operators may create, update, patch or delete sitefailovers, or update or patch sitefailovers/status, in namespace {{ .Release.Namespace }}:
+https://github.com/takodotid/tack/blob/{{ $ref }}/docs/operations.md#who-may-write-ledgers

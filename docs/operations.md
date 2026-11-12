@@ -72,6 +72,7 @@ Most reasons go on with a plain `tack resume RUN -f workload.yaml` once the caus
 | `--accept-git-head SHA` | The run stopped with `GitChanged`; or with `GitDiffersFromLive` once Git is fixed, or `FluxChanged` for an expected change ([runbooks/stop-reasons.md](runbooks/stop-reasons.md)). | Review the commits between the base and the new head named in the message, such as `git log --oneline 6dd30f7..a2c8b96`, then `tack resume RUN -f workload.yaml --accept-git-head a2c8b96`. When the `GitChanged` message names one head, only that commit, or `HEAD` for it, is accepted; `tack status RUN` shows it. Otherwise `HEAD` is the branch head when `tack resume` starts: it prints that commit before it asks, and records it. Before the run's commit, the accepted head becomes its base. After it, the release checks Git against the accepted head, which must contain the run's commit. |
 | `--fence SITE` | The run stopped with `FencedSiteIsPrimary`, and its message offers the flag. | A lost site came back and answers as primary, or declares itself primary. Check it, then `tack resume RUN -f workload.yaml --fence a` declares the new primary there. When no step of the run is left to fence the site, such as an old primary promoted again by hand, the flag cannot help, and the message says so ([runbooks/stop-reasons.md](runbooks/stop-reasons.md#fencedsiteisprimary)). |
 | `--take-over RUN` | Another run of the workload can no longer finish, such as when its ledger is at a lost site. Without the flag, the new run is refused while that run is listed and not `Succeeded`, or stops on its holds. | Pass it when starting the new run: `tack run -f workload.yaml --to b --mode site-loss --take-over RUN` takes over the holds of `RUN`, and records it in its ledger. `RUN` can then never resume. Repeat the flag for each run to take over: `--take-over RUN1 --take-over RUN2`. |
+| `--force` | `tack abandon RUN`, or `tack run --take-over RUN`, refused with `a tack process may still run the run`. | The process that runs a run holds the run's Lease, and renews it every 10 s ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 28). The refusal names that process, or, for a run without a Lease, such as one that v1.4.0 runs, when its ledger was last written. Stop that process, or check that it ended, then wait until the time the refusal names. Pass `--force` only once a human checked that no `tack` process runs `RUN`: a step in flight there still changes the workload. |
 
 A hold set outside Tack, which stops a run with `HeldByAnotherRun`, stays until the operator removes it: Tack never removes a hold it did not set ([runbooks/abandon-run.md](runbooks/abandon-run.md#remove-a-hold-left-behind)).
 
@@ -85,7 +86,7 @@ After `--accept-git-head`, the check before release reports differences outside 
 
 ## Interrupting a run
 
-The first Ctrl-C, SIGTERM or SIGHUP stops the run: the step in flight ends, and the ledger records the stop, which can take up to 30 s when the ledger's site is slow, then its Event, up to 5 s more. A second signal ends `tack` at once, without that record; once the ledger holds the stop, it loses only the Event: the ledger then shows the step `Running`, and `tack resume` runs it again. SIGHUP comes when the terminal or SSH session ends; run `tack` in `tmux` or `screen` on a remote host, so a dropped connection does not stop the run.
+The first Ctrl-C, SIGTERM or SIGHUP stops the run: the step in flight ends, and the ledger records the stop, which can take up to 30 s when the ledger's site is slow, then its Event, up to 5 s more. A second signal ends `tack` at once, without that record; once the ledger holds the stop, it loses only the Event: the ledger then shows the step `Running`, and `tack resume` runs it again. SIGHUP comes when the terminal or SSH session ends; run `tack` in `tmux` or `screen` on a remote host, so a dropped connection does not stop the run. A process that ends this way releases the run's Lease; one ended by a second signal, or killed, leaves the Lease to expire 30 s after its last renewal, and until 10 s after that, `tack abandon` and `tack run --take-over` refuse the run.
 
 ## Break-glass
 
@@ -126,7 +127,7 @@ Each search for runs reads every ledger of the workload at each site that answer
 | Keep the `--keep` newest runs that succeeded, at least 1. Abandoned and taken-over runs do not count among them: they are kept anyway. | The newest that succeeded records the last switch. |
 | Keep a run with a follow-up `Rebuild`. | `tack plan` refuses a planned switchover to that member while such a run says it diverged ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 14). Prune does not read the member: delete such a run by hand once the member was created again after the run started. |
 | Keep a run whose spec takes over a run that is kept, not abandoned, and not marked `status.supersededBy`. | That run counts as taken over only through this run's spec; without it, it would block every new run. |
-| Keep a run that a newer `tack` last wrote (`status.writtenBy`). | A newer release may need what it recorded. |
+| Keep a run that a newer `tack` last wrote (`status.writtenBy`). A `tack` whose version names no release, such as `dev`, keeps every run that a release wrote. | A newer release may need what it recorded. |
 | Delete by name, each only while it is the object that was read; stop at the first error. | A run that started, or a ledger written, while the operator confirmed is not deleted on a stale list. |
 
 To delete a kept `Rebuild` run by hand, once its member was rebuilt:
@@ -161,6 +162,7 @@ Tack acts with the operator's credentials for each site's kube context. Every si
 | 14 | `events` | create | the ledger's | `run`, `resume`, `abandon` | the ledger's Events. Optional: without it, a run goes on without Events, and says so once ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 23) |
 | 15 | `selfsubjectreviews` (`authentication.k8s.io`) | create | | `run`, `resume`, `abandon` | the user in the ledger's history. Without it, the history names no user, and the run says so once |
 | 16 | `sitefailovers` | delete | the ledger's | `prune` | deleting the ledgers of old runs ([Old ledgers](#old-ledgers)) |
+| 17 | `leases` (`coordination.k8s.io`) | get, create, update | the ledger's | `run`, `resume`; `get` also `abandon` | the run's Lease, which the process that runs it holds; `tack abandon` and `tack run --take-over` refuse while it is fresh ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 28). Optional: without it, a run holds no Lease and says so once, and those commands judge by the ledger |
 
 | Fact | Detail |
 |---|---|
@@ -168,7 +170,8 @@ Tack acts with the operator's credentials for each site's kube context. Every si
 | Row 16 | Only `tack prune` needs it. The chart grants it only with `rbac.prune`. |
 | Rows 1, 2 and 15 | Kubernetes grants them to every authenticated user through the default ClusterRoleBindings `system:public-info-viewer`, `system:discovery` and `system:basic-user`. A cluster without those bindings must grant them. |
 | `resourceNames` | Rows 3 and 7 to 13 can name their objects. Rows 4 to 6 cannot: run names are generated, and `list` and `create` take no name. |
-| Checked | On the e2e's kind clusters, a ServiceAccount with exactly these rows, each named where the table allows, ran `tack plan`, `tack status`, a planned run with the routing check and a Kustomization with `postBuild`, a resume, a run with `--take-over`, and a site-loss run. Without row 3, `tack plan` fails with `namespaces "kube-system" is forbidden`; without the ConfigMap of row 12, the check before release stops with `StepFailed`. Rows 14 and 15 came after that check, with v1.3.0, and row 16 with v1.4.0. The e2e's `TestRoutingFromStrait` now runs `tack plan`, a planned run with the routing check and `tack status` as a ServiceAccount bound to [the chart's roles](#the-charts-roles) and Kubernetes' default bindings only: the run records its Events (row 14) and the ServiceAccount as its history's user (row 15). The e2e has no `postBuild`, so it does not use row 12. Its `TestPrune` runs `tack prune` as that ServiceAccount, with `rbac.prune`, and deletes ledgers through row 16. |
+| Row 17 | Optional. Without it, a run holds no Lease, says so once, and goes on; `tack abandon` and `tack run --take-over` then judge the run by its ledger, which keeps refusing them longer after a process was killed. |
+| Checked | On the e2e's kind clusters, a ServiceAccount with exactly these rows, each named where the table allows, ran `tack plan`, `tack status`, a planned run with the routing check and a Kustomization with `postBuild`, a resume, a run with `--take-over`, and a site-loss run. Without row 3, `tack plan` fails with `namespaces "kube-system" is forbidden`; without the ConfigMap of row 12, the check before release stops with `StepFailed`. Rows 14 and 15 came after that check, with v1.3.0, row 16 with v1.4.0, and row 17 after v1.4.0. The e2e's `TestRoutingFromStrait` now runs `tack plan`, a planned run with the routing check and `tack status` as a ServiceAccount bound to [the chart's roles](#the-charts-roles) and Kubernetes' default bindings only: the run records its Events (row 14) and the ServiceAccount as its history's user (row 15). The e2e has no `postBuild`, so it does not use row 12. Its `TestPrune` runs `tack prune` as that ServiceAccount, with `rbac.prune`, and deletes ledgers through row 16. |
 
 The runbooks' own `kubectl` commands need more, such as `patch` on `sitefailovers/status`; each runbook says so.
 
@@ -179,7 +182,7 @@ The chart creates roles that grant exactly the rows above when `rbac.create` is 
 | Role | Kind, namespace | Rows |
 |---|---|---|
 | `<release>-cluster` | ClusterRole | 1, 2, 3 and 15 |
-| `<release>-ledger` | Role, the release's namespace: install the chart in the ledger namespace | 4, 5, 6 and 14; 16 with `rbac.prune` |
+| `<release>-ledger` | Role, the release's namespace: install the chart in the ledger namespace | 4, 5, 6, 14 and 17; 16 with `rbac.prune` |
 | `<release>-objects` | Role, each namespace of `rbac.objects` | 7 to 13, for the objects that entry names |
 
 | Value | Default | Meaning |
@@ -213,13 +216,37 @@ Each site's chart may name every site's objects, so one values file serves all s
 
 ### Who may write ledgers
 
-Writing a ledger is privileged. A ledger names the steps, the kube contexts and the Git URL that `tack resume` uses with the operator's credentials, so anyone who may create `sitefailovers`, or update their status, can plant a run, or change one, for an operator to resume.
+Writing a ledger is privileged. A ledger names the steps, the kube contexts and the Git URL that `tack resume` uses with the operator's credentials. Each search for runs selects ledgers by the label `failover.tako.id/workload`, and decides on what it finds whether a run starts or resumes ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirements 8 and 18).
+
+| Access | What it lets its holder do |
+|---|---|
+| `create` on `sitefailovers` | plant a run for an operator to resume |
+| `update`, `patch` on `sitefailovers/status` | change a run's state, captured values, holds and follow-ups |
+| `update`, `patch` on `sitefailovers` | change a ledger's labels: a run without its workload's label is left out of every search, so a second run starts, or an older run resumes, while it is not done |
+| `delete`, `deletecollection` on `sitefailovers` | remove a run's record, with the same effect |
 
 | Rule | Why |
 |---|---|
-| Grant rows 5 and 6 to the operators only, in the ledger namespace at every site. | Rows 5 and 6 are the write access. |
+| Grant rows 5 and 6 to the operators only, and row 16 only to the operators who prune, in the ledger namespace at every site. | They are the only writes Tack needs. Tack never needs `update` or `patch` on `sitefailovers`, nor `deletecollection`. |
 | Keep the ledger namespace out of every Flux path, and keep `SiteFailover` objects out of Git. | A Kustomization applies what Git holds with kustomize-controller's service account, or the one its `spec.serviceAccountName` names. |
-| Check who else may write: `kubectl --context CTX auth can-i create sitefailovers.failover.tako.id -n tack-system --as system:serviceaccount:NS:NAME`, and the same for `update` on `sitefailovers/status`. | A role with a wildcard resource or verb, such as `cluster-admin`, includes them. |
+| Run the check below at every site: before the first run, and after each change of who is bound to which role. | A role with a wildcard resource or verb, such as `cluster-admin`, includes every access above. RBAC only adds: neither the chart nor Tack can take it away. |
+
+The check, as a cluster admin, since `--as` needs `impersonate`. First list who is bound, then ask for each subject that is not an operator, such as a GitOps controller's or a CI system's ServiceAccount. Every answer must be `no`:
+
+```sh
+ns=tack-system   # the ledger namespace
+kubectl --context "$ctx" get clusterrolebindings -o wide
+kubectl --context "$ctx" -n "$ns" get rolebindings -o wide
+as=system:serviceaccount:flux-system:kustomize-controller   # repeat for each such subject
+for verb in create update patch delete deletecollection; do
+  echo "$verb: $(kubectl --context "$ctx" -n "$ns" auth can-i "$verb" sitefailovers.failover.tako.id --as "$as")"
+done
+for verb in update patch; do
+  echo "$verb status: $(kubectl --context "$ctx" -n "$ns" auth can-i "$verb" sitefailovers.failover.tako.id --subresource=status --as "$as")"
+done
+```
+
+For a group, pass a user name and the group: `--as someone --as-group GROUP`.
 
 A Role with rows 4 to 6, for a RoleBinding to the operators' group:
 
