@@ -11,6 +11,7 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
@@ -474,5 +475,72 @@ func TestDemotionNamesPlannedSteps(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// Observed on kind in the first three-site e2e: CloudNativePG's webhook
+// refused to make pg-b declare pg-c primary, "External cluster pg-c not
+// found", in a step after the promotion. The plan now refuses, before any
+// step, a site whose Cluster does not name the new primary among its
+// spec.externalClusters. The new primary's own list, and a site that gives
+// no answer, are not read.
+func TestPlanRefusesPrimaryNotAmongExternalClusters(t *testing.T) {
+	without := func(site, name string) func(map[string]*unstructured.Unstructured) {
+		return func(cs map[string]*unstructured.Unstructured) {
+			var kept []any
+			for _, e := range cs[site].Object["spec"].(map[string]any)["externalClusters"].([]any) {
+				if e.(map[string]any)["name"] != name {
+					kept = append(kept, e)
+				}
+			}
+			cs[site].Object["spec"].(map[string]any)["externalClusters"] = kept
+		}
+	}
+	planned := driver.Request{From: "a", To: "b", Mode: failoverv1.ModePlanned}
+	siteLoss := driver.Request{From: "a", To: "b", Mode: failoverv1.ModeSiteLoss}
+	for _, tt := range []struct {
+		name string
+		req  driver.Request
+		edit func(map[string]*unstructured.Unstructured)
+		down string
+		want string
+	}{
+		{name: "a third site", req: planned, edit: without("c", "pg-b"),
+			want: "site c: Cluster pg-c does not name pg-b among its spec.externalClusters, so CloudNativePG would refuse to make it declare pg-b primary"},
+		{name: "from", req: planned, edit: without("a", "pg-b"),
+			want: "site a: Cluster pg-a does not name pg-b among its spec.externalClusters"},
+		{name: "a third site, in a site loss", req: siteLoss, edit: without("c", "pg-b"), down: "a",
+			want: "site c: Cluster pg-c does not name pg-b among its spec.externalClusters"},
+		{name: "to's own list", req: planned, edit: without("b", "pg-b")},
+		{name: "a site that gives no answer", req: siteLoss, edit: without("a", "pg-b"), down: "a"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cs := map[string]*unstructured.Unstructured{}
+			objects := map[string][]client.Object{}
+			for _, s := range []string{"a", "b", "c"} {
+				primary := s == "a" && tt.down == ""
+				cs[s] = testenv.Cluster(s, "a", primary, nil)
+			}
+			tt.edit(cs)
+			for _, s := range []string{"a", "b", "c"} {
+				objects[s] = []client.Object{cs[s], testenv.Pooler(s, 0)}
+			}
+			c := testenv.NewClients(objects)
+			if tt.down != "" {
+				c.SetDown(tt.down, true)
+			}
+			w := spec3()
+			topo, err := Driver{}.Discover(context.Background(), w, c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _, err = Driver{}.Plan(w, topo, tt.req)
+			switch {
+			case tt.want == "" && err != nil:
+				t.Errorf("refused: %v", err)
+			case tt.want != "" && (err == nil || !strings.Contains(err.Error(), tt.want)):
+				t.Errorf("err %v, want %q", err, tt.want)
+			}
+		})
 	}
 }

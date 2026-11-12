@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -50,6 +51,8 @@ const (
 	factInProgress    = "inProgress"
 	factMinApplyDelay = "minApplyDelay"
 	factIsPrimary     = "isPrimary"
+	// factExternal names the Cluster's spec.externalClusters, comma-separated.
+	factExternal = "externalClusters"
 )
 
 func init() { driver.Register(Driver{}) }
@@ -181,6 +184,16 @@ func read(st *driver.SiteState, u *unstructured.Unstructured, byCluster map[stri
 	f[factMinApplyDelay] = delay
 	phase, _, _ := unstructured.NestedString(u.Object, "status", "phase")
 	f[factPhase] = phase
+	external, _, _ := unstructured.NestedSlice(u.Object, "spec", "externalClusters")
+	var names []string
+	for _, e := range external {
+		if m, ok := e.(map[string]any); ok {
+			if n, ok := m["name"].(string); ok {
+				names = append(names, n)
+			}
+		}
+	}
+	f[factExternal] = strings.Join(names, ",")
 	inProgress, _, _ := unstructured.NestedBool(u.Object, "status", "switchReplicaClusterStatus", "inProgress")
 	f[factInProgress] = fmt.Sprint(inProgress)
 	isPrimary := false
@@ -234,6 +247,14 @@ func check(t *driver.Topology, r driver.Request) error {
 	toSt, _ := t.Site(r.To)
 	if err := checkTarget(toSt, r); err != nil {
 		return err
+	}
+	// Each other site's Cluster will declare to's primary: CloudNativePG
+	// refuses a primary that it does not name among its external clusters.
+	for _, s := range t.Sites {
+		if s.Reachable && s.Name != r.To && !slices.Contains(strings.Split(s.Facts[factExternal], ","), toSt.Facts[factCluster]) {
+			return fmt.Errorf("site %s: Cluster %s does not name %s among its spec.externalClusters, so CloudNativePG would refuse to make it declare %s primary; add %s there, through Git, before the run",
+				s.Name, s.Facts[factCluster], toSt.Facts[factCluster], toSt.Facts[factCluster], toSt.Facts[factCluster])
+		}
 	}
 	for _, s := range t.Sites {
 		if s.Reachable && s.Facts[factEnabled] != "" {

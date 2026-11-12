@@ -6,14 +6,17 @@ import (
 )
 
 // Cluster returns a CloudNativePG Cluster named pg-<site> in namespace db
-// that declares pg-<primary> primary. isPrimary sets its instance's report.
+// that declares pg-<primary> primary, and names pg-a, pg-b and pg-c among
+// its external clusters. isPrimary sets its instance's report.
 func Cluster(site, primary string, isPrimary bool, extra map[string]any) *unstructured.Unstructured {
 	replica := map[string]any{"self": "pg-" + site, "primary": "pg-" + primary, "source": "pg-" + other(site)}
 	for k, v := range extra {
 		replica[k] = v
 	}
 	return Object("postgresql.cnpg.io/v1", "Cluster", "db", "pg-"+site, map[string]any{
-		"spec": map[string]any{"instances": int64(1), "replica": replica},
+		"spec": map[string]any{"instances": int64(1), "replica": replica, "externalClusters": []any{
+			map[string]any{"name": "pg-a"}, map[string]any{"name": "pg-b"}, map[string]any{"name": "pg-c"},
+		}},
 		"status": map[string]any{
 			"phase":          "Cluster in healthy state",
 			"currentPrimary": "pg-" + site + "-1",
