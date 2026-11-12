@@ -39,7 +39,13 @@ const RequestTimeout = 15 * time.Second
 const CheckTimeout = 5 * time.Second
 
 // Scheme knows the core types and the ledger.
-var Scheme = func() *runtime.Scheme {
+var Scheme = NewScheme()
+
+// NewScheme returns a scheme that knows the core types and the ledger. A
+// fake client of controller-runtime adds the list kinds of unstructured
+// objects to its scheme as it meets them, under a lock of its own: each
+// fake needs a scheme of its own.
+func NewScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
 	if err := clientgoscheme.AddToScheme(s); err != nil {
 		panic(err)
@@ -48,7 +54,7 @@ var Scheme = func() *runtime.Scheme {
 		panic(err)
 	}
 	return s
-}()
+}
 
 // Clients gives the client of each site.
 type Clients interface {

@@ -132,7 +132,7 @@ func NewClient(objs ...client.Object) client.Client {
 	mapper.Add(authenticationv1.SchemeGroupVersion.WithKind("SelfSubjectReview"), meta.RESTScopeRoot)
 	mapper.Add(coordinationv1.SchemeGroupVersion.WithKind("Lease"), meta.RESTScopeNamespace)
 	return fake.NewClientBuilder().
-		WithScheme(kube.Scheme).
+		WithScheme(kube.NewScheme()).
 		WithRESTMapper(mapper).
 		WithObjects(objs...).
 		WithStatusSubresource(&failoverv1.SiteFailover{}).
