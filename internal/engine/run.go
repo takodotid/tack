@@ -383,6 +383,19 @@ func (e *Env) checkLatest(ctx context.Context, sf *failoverv1.SiteFailover, chec
 // ClockSkew before this one may have started after it (#38 item 7).
 const ClockSkew = 10 * time.Second
 
+// CertainlyAfter tells whether the clocks of the sites' API servers show
+// ledger b created after ledger a: at the same site, in a later second; at
+// another site, ClockSkew or more later. It is the complement of what
+// checkLatest counts as a run started after another ([RFC#0003]
+// Requirement 18): where the clocks cannot tell, neither ledger counts as
+// created after the other.
+func CertainlyAfter(b, a *failoverv1.SiteFailover, sameSite bool) bool {
+	if sameSite {
+		return a.CreationTimestamp.Before(&b.CreationTimestamp)
+	}
+	return !b.CreationTimestamp.Time.Before(a.CreationTimestamp.Add(ClockSkew))
+}
+
 // resume runs the remaining steps. A resume, as opposed to the start
 // that Start already recorded, appends its entry Running to the history.
 func (e *Env) resume(ctx context.Context, sf *failoverv1.SiteFailover, opts Options, resumed bool) error {

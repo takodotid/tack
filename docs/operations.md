@@ -118,26 +118,28 @@ Each search for runs reads every ledger of the workload at each site that answer
 | A search at one site with 1,000 ledgers of 13.5 KB | 13.5 MB, in 10 answers of 1.35 MB |
 | The list of `tack status -f` once its search is done, for 10,000 runs | 28 ms |
 
-`tack prune -f workload.yaml --keep N` deletes the ledgers of old runs when their number slows the searches. It lists every run of the workload, newest first, with `delete` or why it keeps it, asks for the workload's name, searches again, then deletes one ledger at a time, oldest first. It needs row 16 of the [permissions](#permissions). The rules ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 27):
+`tack prune -f workload.yaml --keep N` deletes the ledgers of old runs when their number slows the searches. It lists every run of the workload, newest first, with `delete` or why it keeps it, asks for the workload's name, searches again, then deletes one ledger at a time, oldest first. It needs row 16 of the [permissions](#permissions), and row 7's `get` to delete a run with a follow-up `Rebuild`. The rules ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 27):
 
 | Rule | Why |
 |---|---|
 | Every site of the workload answers, and every run of the workload at every site is finished: `Succeeded` with no `Deferred` step, `Abandoned` or `TakenOver`. Otherwise prune deletes nothing. | Deleting a newer run lets an older unfinished run resume on a plan that no longer fits the sites ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 18). |
-| Delete only a `Succeeded` run with no `Deferred` step. Keep `Abandoned` and `TakenOver` runs. | They record holds that may be left in the cluster, and the take-over that ended them ([runbooks/abandon-run.md](runbooks/abandon-run.md), step 6). |
-| Keep the `--keep` newest runs that succeeded, at least 1. Abandoned and taken-over runs do not count among them: they are kept anyway. | The newest that succeeded records the last switch. |
-| Keep a run with a follow-up `Rebuild`. | `tack plan` refuses a planned switchover to that member while such a run says it diverged ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 14). Prune does not read the member: delete such a run by hand once the member was created again after the run started. |
+| Delete only a `Succeeded` run with no `Deferred` step. Keep `Abandoned` and `TakenOver` runs. | They record holds that may be left in the cluster, and the take-over that ended them ([runbooks/abandon-run.md](runbooks/abandon-run.md), step 6). Delete one by hand, below. |
+| Keep the `--keep` newest runs that succeeded, at least 1. Abandoned and taken-over runs do not count among them: they are kept anyway. A run goes only once `--keep` of them were created certainly after it: at its own site, in a later second; at another site, 10 s or more later. Otherwise prune keeps it, `may be one of the N newest`, and names the run the clocks cannot order it against. | The newest that succeeded records the last switch. Each site's API server sets its ledgers' creation time, to the second, by its own clock. |
 | Keep a run whose spec takes over a run that is kept, not abandoned, and not marked `status.supersededBy`. | That run counts as taken over only through this run's spec; without it, it would block every new run. |
 | Keep a run that a newer `tack` last wrote (`status.writtenBy`). A `tack` whose version names no release, such as `dev`, keeps every run that a release wrote. | A newer release may need what it recorded. |
+| Keep a run with a follow-up `Rebuild` until the member of its site, as the Workload file names it, was created again 10 s or more after the run started. Prune reads the member only for such a run, and keeps the run when it cannot read it. | `tack plan` refuses a planned switchover to that member while such a run says it diverged ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 14). The member's time comes from its site's API server, the run's start from the operator's host: the 10 s cover their clocks. |
 | Delete by name, each only while it is the object that was read; stop at the first error. | A run that started, or a ledger written, while the operator confirmed is not deleted on a stale list. |
 
-To delete a kept `Rebuild` run by hand, once its member was rebuilt:
+To delete an abandoned or taken-over run by hand, once its record no longer matters, check each row first, with `RUN`, its site's context `T_CTX`, and the ledger namespace `tack-system`:
+
+| Check | How |
+|---|---|
+| No object still names `RUN` as its holder. | `tack status RUN -f workload.yaml` lists each object the run held; for each, `kubectl --context SITE_CTX -n NS get KIND NAME -o jsonpath='{.metadata.annotations.failover\.tako\.id/held-by}{"\n"}'` prints something other than `RUN`. Otherwise remove the hold first ([runbooks/abandon-run.md](runbooks/abandon-run.md#remove-a-hold-left-behind)). |
+| It has no follow-up `Rebuild`, or that site's member was created again 10 s or more after the run started. | `tack status RUN -f workload.yaml` lists its follow-ups and its start; `kubectl --context "$ctx" -n db get cluster pg-a -o jsonpath='{.metadata.creationTimestamp}{"\n"}'` prints the member's creation. |
+| Its spec takes over no run that is still listed, neither abandoned nor marked `status.supersededBy`. | `kubectl --context T_CTX -n tack-system get sfo RUN -o jsonpath='{.spec.takeOver} {.spec.takeOvers}{"\n"}'`, then `tack status` lists each run it names. Deleting `RUN` would make such a run block every new run. |
 
 ```sh
-# The run: Succeeded, no Deferred step, its follow-up Rebuild, and when the run started
-tack status RUN -f workload.yaml
-# The member at that site, created after the run started
-kubectl --context "$ctx" -n db get cluster pg-a -o jsonpath='{.metadata.creationTimestamp}'
-kubectl --context "$ctx" -n tack-system delete sfo RUN
+kubectl --context T_CTX -n tack-system delete sfo RUN
 ```
 
 ## Permissions
@@ -152,7 +154,7 @@ Tack acts with the operator's credentials for each site's kube context. Every si
 | 4 | `sitefailovers` (`failover.tako.id`) | list | the ledger's | all | the search for runs |
 | 5 | `sitefailovers` | get, create | the ledger's | `run`, `resume`; `get` also `abandon` | the ledger: a dry-run create, then the create at `to`; reading a run, and a ledger that holds the run's name |
 | 6 | `sitefailovers/status` | update | the ledger's | `run`, `resume`, `abandon` | every step; with `--take-over`, the mark on each run taken over, at that run's site; the mark of `tack abandon` |
-| 7 | `clusters`, `poolers` (`postgresql.cnpg.io`) named in the Workload | get | the member's | `plan`, `run`, `resume` | reading each site, the owner labels, `Wait`, `Capture` and the checks |
+| 7 | `clusters`, `poolers` (`postgresql.cnpg.io`) named in the Workload | get | the member's | `plan`, `run`, `resume`; `prune` for a run with a follow-up `Rebuild` | reading each site, the owner labels, `Wait`, `Capture` and the checks |
 | 8 | the same | update, patch | the member's | `run`, `resume` | `update`: adding and removing the hold annotations. `patch`: the Failover steps, and the server-side dry-run apply of the check before release |
 | 9 | `deployments` (`apps`) named after each Pooler | get | the Pooler's | `run`, `resume` | the Pooler waits |
 | 10 | `kustomizations` (`kustomize.toolkit.fluxcd.io`) that apply the objects of rows 7 and 8 | get, patch | Flux's | `run`, `resume` | the reconcile request, an annotation; the waits; the render |

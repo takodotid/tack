@@ -94,3 +94,42 @@ func TestResumeOrdersRunsAcrossSites(t *testing.T) {
 		})
 	}
 }
+
+// #66. tack prune orders runs by the same clocks as tack resume: a ledger
+// counts as certainly created after another only where the resume of the
+// other would refuse it as started after (Requirement 18), and the other
+// way round. Where the clocks cannot tell, neither is after the other.
+func TestCertainlyAfter(t *testing.T) {
+	at := time.Date(2026, 11, 12, 10, 0, 0, 0, time.UTC)
+	ledger := func(offset time.Duration) *failoverv1.SiteFailover {
+		return &failoverv1.SiteFailover{ObjectMeta: metav1.ObjectMeta{CreationTimestamp: metav1.NewTime(at.Add(offset))}}
+	}
+	for _, tt := range []struct {
+		name     string
+		sameSite bool
+		// offset is b's creation time minus a's.
+		offset time.Duration
+		after  bool
+	}{
+		{name: "same site, same second", sameSite: true},
+		{name: "same site, 1 s later", sameSite: true, offset: time.Second, after: true},
+		{name: "same site, 1 s earlier", sameSite: true, offset: -time.Second},
+		{name: "another site, same second"},
+		{name: "another site, 9 s later", offset: 9 * time.Second},
+		{name: "another site, 10 s later", offset: 10 * time.Second, after: true},
+		{name: "another site, 1 min later", offset: time.Minute, after: true},
+		{name: "another site, 5 s earlier", offset: -5 * time.Second},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			a, b := ledger(0), ledger(tt.offset)
+			if got := engine.CertainlyAfter(b, a, tt.sameSite); got != tt.after {
+				t.Errorf("CertainlyAfter(b, a) = %v, want %v", got, tt.after)
+			}
+			// The complement of the resume's rule: a resume of a refuses
+			// b as started after it unless b is certainly before a.
+			if engine.CertainlyAfter(b, a, tt.sameSite) && engine.CertainlyAfter(a, b, tt.sameSite) {
+				t.Error("each is certainly after the other")
+			}
+		})
+	}
+}

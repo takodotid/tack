@@ -1206,6 +1206,12 @@ func TestPrune(t *testing.T) {
 			t.Errorf("prune lacks %q", want)
 		}
 	}
+	// TestRebuildAndSwitchBack created b's member again, minutes after the
+	// site-loss run started: its follow-up Rebuild no longer keeps it
+	// ([RFC#0003] Requirement 27, #66).
+	if strings.Contains(out, "keep: follow-up Rebuild") {
+		t.Errorf("prune kept a run for its follow-up Rebuild, though b's member was rebuilt:\n%s", out)
+	}
 	if _, err := kubectlE("b", "-n", ledgerNS, "get", "sfo", abandoned); err != nil {
 		t.Errorf("the abandoned run %s is gone: %v", abandoned, err)
 	}
