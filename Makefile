@@ -41,11 +41,11 @@ sbom: tools-go
 			-version $(VERSION) -output $$dir.cdx.json $$dir/tack$$exe; \
 	done
 
-## lint: the module's checksums, known vulnerabilities, error strings, the chart, and the pins of the workflows and the e2e
+## lint: the module's checksums, known vulnerabilities, staticcheck, the chart, and the pins of the workflows and the e2e
 lint: tools-go
 	$(GO) mod verify
 	$(GO) tool -modfile=hack/tools/go.mod govulncheck ./...
-	$(GO) tool -modfile=hack/tools/go.mod staticcheck -checks ST1005 -tags e2e ./...
+	$(GO) tool -modfile=hack/tools/go.mod staticcheck -tags e2e ./...
 	helm lint --strict deploy/helm/tack
 	hack/release/pinned.sh
 
