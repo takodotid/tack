@@ -62,7 +62,7 @@ func (e *Env) replan(sf *failoverv1.SiteFailover) ([]failoverv1.Step, error) {
 	if err := e.Driver.Validate(w); err != nil {
 		return nil, err
 	}
-	req := driver.Request{From: sf.Spec.From, To: sf.Spec.To, Mode: sf.Spec.Mode}
+	req := RequestOf(sf)
 	if err := checkRequest(Request{Workload: sf.Spec.Workload.Name, Spec: w, Request: req}); err != nil {
 		return nil, err
 	}

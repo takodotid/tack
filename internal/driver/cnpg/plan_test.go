@@ -548,7 +548,14 @@ func TestPlanRefusesPrimaryNotAmongExternalClusters(t *testing.T) {
 			case tt.want != "" && (err == nil || !strings.Contains(err.Error(), tt.want)):
 				t.Errorf("err %v, want %q", err, tt.want)
 			}
-			notes := strings.Join(Driver{}.Notes(w, topo, tt.req), "\n")
+			// Only the notes of Requirement 12: a site loss also notes its RPO (Requirement 13).
+			var mine []string
+			for _, n := range (Driver{}).Notes(w, topo, tt.req) {
+				if strings.Contains(n, "spec.externalClusters") {
+					mine = append(mine, n)
+				}
+			}
+			notes := strings.Join(mine, "\n")
 			switch {
 			case tt.note == "" && notes != "":
 				t.Errorf("notes %q, want none", notes)

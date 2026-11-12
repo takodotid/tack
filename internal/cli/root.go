@@ -81,8 +81,9 @@ Rules for AI agents:
   - An agent never starts "tack run" or "tack resume" without an explicit
     instruction from a human for that run.
   - "tack plan" comes first. Show its output to the human before any run.
-  - An agent never passes --yes, --fence, --accept-git-head, --take-over or
-    --force unless the human's instruction for that run names it.
+  - An agent never passes --yes, --fence, --accept-git-head, --accept-behind,
+    --take-over or --force unless the human's instruction for that run names
+    it.
   - "tack plan" and "tack status" only read; an agent may run them freely.
   - When a run stops, report its reason and message to the human and wait.
 

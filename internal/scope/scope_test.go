@@ -261,6 +261,38 @@ func TestNoExec(t *testing.T) {
 			}
 		}
 	}
+	// The only request through a pod's proxy: a GET of the instance manager's status, from the cnpg driver.
+	proxied := 0
+	calls(func(p *packages.Package, call *ast.CallExpr, fn *types.Func) {
+		if fn == nil || fn.Pkg() == nil {
+			return
+		}
+		switch {
+		case fn.Name() == "AbsPath" && fn.Pkg().Path() == "k8s.io/client-go/rest":
+			if p.PkgPath != module+"/internal/kube" {
+				t.Errorf("%s: a request by path; only internal/kube makes one", p.Fset.Position(call.Pos()))
+			}
+		case fn.Name() == "ProxyGet" && fn.Pkg().Path() == "k8s.io/client-go/kubernetes/typed/core/v1":
+			t.Errorf("%s: client-go's ProxyGet; Tack proxies only through kube.ProxyGet", p.Fset.Position(call.Pos()))
+		case fn.Name() == "ProxyGet" && strings.HasPrefix(fn.Pkg().Path(), module+"/internal/kube"):
+			if p.PkgPath == module+"/internal/kube" {
+				return
+			}
+			// engine.SiteChecks passes a driver's read on to the site's clients, as it does each request.
+			if p.PkgPath == module+"/internal/engine" && types.ExprString(call.Args[5]) == "port" && types.ExprString(call.Args[6]) == "path" {
+				return
+			}
+			port, path := p.TypesInfo.Types[call.Args[5]].Value, p.TypesInfo.Types[call.Args[6]].Value
+			if p.PkgPath != module+"/internal/driver/cnpg" || port == nil || path == nil ||
+				port.String() != "8000" || constant.StringVal(path) != "/pg/status" {
+				t.Errorf("%s: a GET through a pod's proxy that is not the cnpg driver's read of /pg/status on port 8000", p.Fset.Position(call.Pos()))
+			}
+			proxied++
+		}
+	})
+	if proxied == 0 {
+		t.Error("no call of kube.ProxyGet found: the check of the proxy reads nothing")
+	}
 	calls(func(p *packages.Package, call *ast.CallExpr, fn *types.Func) {
 		if fn == nil || fn.Name() != "SubResource" || len(call.Args) != 1 {
 			return

@@ -26,6 +26,9 @@ type Request struct {
 	From string
 	To   string
 	Mode failoverv1.Mode
+	// AcceptBehind lets a site loss promote to while another site that
+	// answers holds WAL past it ([RFC#0004] Requirement 14).
+	AcceptBehind bool
 }
 
 // Topology is the workload's state at every site, as read at plan time.
@@ -64,6 +67,34 @@ type SiteState struct {
 	Facts map[string]string
 	// Created is when the site's member was created. A rebuild recreates it.
 	Created time.Time
+	// Position is how far the member's copy of the data reaches, nil when
+	// the driver reads none. It moves all the time, so the read again
+	// after the confirmation does not compare it; the driver's refusals
+	// see the new value ([RFC#0009] Requirement 13).
+	Position *Position
+}
+
+// Position is how far a member's copy of the data reaches, as its
+// database reports it.
+type Position struct {
+	// Received and Replayed are the last WAL positions the member received
+	// and replayed, for a replica; Current is the primary's write
+	// position. Each is empty when the member does not report it.
+	Received, Replayed, Current string
+	// Timeline is the member's timeline.
+	Timeline int
+	// System identifies the database: positions of different systems do
+	// not compare.
+	System string
+	// ReceiverActive is true while the member streams WAL from its source.
+	ReceiverActive bool
+	// ReplayPaused is true when replay was paused.
+	ReplayPaused bool
+	// Standing compares the member with the other sites, such as
+	// "most caught up" or "behind b by 16 KiB".
+	Standing string
+	// Error is why the position could not be read.
+	Error string
 }
 
 // FieldChange is one field of one live object, and its value after the run.
@@ -94,7 +125,8 @@ type Driver interface {
 	Discover(ctx context.Context, w *failoverv1.WorkloadSpec, c kube.Clients) (*Topology, error)
 
 	// Plan returns the Failover phase's steps, in order. It checks that the
-	// request makes sense for the topology, then returns what Steps returns.
+	// request makes sense for the topology, then returns what Steps returns,
+	// with the follow-ups that come from the topology after those of Steps.
 	Plan(w *failoverv1.WorkloadSpec, t *Topology, r Request) ([]failoverv1.Step, []failoverv1.FollowUp, error)
 
 	// Steps returns the Failover phase's steps and the follow-ups of a

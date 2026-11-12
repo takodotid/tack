@@ -125,6 +125,19 @@ func TestThreeSites(t *testing.T) {
 	psql(t, "a", "insert into marks values ('three-start') on conflict do nothing")
 	replicated(t, "c", "three-start")
 
+	t.Run("the plan reads each site's WAL position", func(t *testing.T) {
+		// [RFC#0004] Requirement 13, on CloudNativePG: one primary and two replicas of one database.
+		plan := tackOK(t, "plan", "-f", workload3, "--to", "b")
+		if strings.Contains(plan, "could not be read") || !regexp.MustCompile(`(?m)^  a  writes at [0-9A-F]+/[0-9A-F]+ +timeline [0-9]+ +primary$`).MatchString(plan) {
+			t.Errorf("plan:\n%s", plan)
+		}
+		for _, s := range []string{"b", "c"} {
+			if !regexp.MustCompile(`(?m)^  ` + s + `  received [0-9A-F]+/[0-9A-F]+ +replayed [0-9A-F]+/[0-9A-F]+ +timeline [0-9]+, streaming +(most caught up|behind [bc] by .+)$`).MatchString(plan) {
+				t.Errorf("site %s's position is not in the plan:\n%s", s, plan)
+			}
+		}
+	})
+
 	t.Run("planned switchover, c follows", func(t *testing.T) {
 		out := tackOK(t, "run", "-f", workload3, "--to", "b", "--yes")
 		run := createdRun(t, out)

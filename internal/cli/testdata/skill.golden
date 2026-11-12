@@ -30,8 +30,9 @@ Rules for AI agents:
   - An agent never starts "tack run" or "tack resume" without an explicit
     instruction from a human for that run.
   - "tack plan" comes first. Show its output to the human before any run.
-  - An agent never passes --yes, --fence, --accept-git-head, --take-over or
-    --force unless the human's instruction for that run names it.
+  - An agent never passes --yes, --fence, --accept-git-head, --accept-behind,
+    --take-over or --force unless the human's instruction for that run names
+    it.
   - "tack plan" and "tack status" only read; an agent may run them freely.
   - When a run stops, report its reason and message to the human and wait.
 
@@ -117,6 +118,7 @@ Usage: `tack plan -f WORKLOAD --to SITE [--mode planned|site-loss] [flags]`
 
 | Flag | Meaning |
 |---|---|
+| `--accept-behind` | with --mode site-loss: promote the target although another site that answers holds WAL past it; that site then needs a rebuild |
 | `-f`, `--file` | the Workload file (required) |
 | `--from` | the site of the current primary (default: the primary the target site declares) |
 | `--mode` | planned: the old primary demotes and hands over its token; site-loss: promote without a token after the old site is lost (default `planned`) |
@@ -283,6 +285,7 @@ Usage: `tack run -f WORKLOAD --to SITE [--mode planned|site-loss] [flags]`
 
 | Flag | Meaning |
 |---|---|
+| `--accept-behind` | with --mode site-loss: promote the target although another site that answers holds WAL past it; that site then needs a rebuild |
 | `-f`, `--file` | the Workload file (required) |
 | `--force` | with --take-over: go on although a tack process may still run the run: its lease is fresh, or its ledger was just written; only once a human checked that none does |
 | `--from` | the site of the current primary (default: the primary the target site declares) |

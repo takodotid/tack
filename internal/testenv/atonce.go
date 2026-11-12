@@ -53,3 +53,12 @@ func (a *AtOnce) Reachable(ctx context.Context, site string) error {
 	}
 	return a.Clients.Reachable(ctx, site)
 }
+
+// ProxyGet implements kube.Proxier, when the clients it wraps do.
+func (a *AtOnce) ProxyGet(ctx context.Context, site, namespace, pod, scheme string, port int, path string) ([]byte, error) {
+	p, ok := a.Clients.(kube.Proxier)
+	if !ok {
+		return nil, fmt.Errorf("these clients cannot read a pod through the API server")
+	}
+	return p.ProxyGet(ctx, site, namespace, pod, scheme, port, path)
+}

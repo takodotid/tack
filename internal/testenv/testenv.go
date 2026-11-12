@@ -56,6 +56,10 @@ type Clients struct {
 	// errs holds, by site, an error every check returns, such as a refused
 	// credential.
 	errs map[string]error
+	// status and statusErr are what the site's pods report (SetStatus).
+	status    map[string]map[string]any
+	statusErr map[string]error
+	proxied   []Proxied
 }
 
 // NewClients returns fake clients for the sites, seeded with objects. Each
@@ -126,12 +130,14 @@ const User = "operator@example.com"
 // subresource ignores it (#38 item 4). Objects seeded with objs keep
 // theirs: they stand for ledgers written before.
 func NewClient(objs ...client.Object) client.Client {
+	objs = withPods(objs)
 	mapper := meta.NewDefaultRESTMapper(nil)
 	for _, gvk := range GVKs {
 		mapper.Add(gvk, meta.RESTScopeNamespace)
 	}
 	mapper.Add(corev1.SchemeGroupVersion.WithKind("Namespace"), meta.RESTScopeRoot)
 	mapper.Add(corev1.SchemeGroupVersion.WithKind("Event"), meta.RESTScopeNamespace)
+	mapper.Add(corev1.SchemeGroupVersion.WithKind("Pod"), meta.RESTScopeNamespace)
 	mapper.Add(authenticationv1.SchemeGroupVersion.WithKind("SelfSubjectReview"), meta.RESTScopeRoot)
 	mapper.Add(coordinationv1.SchemeGroupVersion.WithKind("Lease"), meta.RESTScopeNamespace)
 	return fake.NewClientBuilder().
@@ -590,4 +596,96 @@ func lower(s string) string {
 		}
 	}
 	return string(b)
+}
+
+// withPods adds, for each CloudNativePG Cluster among objs, the Pod that
+// its status names current primary, as CloudNativePG v1.30.1 runs it: its
+// postgres container serves the status port with TLS.
+func withPods(objs []client.Object) []client.Object {
+	out := slices.Clone(objs)
+	for _, o := range objs {
+		u, ok := o.(*unstructured.Unstructured)
+		if !ok || u.GetKind() != "Cluster" {
+			continue
+		}
+		name, _, _ := unstructured.NestedString(u.Object, "status", "currentPrimary")
+		if name == "" {
+			continue
+		}
+		has := false
+		for _, p := range objs {
+			has = has || p.GetName() == name && p.GetNamespace() == u.GetNamespace() && p.GetObjectKind().GroupVersionKind().Kind == "Pod"
+		}
+		if !has {
+			out = append(out, Pod(u.GetNamespace(), name))
+		}
+	}
+	return out
+}
+
+// Pod returns an instance Pod of CloudNativePG.
+func Pod(namespace, name string) *corev1.Pod {
+	p := &corev1.Pod{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Pod"}}
+	p.Namespace, p.Name = namespace, name
+	p.Spec.Containers = []corev1.Container{{Name: "postgres", Command: []string{"/controller/manager", "instance", "run", "--status-port-tls"}}}
+	return p
+}
+
+// Proxied is one GET that the fake API server proxied to a pod.
+type Proxied struct {
+	Site, Namespace, Pod, Scheme, Path string
+	Port                               int
+}
+
+// SetStatus sets the instance status that the site's pods report, as
+// JSON; nil goes back to the default. An error makes the read fail.
+func (c *Clients) SetStatus(site string, status map[string]any, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.status == nil {
+		c.status = map[string]map[string]any{}
+		c.statusErr = map[string]error{}
+	}
+	c.status[site], c.statusErr[site] = status, err
+}
+
+// ProxyLog returns the GETs proxied so far.
+func (c *Clients) ProxyLog() []Proxied {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Clone(c.proxied)
+}
+
+// ProxyGet implements kube.Proxier. By default a pod reports the status
+// of an instance at 0/3000060 on timeline 1: a primary when its Cluster
+// reports it so, else a replica that streams.
+func (c *Clients) ProxyGet(ctx context.Context, site, namespace, pod, scheme string, port int, path string) ([]byte, error) {
+	if c.IsDown(site) {
+		return nil, &kube.UnreachableError{Err: fmt.Errorf("site %s is unreachable: connection refused", site)}
+	}
+	c.mu.Lock()
+	c.proxied = append(c.proxied, Proxied{Site: site, Namespace: namespace, Pod: pod, Scheme: scheme, Path: path, Port: port})
+	status, err := c.status[site], c.statusErr[site]
+	c.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	if status == nil {
+		cl, err := c.Client(site)
+		if err != nil {
+			return nil, err
+		}
+		u := Object("postgresql.cnpg.io/v1", "Cluster", namespace, "pg-"+site, nil)
+		if err := cl.Get(ctx, client.ObjectKeyFromObject(u), u); err != nil {
+			return nil, err
+		}
+		primary, _, _ := unstructured.NestedBool(u.Object, "status", "instancesReportedState", pod, "isPrimary")
+		status = map[string]any{"systemID": "7300000000000000001", "timeLineID": 1, "isPrimary": primary}
+		if primary {
+			status["currentLsn"] = "0/3000060"
+		} else {
+			status["receivedLsn"], status["replayLsn"], status["isWalReceiverActive"] = "0/3000060", "0/3000060", true
+		}
+	}
+	return json.Marshal(status)
 }

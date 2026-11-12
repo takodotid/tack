@@ -100,6 +100,12 @@ type SiteFailoverSpec struct {
 	// the first. Unset for most runs.
 	// +optional
 	TakeOvers []string `json:"takeOvers,omitempty"`
+
+	// AcceptBehind records --accept-behind: the operator let a site loss
+	// promote To while another site that answered held WAL past it
+	// ([RFC#0004] Requirement 14). Unset for most runs.
+	// +optional
+	AcceptBehind bool `json:"acceptBehind,omitempty"`
 }
 
 // TakenOver returns every run sf takes over: spec.takeOver, then the rest

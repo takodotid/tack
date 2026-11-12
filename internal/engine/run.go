@@ -40,6 +40,9 @@ type Options struct {
 	// Force is set when the operator took over a run that a tack process
 	// may still run, with --force ([RFC#0003] Requirement 28).
 	Force bool
+	// AcceptBehind is set when the operator passed --accept-behind
+	// ([RFC#0004] Requirement 14). The spec records it too.
+	AcceptBehind bool
 }
 
 // ErrStopped is returned when the run stops for the operator.
@@ -719,8 +722,11 @@ func (r *runner) index(id string) int {
 }
 
 // request is the run's request, as its driver takes it.
-func (r *runner) request() driver.Request {
-	return driver.Request{From: r.sf.Spec.From, To: r.sf.Spec.To, Mode: r.sf.Spec.Mode}
+func (r *runner) request() driver.Request { return RequestOf(r.sf) }
+
+// RequestOf is a ledger's request, as its driver takes it.
+func RequestOf(sf *failoverv1.SiteFailover) driver.Request {
+	return driver.Request{From: sf.Spec.From, To: sf.Spec.To, Mode: sf.Spec.Mode, AcceptBehind: sf.Spec.AcceptBehind}
 }
 
 // fencesAfter tells whether the step that makes site declare another

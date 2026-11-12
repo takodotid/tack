@@ -890,7 +890,13 @@ func TestRoutingFromStrait(t *testing.T) {
 	}
 
 	restricted := operatorKubeconfig(t)
-	tackOK(t, "plan", "--kubeconfig", restricted, "-f", routed, "--to", "a")
+	// [RFC#0004] Requirement 13 through the chart's row 18: the plan reads each site's WAL position.
+	plan := tackOK(t, "plan", "--kubeconfig", restricted, "-f", routed, "--to", "a")
+	if !strings.Contains(plan, "WAL positions:") || strings.Contains(plan, "could not be read") ||
+		!regexp.MustCompile(`(?m)^  a  received [0-9A-F]+/[0-9A-F]+ +replayed [0-9A-F]+/[0-9A-F]+ +timeline [0-9]+, streaming +most caught up$`).MatchString(plan) ||
+		!regexp.MustCompile(`(?m)^  b  writes at [0-9A-F]+/[0-9A-F]+ +timeline [0-9]+ +primary$`).MatchString(plan) {
+		t.Errorf("the plan as the chart's roles does not show both sites' WAL positions:\n%s", plan)
+	}
 	run := createdRun(t, tackOK(t, "run", "--kubeconfig", restricted, "-f", routed, "--to", "a", "--yes"))
 	assertPrimary(t, "a", "b")
 	sf := latestRun(t, "a")

@@ -393,6 +393,31 @@ func (k *Kubeconfig) Reachable(ctx context.Context, site string) error {
 	return fmt.Errorf("site %q answered its check with an error, so it is not counted as lost: %w", site, err)
 }
 
+// Proxier is a Clients that can read one HTTP path of a pod through the
+// site's API server ([RFC#0001] Requirement 2). It sends a GET only.
+type Proxier interface {
+	// ProxyGet returns the body of a GET of path on the pod's port, through
+	// the API server's pods/proxy subresource, with scheme http or https.
+	ProxyGet(ctx context.Context, site, namespace, pod, scheme string, port int, path string) ([]byte, error)
+}
+
+// ProxyGet implements Proxier. Only the cnpg driver calls it, for the
+// instance manager's status ([RFC#0004] Requirement 13).
+func (k *Kubeconfig) ProxyGet(ctx context.Context, site, namespace, pod, scheme string, port int, path string) ([]byte, error) {
+	k.mu.Lock()
+	cfg, err := k.restConfig(site)
+	k.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	rc, err := rest.UnversionedRESTClientFor(setDefaults(rest.CopyConfig(cfg)))
+	if err != nil {
+		return nil, fmt.Errorf("site %q: %w", site, err)
+	}
+	target := fmt.Sprintf("%s:%s:%d", scheme, pod, port)
+	return rc.Get().AbsPath("/api/v1/namespaces", namespace, "pods", target, "proxy", strings.TrimPrefix(path, "/")).DoRaw(ctx)
+}
+
 // Server implements the optional Server of Clients: the API server URL of
 // the site's context.
 func (k *Kubeconfig) Server(site string) (string, error) {

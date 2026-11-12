@@ -241,7 +241,7 @@ func (e *Env) Recheck(ctx context.Context, p *Plan) error {
 			return stale("site %s changed since the plan: %s", was.Name, diff)
 		}
 	}
-	if _, _, err := e.Driver.Plan(spec, topo, driver.Request{From: sf.Spec.From, To: sf.Spec.To, Mode: sf.Spec.Mode}); err != nil {
+	if _, _, err := e.Driver.Plan(spec, topo, RequestOf(sf)); err != nil {
 		return stale("the plan is no longer allowed: %v", err)
 	}
 	for _, f := range sf.Spec.Fingerprints {
@@ -516,6 +516,7 @@ func Compose(in Inputs) (*failoverv1.SiteFailover, error) {
 			To:           in.To,
 			Steps:        steps,
 			Fingerprints: in.Fingerprints,
+			AcceptBehind: in.AcceptBehind,
 		},
 		Status: failoverv1.SiteFailoverStatus{FollowUps: in.FollowUps},
 	}

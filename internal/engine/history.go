@@ -42,6 +42,9 @@ func (o Options) Flags() []string {
 	if o.AcceptGitHead != "" {
 		out = append(out, "--accept-git-head="+o.AcceptGitHead)
 	}
+	if o.AcceptBehind {
+		out = append(out, "--accept-behind")
+	}
 	if o.Yes {
 		out = append(out, "--yes")
 	}
