@@ -183,16 +183,19 @@ type Kubeconfig struct {
 	mu      sync.Mutex
 	clients map[string]client.Client
 	configs map[string]*rest.Config
-	// probes are the clients of Credentials, by site.
+	// probes are the clients of Credentials, by site: nil for a context
+	// without a credential plugin.
 	probes map[string]rest.Interface
 	// denied holds, by site, the credentials that could not be obtained:
 	// every later check of the site returns it.
 	denied map[string]error
 }
 
-// credentialsMu runs one credential plugin at a time in the process: a
-// plugin may prompt on the terminal ([RFC#0007] Requirement 12).
-var credentialsMu sync.Mutex
+// pluginTurn runs one credential plugin at a time in the process: a
+// plugin may prompt on the terminal ([RFC#0007] Requirement 12). A probe
+// takes it before its plugin starts and gives it back once its plugin
+// ended, also when its caller stopped waiting.
+var pluginTurn = make(chan struct{}, 1)
 
 // localAnswer answers every request itself. The probe of Credentials goes
 // through the credential plugin's wrapper of client-go, which runs the
@@ -214,9 +217,12 @@ func (localAnswer) RoundTrip(req *http.Request) (*http.Response, error) {
 // plugin, when it has one and client-go holds no valid credentials from
 // it, through a request that never leaves the process. client-go keeps one
 // plugin per configuration, so the site's other clients use what it got.
-// Credentials run one at a time in the process. Credentials that cannot be
-// obtained are kept: every later check of the site returns that error. An
-// interrupt is not kept.
+// A context without a plugin has nothing to obtain. Credentials run one at
+// a time in the process. The end of ctx ends the wait, for the turn and
+// for the plugin: client-go runs the plugin with no context, so the plugin
+// itself runs on until it ends, and keeps the turn until then. Credentials
+// that cannot be obtained are kept: every later check of the site returns
+// that error. An interrupt is not kept.
 func (k *Kubeconfig) Credentials(ctx context.Context, site string) error {
 	k.mu.Lock()
 	if err := k.denied[site]; err != nil {
@@ -228,11 +234,30 @@ func (k *Kubeconfig) Credentials(ctx context.Context, site string) error {
 	if err != nil {
 		return fmt.Errorf("%w; a site that cannot be checked is not counted as lost", err)
 	}
-	credentialsMu.Lock()
-	defer credentialsMu.Unlock()
-	err = probe.Get().AbsPath("/readyz").Do(ctx).Error()
-	if err == nil || ctx.Err() != nil {
-		return err
+	if probe == nil {
+		return nil
+	}
+	select {
+	case pluginTurn <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	done := make(chan error, 1)
+	go func() {
+		defer func() { <-pluginTurn }()
+		done <- probe.Get().AbsPath("/readyz").Do(ctx).Error()
+	}()
+	select {
+	case err = <-done:
+	case <-ctx.Done():
+	}
+	// An interrupt is not credentials that cannot be obtained: it is not
+	// kept.
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if err == nil {
+		return nil
 	}
 	err = fmt.Errorf("site %q: the credentials of context %q could not be obtained, so the site is not counted as lost: %w", site, k.Contexts[site], err)
 	k.mu.Lock()
@@ -246,7 +271,8 @@ func (k *Kubeconfig) Credentials(ctx context.Context, site string) error {
 
 // probe returns the client of Credentials for site: its context's
 // configuration, with no time limit, whose requests end at localAnswer.
-// k.mu must be held.
+// It returns nil for a context without a credential plugin, exec or
+// auth-provider. k.mu must be held.
 func (k *Kubeconfig) probe(site string) (rest.Interface, error) {
 	if p, ok := k.probes[site]; ok {
 		return p, nil
@@ -255,12 +281,15 @@ func (k *Kubeconfig) probe(site string) (rest.Interface, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg = rest.CopyConfig(cfg)
-	cfg.Timeout = 0
-	cfg.WrapTransport = func(http.RoundTripper) http.RoundTripper { return localAnswer{} }
-	p, err := rest.UnversionedRESTClientFor(setDefaults(cfg))
-	if err != nil {
-		return nil, fmt.Errorf("site %q: %w", site, err)
+	var p rest.Interface
+	if cfg.ExecProvider != nil || cfg.AuthProvider != nil {
+		cfg = rest.CopyConfig(cfg)
+		cfg.Timeout = 0
+		cfg.WrapTransport = func(http.RoundTripper) http.RoundTripper { return localAnswer{} }
+		p, err = rest.UnversionedRESTClientFor(setDefaults(cfg))
+		if err != nil {
+			return nil, fmt.Errorf("site %q: %w", site, err)
+		}
 	}
 	if k.probes == nil {
 		k.probes = map[string]rest.Interface{}
