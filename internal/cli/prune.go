@@ -277,10 +277,11 @@ func newest(r foundRun, counted []foundRun, keep int) string {
 		case i < keep && near == nil:
 			near = o
 		}
+		if after >= keep {
+			return ""
+		}
 	}
 	switch {
-	case after >= keep:
-		return ""
 	case near.site == r.site:
 		return fmt.Sprintf("may be one of the %d newest that succeeded: created in the same second as run %s", keep, near.sf.Name)
 	default:
