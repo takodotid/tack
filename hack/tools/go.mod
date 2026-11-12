@@ -1,7 +1,7 @@
 // The Go tools of make lint and make sbom, apart from the main module, so that they never change its dependencies.
 module github.com/takodotid/tack/hack/tools
 
-go 1.27.3
+go 1.27.4
 
 tool (
 	github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod
@@ -48,7 +48,7 @@ require (
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
 	golang.org/x/exp/typeparams v0.0.0-20231108232855-2478ac86f678 // indirect
 	golang.org/x/mod v0.42.0 // indirect
-	golang.org/x/net v0.61.0 // indirect
+	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/telemetry v0.0.0-20261010193011-f71dc92da45e // indirect
