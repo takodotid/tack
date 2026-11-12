@@ -219,14 +219,16 @@ Each release also needs:
 
 | From | To | CRD | Also before the new CLI runs |
 |---|---|---|---|
+| v1.4.x | v1.5.0 | unchanged | Grant `get`, `create` and `update` on `leases` in the ledger namespace (row 17 of [docs/operations.md](docs/operations.md#permissions); the chart's ledger Role has it with `rbac.create`): without it, a run holds no Lease and says so once. `tack abandon` and `tack run --take-over` now refuse a run that a process may still run; `--force` goes on. A build whose version names no release, such as `dev`, refuses ledgers that a release wrote. Quote a `kubeContext` that YAML reads as other text, such as `on`: v1.5.0 refuses it unquoted. |
 | v1.3.x | v1.4.0 | no new field; the column Abandoned in `kubectl get sfo`, after Reason: Phase and Age move one place right | With a CRD of v1.3.x, everything works but that column. `tack prune` needs `delete` on `sitefailovers` in the ledger namespace (row 16 of [docs/operations.md](docs/operations.md#permissions)): the chart grants it only with `rbac.prune`, so grant it only to the operators who prune. Once v1.4.0 writes a ledger, `tack resume` and `tack abandon` of v1.3.x refuse that run and name v1.4.0. |
 | v1.3.0 | v1.3.1 | unchanged | A script that runs `tack status -f` gets exit code 1 when a site gives no answer, with the runs it read: the list is incomplete ([docs/operations.md](docs/operations.md#reading-a-run)). |
 | v1.2.x | v1.3.0 | new optional fields: `spec.takeOvers`, `status.abandoned`, `status.git.changedRevision`, `status.history`, `status.historyDropped`, `status.writtenBy`; the column Reason in `kubectl get sfo` | Grant `create` on `events` in the ledger namespace, for the ledger's Events; without it, a run goes on without them ([docs/operations.md](docs/operations.md#permissions)). Quote every site name that YAML reads as a boolean or a number, such as `n`, `on` or `010`, in each Workload file: v1.3.0 refuses it unquoted ([docs/workload.md](docs/workload.md#specsites)). A run planned before recorded the decoded name, such as `false`, and its flags, such as `--fence`, take that name. |
 | v1.2.0 | v1.2.1 | unchanged | nothing |
 | v1.0.x or v1.1.x | v1.2.x | new optional fields: `spec.takeOver`, `spec.fingerprints`, `status.fingerprints`, `status.supersededBy`, `status.git.releaseRevision` | Grant `get` on the namespace `kube-system` at every site: the plan reads its UID to identify the site's cluster, and fails with `forbidden` without it. Move a user out of an `http` or `https` Git URL, such as `https://user@git.example.com/gitops.git`, into git's configuration (`credential.<url>.username`): Tack refuses such a URL. `ssh://git@git.example.com/gitops.git` and `git@git.example.com:gitops.git` still work. |
 
-| A ledger written by | Under v1.4.0 |
+| A ledger written by | Under v1.5.0 |
 |---|---|
+| v1.4.x | As below for v1.3.x. It has no Lease: `tack abandon` and `tack run --take-over` judge it by the ledger, and refuse a `Running` run written within its `Running` step's timeout and 5 minutes, unless `--force`. |
 | v1.3.x | `tack status` lists and shows it, with its history. `tack resume` continues it and keeps that history. `tack abandon` sees its mark. `tack prune` deletes it when its rules allow. |
 | v1.2.x | `tack resume` continues it. |
 | v1.0.x or v1.1.x | `tack resume` continues it. Each site's cluster is recorded in `status.fingerprints` on its first read, and checked after. |
