@@ -72,7 +72,7 @@ func diffOptions(ks *unstructured.Unstructured) (ssa.DiffOptions, error) {
 		} `json:"target"`
 	}
 	if err := json.Unmarshal(b, &rules); err != nil {
-		return opts, fmt.Errorf("Kustomization %s/%s: spec.ignore: %w", ks.GetNamespace(), ks.GetName(), err)
+		return opts, fmt.Errorf("the Kustomization %s/%s: spec.ignore: %w", ks.GetNamespace(), ks.GetName(), err)
 	}
 	for _, r := range rules {
 		rule := jsondiff.IgnoreRule{Paths: r.Paths}
@@ -415,12 +415,12 @@ func (f *Flux) waitReady(ctx context.Context, c client.Client, site string, ks [
 			if suspended(u) {
 				// Its Ready condition is its last reconcile's: Flux applies
 				// nothing to the released objects (PR #42).
-				return nil, fmt.Errorf("Kustomization %s at site %s is suspended (spec.suspend): Flux applies nothing to the released objects, so the check after release cannot tell what Flux does with them. Resume the Kustomization, then resume the run", keyString(k), site)
+				return nil, fmt.Errorf("the Kustomization %s at site %s is suspended (spec.suspend): Flux applies nothing to the released objects, so the check after release cannot tell what Flux does with them. Resume the Kustomization, then resume the run", keyString(k), site)
 			}
 			st, reason, msg := ready(u)
 			switch {
 			case st == "False":
-				return nil, fmt.Errorf("Kustomization %s at site %s is failing after release: %s: %s", keyString(k), site, reason, msg)
+				return nil, fmt.Errorf("the Kustomization %s at site %s is failing after release: %s: %s", keyString(k), site, reason, msg)
 			case st == "True" && reason == ReasonSucceeded:
 				revs = append(revs, keyString(k)+" at "+str(u, "status", "lastAppliedRevision"))
 			default:

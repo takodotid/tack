@@ -38,7 +38,7 @@ func main() {
 
 func run(args []string, epoch string) error {
 	if len(args) < 3 {
-		return errors.New("usage: SOURCE_DATE_EPOCH=<seconds> distcheck <dist> <version> <os/arch>...")
+		return errors.New("usage: SOURCE_DATE_EPOCH=<seconds> distcheck <dist> <version> <os/arch> [<os/arch> ...]")
 	}
 	dist, version, platforms := args[0], args[1], args[2:]
 	secs, err := strconv.ParseInt(epoch, 10, 64)
