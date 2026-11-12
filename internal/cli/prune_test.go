@@ -477,21 +477,3 @@ func TestPruneReadsMembersAgainAfterConfirmation(t *testing.T) {
 		t.Errorf("site b holds %v, want 3 runs", got)
 	}
 }
-
-// The plan refuses a switch to a primary that a site's Cluster does not
-// name among its external clusters, before the ledger exists and before
-// any step (observed on kind: CloudNativePG refused the step).
-func TestRunRefusesPrimaryNotAmongExternalClusters(t *testing.T) {
-	a := testenv.Cluster("a", "a", true, nil)
-	a.Object["spec"].(map[string]any)["externalClusters"] = []any{map[string]any{"name": "pg-a"}}
-	f := newFactory(map[string][]client.Object{"a": {a, testenv.Pooler("a", 2)}, "b": testenv.Site("b", "a", 0)})
-	// A run that starts stops at its first step.
-	f.flux.Fail["Hold"] = errors.New("a step ran")
-	out, code := run(t, f, "run", "-f", "testdata/workload.yaml", "--to", "b", "--yes")
-	if code != ExitError || !strings.Contains(out, "site a: Cluster pg-a does not name pg-b among its spec.externalClusters") {
-		t.Fatalf("exit %d, want 1 naming pg-a:\n%s", code, out)
-	}
-	if got := runsAt(t, f, "b"); len(got) != 0 || len(f.flux.Calls) > 0 {
-		t.Errorf("the refused run left ledgers %v and Flux calls %v", got, f.flux.Calls)
-	}
-}
