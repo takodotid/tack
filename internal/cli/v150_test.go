@@ -86,7 +86,7 @@ func TestLedgersOfV150(t *testing.T) {
 			kept: map[string]string{
 				"planned-after-rebuild": "keep: one of the 1 newest that succeeded",
 				"abandoned":             "keep: abandoned",
-				"site-loss-rebuild":     "keep: follow-up Rebuild for site b: its member was created at 2026-11-12T08:00:00Z, not 10s or more after the run started at 2026-11-12T10:00:00Z",
+				"site-loss-rebuild":     "keep: follow-up Rebuild for site b: its member was created at 2026-11-12T08:00:00Z, not 10s or more after the run's ledger at 2026-11-12T10:00:00Z",
 			},
 		},
 	} {

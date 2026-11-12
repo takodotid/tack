@@ -96,7 +96,7 @@ func TestPrune(t *testing.T) {
 		"pg-main-marked          TakenOver  2026-10-27 04:15:00Z  keep: taken over\n",
 		"pg-main-taker           Succeeded  2026-10-27 03:45:00Z  keep: only its spec marks run pg-main-unmarked as taken over\n",
 		"pg-main-unmarked        TakenOver  2026-10-27 03:15:00Z  keep: taken over\n",
-		"keep: follow-up Rebuild for site a: its member was created at 2026-10-27T01:15:00Z, not 10s or more after the run started at 2026-10-27T02:15:00Z\n",
+		"keep: follow-up Rebuild for site a: its member was created at 2026-10-27T01:15:00Z, not 10s or more after the run's ledger at 2026-10-27T02:15:00Z\n",
 		"keep: written by tack v99.0.0, newer than this tack v1.4.0\n",
 		"deleted   ledger tack-system/pg-main-old-at-a at site a\n",
 		"deleted   ledger tack-system/pg-main-old at site b\n",
@@ -353,8 +353,11 @@ func TestPruneOrdersRunsByTheClocks(t *testing.T) {
 // member, and the operator deleted such a run by hand. It now reads the
 // member of the Rebuild's site, as tack plan does for [RFC#0003]
 // Requirement 14, and deletes the run once the member was created again
-// 10 s or more after the run started: plan no longer needs it. Anything it
-// cannot tell keeps the run.
+// 10 s or more after the run's ledger. Anything it cannot tell keeps the
+// run. The coordinator's review of PR #68 found that prune compared with
+// the run's start, from the clock of the host that ran it: a host clock
+// behind made a member created before the run look rebuilt. Both times
+// now come from API servers.
 func TestPruneDeletesRunWhoseRebuildIsDone(t *testing.T) {
 	started := fixedNow.Add(-3 * time.Hour)
 	forbidden := func(c client.WithWatch) client.WithWatch {
@@ -373,20 +376,28 @@ func TestPruneDeletesRunWhoseRebuildIsDone(t *testing.T) {
 		member *unstructured.Unstructured
 		site   string
 		wrap   func(client.WithWatch) client.WithWatch
-		keep   string
+		// edit changes the run's ledger.
+		edit func(*failoverv1.SiteFailover)
+		keep string
 	}{
 		{name: "rebuilt an hour after the run started", member: created(testenv.Cluster("a", "b", false, nil), started.Add(time.Hour))},
 		{name: "rebuilt 10 s after", member: created(testenv.Cluster("a", "b", false, nil), started.Add(10*time.Second))},
 		{name: "created 5 s after, within the clocks' margin", member: created(testenv.Cluster("a", "b", false, nil), started.Add(5*time.Second)),
-			keep: "follow-up Rebuild for site a: its member was created at 2026-10-27T07:15:05Z, not 10s or more after the run started at 2026-10-27T07:15:00Z"},
+			keep: "follow-up Rebuild for site a: its member was created at 2026-10-27T07:15:05Z, not 10s or more after the run's ledger at 2026-10-27T07:15:00Z"},
 		{name: "created before the run", member: created(testenv.Cluster("a", "b", false, nil), started.Add(-time.Hour)),
-			keep: "follow-up Rebuild for site a: its member was created at 2026-10-27T06:15:00Z, not 10s or more after the run started at 2026-10-27T07:15:00Z"},
+			keep: "follow-up Rebuild for site a: its member was created at 2026-10-27T06:15:00Z, not 10s or more after the run's ledger at 2026-10-27T07:15:00Z"},
 		{name: "creation time unknown", member: testenv.Cluster("a", "b", false, nil),
 			keep: "follow-up Rebuild for site a: its member's creation time is unknown"},
 		{name: "member cannot be read", member: created(testenv.Cluster("a", "b", false, nil), started.Add(time.Hour)), wrap: forbidden,
 			keep: `follow-up Rebuild for site a: its member could not be read (site a: read Cluster db/pg-a: clusters.postgresql.cnpg.io "pg-a" is forbidden: no rule)`},
 		{name: "a site the Workload file does not name", member: created(testenv.Cluster("a", "b", false, nil), started.Add(time.Hour)), site: "c",
 			keep: "follow-up Rebuild for site c: the Workload file has no such site"},
+		{name: "created before the run, by a host whose clock was an hour behind", member: created(testenv.Cluster("a", "b", false, nil), started.Add(-30*time.Minute)),
+			edit: func(sf *failoverv1.SiteFailover) { sf.Status.StartedAt = &metav1.Time{Time: started.Add(-time.Hour)} },
+			keep: "follow-up Rebuild for site a: its member was created at 2026-10-27T06:45:00Z, not 10s or more after the run's ledger at 2026-10-27T07:15:00Z"},
+		{name: "a ledger without a creation time", member: created(testenv.Cluster("a", "b", false, nil), started.Add(time.Hour)),
+			edit: func(sf *failoverv1.SiteFailover) { sf.CreationTimestamp = metav1.Time{} },
+			keep: "follow-up Rebuild for site a: its ledger has no creation time"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			site := tt.site
@@ -396,6 +407,9 @@ func TestPruneDeletesRunWhoseRebuildIsDone(t *testing.T) {
 			rebuild := doneRun(t, "pg-main-rebuild", 3*time.Hour)
 			rebuild.Status.StartedAt = &metav1.Time{Time: started}
 			rebuild.Status.FollowUps = []failoverv1.FollowUp{{Site: site, Action: engine.FollowUpRebuild, Reason: "promoted without a token"}}
+			if tt.edit != nil {
+				tt.edit(rebuild)
+			}
 			f := newFactory(map[string][]client.Object{
 				"a": {tt.member, testenv.Pooler("a", 0)},
 				"b": append(testenv.Site("b", "b", 2), doneRun(t, "pg-main-newest", time.Hour), rebuild),
@@ -408,7 +422,12 @@ func TestPruneDeletesRunWhoseRebuildIsDone(t *testing.T) {
 			if tt.keep != "" {
 				want = "pg-main-rebuild  Succeeded  2026-10-27 07:15:00Z  keep: " + tt.keep + "\n"
 			}
-			if code != ExitOK || !strings.Contains(out, want) {
+			if tt.edit != nil {
+				// The list shows the ledger's creation, which edit may
+				// change.
+				want = want[strings.Index(want, "Z  ")+1:]
+			}
+			if code != ExitOK || !strings.Contains(out, " pg-main-rebuild ") || !strings.Contains(out, want) {
 				t.Fatalf("exit %d, want 0 with %q:\n%s", code, want, out)
 			}
 			if kept := slices.Contains(runsAt(t, f, "b"), "pg-main-rebuild"); kept != (tt.keep != "") {

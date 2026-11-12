@@ -32,9 +32,9 @@ Deferred step, and keeps:
   - every abandoned run, and every run that another run took over: delete
     one by hand, as the link below shows;
   - every run with a follow-up Rebuild whose member was not created again
-    10s or more after the run started, as the Workload file names the
-    member at that site, or whose member cannot be read: a planned run
-    onto that member needs it;
+    10s or more after the run's ledger was created, as the Workload file
+    names the member at that site, or whose member cannot be read: a
+    planned run onto that member needs it;
   - every run whose spec records that it took over a run that is kept and
     is not marked as taken over: without it, that run would block new runs;
   - every run that a newer tack than this one last wrote.
@@ -291,14 +291,14 @@ func newest(r foundRun, counted []foundRun, keep int) string {
 
 // openRebuild tells why a run's follow-ups Rebuild may still be open, or
 // "": the member of each such site, as the Workload file names it, was
-// created again ClockSkew or more after the run started. Its creation time
-// comes from the site's API server, the run's start from the clock of the
-// host that ran it. A member that cannot be read keeps the run.
+// created again ClockSkew or more after the run's ledger. Both times come
+// from API servers, the member's from its site's and the ledger's
+// (metadata.creationTimestamp) from the ledger site's, never from the
+// clock of the host that ran the run, which may be behind. A member that
+// cannot be read keeps the run, and so does a ledger without a creation
+// time.
 func openRebuild(sf *failoverv1.SiteFailover, members func() (*driver.Topology, error)) string {
-	started := sf.CreationTimestamp.Time
-	if sf.Status.StartedAt != nil {
-		started = sf.Status.StartedAt.Time
-	}
+	created := sf.CreationTimestamp.Time
 	var why []string
 	for _, f := range sf.Status.FollowUps {
 		if f.Action != engine.FollowUpRebuild {
@@ -312,6 +312,8 @@ func openRebuild(sf *failoverv1.SiteFailover, members func() (*driver.Topology, 
 		}
 		open := ""
 		switch {
+		case created.IsZero():
+			open = "its ledger has no creation time"
 		case err != nil:
 			open = fmt.Sprintf("its member could not be read (%v)", err)
 		case !ok:
@@ -320,9 +322,9 @@ func openRebuild(sf *failoverv1.SiteFailover, members func() (*driver.Topology, 
 			open = "the site gave no answer when its member was read"
 		case st.Created.IsZero():
 			open = "its member's creation time is unknown"
-		case st.Created.Before(started.Add(engine.ClockSkew)):
-			open = fmt.Sprintf("its member was created at %s, not %s or more after the run started at %s",
-				st.Created.UTC().Format(time.RFC3339), engine.ClockSkew, started.UTC().Format(time.RFC3339))
+		case st.Created.Before(created.Add(engine.ClockSkew)):
+			open = fmt.Sprintf("its member was created at %s, not %s or more after the run's ledger at %s",
+				st.Created.UTC().Format(time.RFC3339), engine.ClockSkew, created.UTC().Format(time.RFC3339))
 		}
 		if open != "" {
 			why = append(why, "follow-up Rebuild for site "+f.Site+": "+open)

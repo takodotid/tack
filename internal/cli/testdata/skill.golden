@@ -151,9 +151,9 @@ Deferred step, and keeps:
   - every abandoned run, and every run that another run took over: delete
     one by hand, as the link below shows;
   - every run with a follow-up Rebuild whose member was not created again
-    10s or more after the run started, as the Workload file names the
-    member at that site, or whose member cannot be read: a planned run
-    onto that member needs it;
+    10s or more after the run's ledger was created, as the Workload file
+    names the member at that site, or whose member cannot be read: a
+    planned run onto that member needs it;
   - every run whose spec records that it took over a run that is kept and
     is not marked as taken over: without it, that run would block new runs;
   - every run that a newer tack than this one last wrote.
