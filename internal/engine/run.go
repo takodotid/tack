@@ -1099,10 +1099,6 @@ func (r *runner) finish(ctx context.Context) error {
 	return nil
 }
 
-// siteReachable checks the step's site once per process. The site counts
-// as unreachable only when every check fails, so a short network blip
-// neither stops nor defers a step. A deferrable step of a SiteLoss run has
-// one check: the run does not wait for a site it can do without.
 // checkDeferrable starts at once the checks before the first step of each
 // site whose steps are deferrable and not all Succeeded ([RFC#0007]
 // Requirement 5), so that sites that give no answer wait together, not
@@ -1136,6 +1132,10 @@ func (r *runner) checkDeferrable(ctx context.Context) (end func()) {
 	}
 }
 
+// siteReachable checks the step's site once per process. The site counts
+// as unreachable only when every check fails, so a short network blip
+// neither stops nor defers a step. A deferrable step of a SiteLoss run has
+// one check: the run does not wait for a site it can do without.
 func (r *runner) siteReachable(ctx context.Context, step *failoverv1.Step) error {
 	site := step.Site
 	if err, ok := r.reachable[site]; ok {
