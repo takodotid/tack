@@ -122,6 +122,14 @@ type Driver interface {
 	Demotion(r Request, site string) string
 }
 
+// Noter is a Driver whose plan says what the operator should know about a
+// request that Plan accepts.
+type Noter interface {
+	// Notes returns the notes of a request that Plan accepted, for the
+	// plan to print before the operator approves it.
+	Notes(w *failoverv1.WorkloadSpec, t *Topology, r Request) []string
+}
+
 var drivers = map[string]Driver{}
 
 // Register adds a built-in driver. Tack never loads a driver from outside.

@@ -134,7 +134,7 @@ func TestWrite(t *testing.T) {
 			if err := run([]string{archive, dir + string(filepath.Separator)}, epoch); err != nil {
 				t.Fatal(err)
 			}
-			entries := map[string]got{}
+			var entries map[string]got
 			if ext == ".zip" {
 				entries = readZip(t, archive)
 			} else {

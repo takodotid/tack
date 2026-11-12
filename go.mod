@@ -6,6 +6,7 @@ require (
 	github.com/fluxcd/pkg/kustomize v1.44.0
 	github.com/fluxcd/pkg/sourceignore v0.22.0
 	github.com/fluxcd/pkg/ssa v0.83.0
+	github.com/go-logr/logr v1.4.4
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	golang.org/x/term v0.47.0
@@ -37,7 +38,6 @@ require (
 	github.com/fluxcd/pkg/envsubst v1.9.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.3 // indirect
 	github.com/go-errors/errors v1.5.1 // indirect
-	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-openapi/jsonpointer v1.0.2 // indirect
 	github.com/go-openapi/jsonreference v1.0.1 // indirect
 	github.com/go-openapi/swag v0.29.1 // indirect

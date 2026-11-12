@@ -9,6 +9,9 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/go-logr/logr"
+	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
+
 	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/cli"
 	"github.com/takodotid/tack/internal/driver"
@@ -20,6 +23,12 @@ import (
 	"github.com/takodotid/tack/internal/ledger"
 	"github.com/takodotid/tack/internal/strait"
 )
+
+// controller-runtime's clients log through a logger of their own, which
+// prints a warning with a stack trace on stderr when nothing set it within
+// 30 s of the start, such as in a run that waits for a site. Tack keeps
+// none of those logs.
+func init() { ctrllog.SetLogger(logr.Discard()) }
 
 type factory struct{}
 

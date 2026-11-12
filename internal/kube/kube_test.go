@@ -11,6 +11,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -149,5 +152,250 @@ func TestTransient(t *testing.T) {
 		if got := Transient(tt.err); got != tt.want {
 			t.Errorf("%s: Transient %v, want %v", tt.name, got, tt.want)
 		}
+	}
+}
+
+// plugin writes a credential plugin that logs its start, with its pid, and
+// its end to log, waits for wait, and then gives a token, or fails when
+// fail is set.
+func plugin(t *testing.T, log string, wait time.Duration, fail bool) string {
+	t.Helper()
+	end := `printf '{"apiVersion":"client.authentication.k8s.io/v1","kind":"ExecCredential","status":{"token":"t-%s"}}' "$1"`
+	if fail {
+		end = `echo "no login for $1" >&2; exit 1`
+	}
+	script := fmt.Sprintf("#!/bin/sh\necho \"start $(date +%%s%%N) $1 $$\" >>%q\nsleep %s\necho \"end $(date +%%s%%N) $1\" >>%q\n%s\n",
+		log, strconv.FormatFloat(wait.Seconds(), 'f', 3, 64), log, end)
+	path := filepath.Join(t.TempDir(), "plugin.sh")
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// sitesWithPlugin writes a kubeconfig whose contexts site-a and site-b
+// point at server, each with the credential plugin of its site, and whose
+// context site-c points at server with a token and no plugin.
+func sitesWithPlugin(t *testing.T, server, plugin string) *Kubeconfig {
+	t.Helper()
+	cfg := fmt.Sprintf(`apiVersion: v1
+kind: Config
+clusters:
+- name: c
+  cluster: {server: %q, insecure-skip-tls-verify: true}
+users:
+- name: a
+  user: {exec: {apiVersion: client.authentication.k8s.io/v1, command: %q, args: [a], interactiveMode: Never}}
+- name: b
+  user: {exec: {apiVersion: client.authentication.k8s.io/v1, command: %q, args: [b], interactiveMode: Never}}
+- name: c
+  user: {token: t-c}
+contexts:
+- name: site-a
+  context: {cluster: c, user: a}
+- name: site-b
+  context: {cluster: c, user: b}
+- name: site-c
+  context: {cluster: c, user: c}
+`, server, plugin, plugin)
+	path := filepath.Join(t.TempDir(), "kubeconfig")
+	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return NewKubeconfig(path, map[string]string{"a": "site-a", "b": "site-b", "c": "site-c"})
+}
+
+// pluginEvents waits until the plugin logged ends ends, and returns its
+// events in order, each "start <site>" or "end <site>". A test that stops
+// waiting for a plugin waits here for it to end: the plugin keeps the turn
+// of the process until then.
+func pluginEvents(t *testing.T, log string, ends int) []string {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		b, _ := os.ReadFile(log)
+		var events []string
+		for _, l := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+			if f := strings.Fields(l); len(f) >= 3 {
+				events = append(events, f[0]+" "+f[2])
+			}
+		}
+		n := 0
+		for _, e := range events {
+			if strings.HasPrefix(e, "end ") {
+				n++
+			}
+		}
+		if n >= ends {
+			return events
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the plugin logged %d ends, want %d: %v", n, ends, events)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// #58 row 6, observed on kind: a credential plugin that waited for the
+// operator ran inside the check's request, whose 5 s covered the wait, and
+// the check counted as no answer: a live site could read as lost (#25).
+// Its credentials are now obtained before the check, with no time limit
+// ([RFC#0007] Requirement 12).
+func TestCredentialsTakeNothingOfTheCheck(t *testing.T) {
+	server := httptest.NewTLSServer(status(http.StatusOK))
+	t.Cleanup(server.Close)
+	log := filepath.Join(t.TempDir(), "plugin.log")
+	k := sitesWithPlugin(t, server.URL, plugin(t, log, 1500*time.Millisecond, false))
+	// The plugin takes longer than a check, and than any other request.
+	k.CheckTimeout, k.requestTimeout = 500*time.Millisecond, time.Second
+	if err := k.Reachable(context.Background(), "a"); err != nil {
+		t.Fatalf("a site whose plugin takes longer than a check: %v (unreachable %v)", err, IsUnreachable(err))
+	}
+}
+
+// Two credential plugins never run at once: one may prompt on the terminal
+// while the other does, and their prompts mixed on kind (#58 row 6).
+func TestCredentialPluginsRunOneAtATime(t *testing.T) {
+	server := httptest.NewTLSServer(status(http.StatusOK))
+	t.Cleanup(server.Close)
+	log := filepath.Join(t.TempDir(), "plugin.log")
+	k := sitesWithPlugin(t, server.URL, plugin(t, log, 300*time.Millisecond, false))
+	var wg sync.WaitGroup
+	for _, s := range []string{"a", "b"} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := k.Reachable(context.Background(), s); err != nil {
+				t.Errorf("site %s: %v", s, err)
+			}
+		}()
+	}
+	wg.Wait()
+	b, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var events []string
+	for _, l := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		f := strings.Fields(l)
+		events = append(events, f[0]+" "+f[2])
+	}
+	// Each plugin ends before the other starts.
+	if len(events) != 4 || strings.Fields(events[0])[0] != "start" || strings.Fields(events[1])[0] != "end" ||
+		strings.Fields(events[0])[1] != strings.Fields(events[1])[1] {
+		t.Errorf("the plugins overlapped: %v", events)
+	}
+}
+
+// A site whose credentials cannot be obtained is not lost, and its plugin
+// runs once in the process: every later check returns the same error.
+func TestCredentialsThatFailAreKept(t *testing.T) {
+	server := httptest.NewTLSServer(status(http.StatusOK))
+	t.Cleanup(server.Close)
+	log := filepath.Join(t.TempDir(), "plugin.log")
+	k := sitesWithPlugin(t, server.URL, plugin(t, log, 0, true))
+	for i := range 2 {
+		err := k.Reachable(context.Background(), "a")
+		if err == nil || IsUnreachable(err) || Retryable(err) ||
+			!strings.Contains(err.Error(), `site "a": the credentials of context "site-a" could not be obtained, so the site is not counted as lost`) {
+			t.Fatalf("check %d: %v, want a final error that is not no answer", i+1, err)
+		}
+	}
+	if b, _ := os.ReadFile(log); strings.Count(string(b), "start") != 1 {
+		t.Errorf("the plugin ran %d times, want 1", strings.Count(string(b), "start"))
+	}
+}
+
+// Found in the coordinator's review of PR #68: client-go runs the
+// credential plugin with no context, and Credentials waited for it
+// whatever its ctx did: a ctx of 1 s returned after the plugin's 8 s, and
+// a SIGTERM did not end tack. The end of ctx now ends the wait. The plugin
+// runs on until it ends, and the interrupt is not kept as credentials that
+// cannot be obtained ([RFC#0007] Requirement 12).
+func TestCredentialsWaitEndsWithTheContext(t *testing.T) {
+	server := httptest.NewTLSServer(status(http.StatusOK))
+	t.Cleanup(server.Close)
+	log := filepath.Join(t.TempDir(), "plugin.log")
+	k := sitesWithPlugin(t, server.URL, plugin(t, log, time.Second, false))
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	err := k.Credentials(ctx, "a")
+	took := time.Since(start)
+	if !errors.Is(err, context.DeadlineExceeded) || took > 700*time.Millisecond {
+		t.Errorf("Credentials with a ctx that ended after 200 ms: %v after %s, want ctx's error at once", err, took.Round(time.Millisecond))
+	}
+	pluginEvents(t, log, 1)
+	// The plugin ended after the interrupt, with credentials.
+	if err := k.Credentials(context.Background(), "a"); err != nil {
+		t.Errorf("Credentials after the interrupt: %v, want nil: an interrupt is not kept", err)
+	}
+	if err := k.Reachable(context.Background(), "a"); err != nil {
+		t.Errorf("Reachable after the interrupt: %v", err)
+	}
+}
+
+// Found in the coordinator's review of PR #68: a site waited for the turn
+// behind another site's plugin whatever its ctx did, also a site with no
+// plugin (7.7 s behind a plugin of 8 s). A site whose context has no
+// credential plugin does not wait for the turn; a site with one waits,
+// until its plugin may run or its ctx ends.
+func TestOnlyPluginsWaitForTheTurn(t *testing.T) {
+	server := httptest.NewTLSServer(status(http.StatusOK))
+	t.Cleanup(server.Close)
+	log := filepath.Join(t.TempDir(), "plugin.log")
+	k := sitesWithPlugin(t, server.URL, plugin(t, log, time.Second, false))
+	a := make(chan error, 1)
+	go func() { a <- k.Credentials(context.Background(), "a") }()
+	deadline := time.Now().Add(5 * time.Second)
+	for b, _ := os.ReadFile(log); !strings.Contains(string(b), "start"); b, _ = os.ReadFile(log) {
+		if time.Now().After(deadline) {
+			t.Fatal("site a's plugin did not start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	start := time.Now()
+	if err := k.Credentials(context.Background(), "c"); err != nil || time.Since(start) > 300*time.Millisecond {
+		t.Errorf("site c, with no plugin, while a's plugin runs: %v after %s, want nil at once", err, time.Since(start).Round(time.Millisecond))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start = time.Now()
+	if err := k.Credentials(ctx, "b"); !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > 700*time.Millisecond {
+		t.Errorf("site b, with a plugin and a ctx of 200 ms, while a's plugin runs: %v after %s, want ctx's error at once", err, time.Since(start).Round(time.Millisecond))
+	}
+	if err := <-a; err != nil {
+		t.Fatalf("site a: %v", err)
+	}
+	if events := pluginEvents(t, log, 1); len(events) != 2 {
+		t.Errorf("plugins run while b waited for the turn: %v, want a's only", events)
+	}
+	if err := k.Credentials(context.Background(), "b"); err != nil {
+		t.Errorf("site b once a's plugin ended: %v", err)
+	}
+	if err := k.Reachable(context.Background(), "c"); err != nil {
+		t.Errorf("site c: %v", err)
+	}
+}
+
+// A plugin whose caller stopped waiting keeps the turn until it ends:
+// another site's plugin never starts while it runs, and may prompt on
+// the same terminal.
+func TestPluginKeepsTheTurnUntilItEnds(t *testing.T) {
+	server := httptest.NewTLSServer(status(http.StatusOK))
+	t.Cleanup(server.Close)
+	log := filepath.Join(t.TempDir(), "plugin.log")
+	k := sitesWithPlugin(t, server.URL, plugin(t, log, 600*time.Millisecond, false))
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if err := k.Credentials(ctx, "a"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("site a with a ctx of 100 ms: %v, want ctx's error", err)
+	}
+	if err := k.Credentials(context.Background(), "b"); err != nil {
+		t.Fatalf("site b: %v", err)
+	}
+	if events := pluginEvents(t, log, 2); strings.Join(events, ", ") != "start a, end a, start b, end b" {
+		t.Errorf("the plugins ran %v, want a's, then b's", events)
 	}
 }

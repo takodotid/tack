@@ -83,3 +83,21 @@ spec:
       sslRootCert:
         name: tack-e2e-server-ca
         key: ca.crt
+    # Site c, of the three-site scenarios: a site may declare pg-c primary
+    # only when it names pg-c here. Unused with two sites.
+    - name: pg-c
+      connectionParameters:
+        host: tack-e2e-c-control-plane
+        port: "30432"
+        user: streaming_replica
+        dbname: postgres
+        sslmode: verify-full
+      sslKey:
+        name: pg-b-replication
+        key: tls.key
+      sslCert:
+        name: pg-b-replication
+        key: tls.crt
+      sslRootCert:
+        name: tack-e2e-server-ca
+        key: ca.crt

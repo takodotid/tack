@@ -27,7 +27,7 @@ func TestNotServed(t *testing.T) {
 		GroupKind:        schema.GroupKind{Group: failoverv1.GroupVersion.Group, Kind: "SiteFailover"},
 		SearchedVersions: []string{failoverv1.GroupVersion.Version},
 	}
-	c := interceptor.NewClient(fake.NewClientBuilder().WithScheme(kube.Scheme).Build(), interceptor.Funcs{
+	c := interceptor.NewClient(fake.NewClientBuilder().WithScheme(kube.NewScheme()).Build(), interceptor.Funcs{
 		Get: func(context.Context, client.WithWatch, client.ObjectKey, client.Object, ...client.GetOption) error {
 			return noMatch
 		},
@@ -63,7 +63,7 @@ func TestNotServed(t *testing.T) {
 // same name.
 func TestCreateRefusesTakenName(t *testing.T) {
 	ctx := context.Background()
-	s := &Store{Client: fake.NewClientBuilder().WithScheme(kube.Scheme).Build(), Namespace: "tack-system"}
+	s := &Store{Client: fake.NewClientBuilder().WithScheme(kube.NewScheme()).Build(), Namespace: "tack-system"}
 	first := &failoverv1.SiteFailover{
 		ObjectMeta: metav1.ObjectMeta{Name: "run-1"},
 		Spec:       failoverv1.SiteFailoverSpec{Mode: failoverv1.ModePlanned, From: "a", To: "b"},
@@ -88,7 +88,7 @@ func TestCreateRefusesTakenName(t *testing.T) {
 // Tack: the API server drops the spec fields it does not know, without an
 // error. Create must refuse before the ledger exists.
 func TestCreateRefusesPrunedSpec(t *testing.T) {
-	base := fake.NewClientBuilder().WithScheme(kube.Scheme).Build()
+	base := fake.NewClientBuilder().WithScheme(kube.NewScheme()).Build()
 	c := interceptor.NewClient(base, interceptor.Funcs{
 		Create: func(ctx context.Context, cl client.WithWatch, o client.Object, opts ...client.CreateOption) error {
 			if sf, ok := o.(*failoverv1.SiteFailover); ok {
@@ -121,7 +121,7 @@ func TestCreateRefusesPrunedSpec(t *testing.T) {
 // each create and status update, as "create Kind: manager", with
 // "dry-run" for a dry run.
 func fieldManagers(writes *[]string) client.Client {
-	return interceptor.NewClient(fake.NewClientBuilder().WithScheme(kube.Scheme).WithStatusSubresource(&failoverv1.SiteFailover{}).Build(), interceptor.Funcs{
+	return interceptor.NewClient(fake.NewClientBuilder().WithScheme(kube.NewScheme()).WithStatusSubresource(&failoverv1.SiteFailover{}).Build(), interceptor.Funcs{
 		Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
 			o := &client.CreateOptions{}
 			o.ApplyOptions(opts)
@@ -208,7 +208,7 @@ func TestEventsUseFieldManagerTack(t *testing.T) {
 // is not deleted.
 func TestDeleteNeedsTheLedgerRead(t *testing.T) {
 	ctx := context.Background()
-	c := fake.NewClientBuilder().WithScheme(kube.Scheme).WithStatusSubresource(&failoverv1.SiteFailover{}).Build()
+	c := fake.NewClientBuilder().WithScheme(kube.NewScheme()).WithStatusSubresource(&failoverv1.SiteFailover{}).Build()
 	s := &Store{Client: c, Namespace: "tack-system"}
 	if err := s.Create(ctx, &failoverv1.SiteFailover{ObjectMeta: metav1.ObjectMeta{Name: "run-1"}}); err != nil {
 		t.Fatal(err)

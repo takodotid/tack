@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -383,6 +384,19 @@ func (e *Env) checkLatest(ctx context.Context, sf *failoverv1.SiteFailover, chec
 // ClockSkew before this one may have started after it (#38 item 7).
 const ClockSkew = 10 * time.Second
 
+// CertainlyAfter tells whether the clocks of the sites' API servers show
+// ledger b created after ledger a: at the same site, in a later second; at
+// another site, ClockSkew or more later. It is the complement of what
+// checkLatest counts as a run started after another ([RFC#0003]
+// Requirement 18): where the clocks cannot tell, neither ledger counts as
+// created after the other.
+func CertainlyAfter(b, a *failoverv1.SiteFailover, sameSite bool) bool {
+	if sameSite {
+		return a.CreationTimestamp.Before(&b.CreationTimestamp)
+	}
+	return !b.CreationTimestamp.Time.Before(a.CreationTimestamp.Add(ClockSkew))
+}
+
 // resume runs the remaining steps. A resume, as opposed to the start
 // that Start already recorded, appends its entry Running to the history.
 func (e *Env) resume(ctx context.Context, sf *failoverv1.SiteFailover, opts Options, resumed bool) error {
@@ -444,6 +458,7 @@ type runner struct {
 }
 
 func (r *runner) run(ctx context.Context) error {
+	defer r.checkDeferrable(ctx)()
 	for i := range r.sf.Spec.Steps {
 		step := &r.sf.Spec.Steps[i]
 		st := r.stepStatus(step.ID)
@@ -531,6 +546,19 @@ func (r *runner) run(ctx context.Context) error {
 					r.printf("  deferred  %s (site %s did not answer the read before its steps)\n", step.ID, step.Site)
 					continue
 				}
+			}
+		}
+		if step.Site != "" {
+			// The site's credentials again, with a line when they take a
+			// while: they may have expired since its check, such as
+			// during a wait at another site. client-go would otherwise run
+			// the credential plugin inside the step's request, where an
+			// interrupt does not end the wait ([RFC#0007] Requirement 12).
+			if err := r.checks.obtain(ctx, step.Site); err != nil {
+				if ctx.Err() != nil {
+					return r.stopBefore(ctx, step, ctx.Err())
+				}
+				return r.stopBefore(ctx, step, stop.Ask(failoverv1.ReasonStepFailed, "site %s: %v", step.Site, err))
 			}
 		}
 		if step.Type == failoverv1.StepRelease && !r.verified[step.Site] {
@@ -890,6 +918,13 @@ func (c runChecks) Reachable(ctx context.Context, site string) error {
 // the site c skips and a site that gave no answer in this process get no
 // check, as in the read.
 func (c runChecks) ahead(ctx context.Context, sites []string) func() {
+	var checked []string
+	for _, site := range sites {
+		if err := c.r.reachable[site]; site != c.skip && (err == nil || !kube.IsUnreachable(err)) {
+			checked = append(checked, site)
+		}
+	}
+	c.r.checks.credentials(ctx, checked)
 	return c.r.checks.checkAhead(ctx, sites, c.Reachable)
 }
 
@@ -1075,6 +1110,50 @@ func (r *runner) finish(ctx context.Context) error {
 	}
 	r.printf("run %s succeeded: %s\n", r.sf.Name, r.sf.Status.Message)
 	return nil
+}
+
+// checkDeferrable starts at once the checks before the first step of each
+// site whose steps are deferrable and not all Succeeded ([RFC#0007]
+// Requirement 5), so that sites that give no answer wait together, not
+// one after another (#58 row 4). Each site gets the checks it would get
+// before its first step, no more, and that step waits for them
+// (SiteChecks.Check holds the site). Their credentials come first, one
+// site at a time, in the order of the steps ([RFC#0007] Requirement 12).
+// The end stops the checks still running: a check stopped so does not
+// count.
+func (r *runner) checkDeferrable(ctx context.Context) (end func()) {
+	ctx, cancel := context.WithCancel(ctx)
+	var sites []string
+	for i := range r.sf.Spec.Steps {
+		step := &r.sf.Spec.Steps[i]
+		if step.Site == "" || !step.Deferrable || slices.Contains(sites, step.Site) || r.stepStatus(step.ID).State == failoverv1.StepSucceeded {
+			continue
+		}
+		if _, ok := r.reachable[step.Site]; ok {
+			continue
+		}
+		sites = append(sites, step.Site)
+	}
+	once := r.sf.Spec.Mode == failoverv1.ModeSiteLoss
+	var wg sync.WaitGroup
+	if len(sites) > 0 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r.checks.credentials(ctx, sites)
+			for _, site := range sites {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					_ = r.checks.Check(ctx, site, once)
+				}()
+			}
+		}()
+	}
+	return func() {
+		cancel()
+		wg.Wait()
+	}
 }
 
 // siteReachable checks the step's site once per process. The site counts

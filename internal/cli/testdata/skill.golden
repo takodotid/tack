@@ -146,10 +146,14 @@ for runs reads at every site. It deletes only a run that succeeded with no
 Deferred step, and keeps:
 
   - the newest --keep runs that succeeded, so the record of the last
-    switch stays;
-  - every abandoned run, and every run that another run took over;
-  - every run with a follow-up Rebuild: delete it by hand once the site's
-    member was rebuilt;
+    switch stays. Where the clocks of two sites' API servers cannot order
+    two runs, created less than 10s apart, prune keeps both;
+  - every abandoned run, and every run that another run took over: delete
+    one by hand, as the link below shows;
+  - every run with a follow-up Rebuild whose member was not created again
+    10s or more after the run's ledger was created, as the Workload file
+    names the member at that site, or whose member cannot be read: a
+    planned run onto that member needs it;
   - every run whose spec records that it took over a run that is kept and
     is not marked as taken over: without it, that run would block new runs;
   - every run that a newer tack than this one last wrote.
@@ -163,8 +167,9 @@ each only while it is the object that was read, and stops at the first
 error. It changes nothing else.
 
 Prune needs delete on sitefailovers in the ledger namespace at each site,
-row 16 of the permissions table. The rules, and how to delete a kept run by
-hand:
+row 16 of the permissions table, and get on the workload's objects, row 7,
+when a run has a follow-up Rebuild. The rules, and how to delete a kept
+run by hand:
   https://github.com/takodotid/tack/blob/main/docs/operations.md#old-ledgers
 
 An agent never starts "tack prune" without an explicit instruction from a

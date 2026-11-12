@@ -121,7 +121,13 @@ func (c *SiteChecks) Check(ctx context.Context, site string, once bool) error {
 			case <-time.After(waits[s.n-1]):
 			}
 		}
-		err := c.Clients.Reachable(ctx, site)
+		// The site's credentials first, apart from the check, with a line
+		// when they take a while, also outside a read that obtains them
+		// all first, such as before a run's first step at the site.
+		err := c.obtain(ctx, site)
+		if err == nil {
+			err = c.Clients.Reachable(ctx, site)
+		}
 		if err != nil && ctx.Err() != nil {
 			return err
 		}
@@ -217,7 +223,61 @@ func CheckAhead(ctx context.Context, c kube.Clients, spec *failoverv1.WorkloadSp
 }
 
 func (c *SiteChecks) ahead(ctx context.Context, sites []string) func() {
+	c.credentials(ctx, sites)
 	return c.checkAhead(ctx, sites, c.Reachable)
+}
+
+// CredentialsWait is how long a site's credentials may take before a
+// progress line says that Tack waits for them ([RFC#0007] Requirement 12).
+var CredentialsWait = 2 * time.Second
+
+// Credentials implements kube.Credentialed when c's clients do.
+func (c *SiteChecks) Credentials(ctx context.Context, site string) error {
+	if cr, ok := c.Clients.(kube.Credentialed); ok {
+		return cr.Credentials(ctx, site)
+	}
+	return nil
+}
+
+// obtain obtains the site's credentials, and prints a line once they took
+// CredentialsWait, for the site's credential plugin or for another site's
+// that runs ([RFC#0007] Requirement 12). It returns at once when c's
+// clients do not obtain credentials apart from their checks.
+func (c *SiteChecks) obtain(ctx context.Context, site string) error {
+	if _, ok := c.Clients.(kube.Credentialed); !ok {
+		return nil
+	}
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		t := time.NewTimer(CredentialsWait)
+		defer t.Stop()
+		select {
+		case <-done:
+		case <-t.C:
+			c.print(site, "  waiting   for the credentials of site %s: the credential plugin of its kube context runs, or another site's does, with no time limit\n", site)
+		}
+	}()
+	err := c.Credentials(ctx, site)
+	close(done)
+	wg.Wait()
+	return err
+}
+
+// credentials obtains the credentials of each site, one at a time, in the
+// order of sites, before any of their checks starts ([RFC#0007]
+// Requirement 12): a credential plugin may prompt on the terminal, and its
+// time must not count toward a check. A failure is left to the site's
+// check, which returns it.
+func (c *SiteChecks) credentials(ctx context.Context, sites []string) {
+	for _, site := range sites {
+		if ctx.Err() != nil {
+			return
+		}
+		_ = c.obtain(ctx, site)
+	}
 }
 
 // checkAhead runs reach for each site in a goroutine of its own. Until

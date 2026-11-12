@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -50,6 +51,8 @@ const (
 	factInProgress    = "inProgress"
 	factMinApplyDelay = "minApplyDelay"
 	factIsPrimary     = "isPrimary"
+	// factExternal names the Cluster's spec.externalClusters, comma-separated.
+	factExternal = "externalClusters"
 )
 
 func init() { driver.Register(Driver{}) }
@@ -181,6 +184,16 @@ func read(st *driver.SiteState, u *unstructured.Unstructured, byCluster map[stri
 	f[factMinApplyDelay] = delay
 	phase, _, _ := unstructured.NestedString(u.Object, "status", "phase")
 	f[factPhase] = phase
+	external, _, _ := unstructured.NestedSlice(u.Object, "spec", "externalClusters")
+	var names []string
+	for _, e := range external {
+		if m, ok := e.(map[string]any); ok {
+			if n, ok := m["name"].(string); ok {
+				names = append(names, n)
+			}
+		}
+	}
+	f[factExternal] = strings.Join(names, ",")
 	inProgress, _, _ := unstructured.NestedBool(u.Object, "status", "switchReplicaClusterStatus", "inProgress")
 	f[factInProgress] = fmt.Sprint(inProgress)
 	isPrimary := false
@@ -235,6 +248,14 @@ func check(t *driver.Topology, r driver.Request) error {
 	if err := checkTarget(toSt, r); err != nil {
 		return err
 	}
+	// Each other site's Cluster will declare to's primary: CloudNativePG
+	// refuses a primary that it does not name among its external clusters.
+	// A site loss goes on: its notes say where the run stops (Notes).
+	if l := lacksTo(t, r); r.Mode == failoverv1.ModePlanned && len(l) > 0 {
+		s := l[0]
+		return fmt.Errorf("site %s: Cluster %s does not name %s among its spec.externalClusters, so CloudNativePG would refuse to make it declare %s primary; add %s there, through Git, before the run",
+			s.Name, s.Facts[factCluster], toSt.Facts[factCluster], toSt.Facts[factCluster], toSt.Facts[factCluster])
+	}
 	for _, s := range t.Sites {
 		if s.Reachable && s.Facts[factEnabled] != "" {
 			return fmt.Errorf("site %s: Cluster %s uses spec.replica.enabled; Tack needs the distributed topology with spec.replica.primary", s.Name, s.Facts[factCluster])
@@ -267,6 +288,48 @@ func check(t *driver.Topology, r driver.Request) error {
 		return fmt.Errorf("unknown mode %q", r.Mode)
 	}
 	return nil
+}
+
+// lacksTo returns the sites that answer, other than to, whose Cluster does
+// not name to's among its external clusters ([RFC#0004] Requirement 12).
+func lacksTo(t *driver.Topology, r driver.Request) []driver.SiteState {
+	toSt, ok := t.Site(r.To)
+	if !ok {
+		return nil
+	}
+	var out []driver.SiteState
+	for _, s := range t.Sites {
+		if s.Reachable && s.Name != r.To && !slices.Contains(strings.Split(s.Facts[factExternal], ","), toSt.Facts[factCluster]) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// Notes implements driver.Noter. A site loss whose sites lack to's Cluster
+// among their external clusters is not refused: Git, the way to add it,
+// may have gone with the lost site. The step that makes such a site
+// declare to's primary fails, as CloudNativePG refuses it, and the run
+// stops there.
+func (d Driver) Notes(_ *failoverv1.WorkloadSpec, t *driver.Topology, r driver.Request) []string {
+	if r.Mode != failoverv1.ModeSiteLoss {
+		return nil
+	}
+	toSt, ok := t.Site(r.To)
+	if !ok {
+		return nil
+	}
+	to := toSt.Facts[factCluster]
+	var notes []string
+	for _, s := range lacksTo(t, r) {
+		when := "after the promotion of " + to
+		if s.Name == r.From {
+			when = "before the promotion of " + to
+		}
+		notes = append(notes, fmt.Sprintf("warning: site %s: Cluster %s does not name %s among its spec.externalClusters, so CloudNativePG refuses to make it declare %s primary: the run stops at step %s, %s, and that step changes nothing. To go on, add %s to that list, at the site and in Git, then resume the run",
+			s.Name, s.Facts[factCluster], to, to, d.Demotion(r, s.Name), when, to))
+	}
+	return notes
 }
 
 // Steps implements driver.Driver: the steps depend on the Workload and the

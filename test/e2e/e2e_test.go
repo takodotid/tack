@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -29,8 +30,16 @@ var (
 	work       = envOr("TACK_E2E_WORKDIR", filepath.Join(repo, ".e2e"))
 	kubeconfig = filepath.Join(work, "kubeconfig")
 	tackBin    = filepath.Join(work, "tack")
-	workload   = filepath.Join(work, "workload.yaml")
-	gitDir     = filepath.Join(work, "gitops-clone")
+	// crdFrom names a release, such as v1.5.0, whose chart and CRD the e2e
+	// installs in place of this tree's: the scenarios then run this tack
+	// against the CRD of that release. Checks of what the CRD prints that
+	// came after it are skipped.
+	crdFrom = os.Getenv("TACK_E2E_CRD_FROM")
+	// sites are the environment's sites, as TACK_E2E_SITES names them for
+	// up.sh: a and b, or a, b and c for the three-site scenarios.
+	sites    = strings.Fields(envOr("TACK_E2E_SITES", "a b"))
+	workload = filepath.Join(work, "workload.yaml")
+	gitDir   = filepath.Join(work, "gitops-clone")
 )
 
 const (
@@ -113,9 +122,25 @@ func setup() error {
 	if err := os.WriteFile(values, []byte(rbacValues), 0o644); err != nil {
 		return err
 	}
-	for _, s := range []string{"a", "b"} {
+	chart := filepath.Join(repo, "deploy/helm/tack")
+	if crdFrom != "" {
+		dir := filepath.Join(work, "chart-"+crdFrom)
+		if err := os.RemoveAll(dir); err != nil {
+			return err
+		}
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+		archive := exec.Command("sh", "-c", `git -C "$1" archive "$2" deploy/helm/tack | tar -x -C "$3"`, "sh", repo, crdFrom, dir)
+		if out, err := archive.CombinedOutput(); err != nil {
+			return fmt.Errorf("the chart of %s: %v: %s", crdFrom, err, out)
+		}
+		chart = filepath.Join(dir, "deploy/helm/tack")
+		fmt.Printf("e2e: the chart and CRD of %s, and this tack %s\n", crdFrom, version.Version)
+	}
+	for _, s := range sites {
 		helm := exec.Command("helm", "--kubeconfig", kubeconfig, "--kube-context", context(s),
-			"upgrade", "--install", "tack", filepath.Join(repo, "deploy/helm/tack"),
+			"upgrade", "--install", "tack", chart,
 			"--namespace", ledgerNS, "--create-namespace", "--wait", "-f", values)
 		if out, err := helm.CombinedOutput(); err != nil {
 			return fmt.Errorf("site %s: install chart: %v: %s", s, err, out)
@@ -133,7 +158,13 @@ func setup() error {
 		return err
 	}
 	w := fmt.Sprintf(workloadTemplate, url)
-	return os.WriteFile(workload, []byte(w), 0o644)
+	if err := os.WriteFile(workload, []byte(w), 0o644); err != nil {
+		return err
+	}
+	if slices.Contains(sites, "c") {
+		return os.WriteFile(workload3, []byte(fmt.Sprintf(workload3Template, url)), 0o644)
+	}
+	return nil
 }
 
 // gitURL reads the Git URL that up.sh wrote into the work dir's env file.
@@ -463,8 +494,8 @@ func assertRecorded(t *testing.T, run, out string) {
 			t.Errorf("no Event %s on the ledger:\n%s", want, events)
 		}
 	}
-	if head := strings.SplitN(kubectl(t, "b", "-n", ledgerNS, "get", "sfo", run), "\n", 2)[0]; !regexp.MustCompile(`STATE\s+REASON\s+ABANDONED\s+PHASE\s+AGE`).MatchString(head) {
-		t.Errorf("kubectl get sfo prints %q, want the columns STATE, REASON, ABANDONED, PHASE, AGE ([RFC#0003] Requirement 15)", head)
+	if head := strings.SplitN(kubectl(t, "b", "-n", ledgerNS, "get", "sfo", run), "\n", 2)[0]; !regexp.MustCompile(`STATE\s+REASON\s+ABANDONED\s+PHASE\s+AGE\s+TAKENOVERBY$`).MatchString(head) && crdFrom == "" {
+		t.Errorf("kubectl get sfo prints %q, want the columns STATE, REASON, ABANDONED, PHASE, AGE, TAKENOVERBY ([RFC#0003] Requirement 15)", head)
 	}
 	status := tackOK(t, "status", run, "-f", workload)
 	if !strings.Contains(status, "History:\n") || !strings.Contains(status, "Written by: tack "+version.Version) || !strings.Contains(status, ", attempts 1\n") {
@@ -990,6 +1021,14 @@ func TestTakeOver(t *testing.T) {
 	if got := strings.TrimSpace(kubectl(t, "b", "-n", ledgerNS, "get", "sitefailover", old, "-o", "jsonpath={.status.supersededBy}")); got != run {
 		t.Errorf("%s: status.supersededBy %q, want %s", old, got, run)
 	}
+	// The table, as an operator reads it: the last column names the run
+	// that took it over (#66).
+	if crdFrom == "" {
+		if lines := strings.Split(strings.TrimSpace(kubectl(t, "b", "-n", ledgerNS, "get", "sfo", old)), "\n"); len(lines) != 2 ||
+			!strings.HasSuffix(lines[0], "TAKENOVERBY") || !strings.HasSuffix(lines[1], " "+run) {
+			t.Errorf("kubectl get sfo %s does not end with TAKENOVERBY %s:\n%s", old, run, strings.Join(lines, "\n"))
+		}
+	}
 
 	out, code = tack(t, nil, "resume", old, "-f", workload, "--yes")
 	if code != 1 || !strings.Contains(out, "was taken over by run "+run) {
@@ -1205,6 +1244,12 @@ func TestPrune(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("prune lacks %q", want)
 		}
+	}
+	// TestRebuildAndSwitchBack created b's member again, minutes after the
+	// site-loss run started: its follow-up Rebuild no longer keeps it
+	// ([RFC#0003] Requirement 27, #66).
+	if strings.Contains(out, "keep: follow-up Rebuild") {
+		t.Errorf("prune kept a run for its follow-up Rebuild, though b's member was rebuilt:\n%s", out)
 	}
 	if _, err := kubectlE("b", "-n", ledgerNS, "get", "sfo", abandoned); err != nil {
 		t.Errorf("the abandoned run %s is gone: %v", abandoned, err)

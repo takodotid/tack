@@ -44,6 +44,7 @@ var Phases = []Phase{PhaseHold, PhaseFailover, PhasePromoteToGitOps, PhaseReleas
 // +kubebuilder:printcolumn:name="Abandoned",type=date,JSONPath=`.status.abandoned.at`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+// +kubebuilder:printcolumn:name="TakenOverBy",type=string,JSONPath=`.status.supersededBy`
 type SiteFailover struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

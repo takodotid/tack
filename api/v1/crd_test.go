@@ -88,7 +88,8 @@ func TestCRDPrintsReason(t *testing.T) {
 func TestCRDPrintsAbandoned(t *testing.T) {
 	want := "Workload string .spec.workload.name, Mode string .spec.mode, From string .spec.from, " +
 		"To string .spec.to, State string .status.state, Reason string .status.reason, " +
-		"Abandoned date .status.abandoned.at, Phase string .status.phase, Age date .metadata.creationTimestamp"
+		"Abandoned date .status.abandoned.at, Phase string .status.phase, Age date .metadata.creationTimestamp, " +
+		"TakenOverBy string .status.supersededBy"
 	for _, v := range readCRD(t).Spec.Versions {
 		var cols []string
 		for _, c := range v.AdditionalPrinterColumns {
@@ -96,6 +97,26 @@ func TestCRDPrintsAbandoned(t *testing.T) {
 		}
 		if got := strings.Join(cols, ", "); got != want {
 			t.Errorf("version %s: columns\n  %s\nwant\n  %s", v.Name, got, want)
+		}
+	}
+}
+
+// #66. kubectl get sfo showed a run that another run took over in its last
+// state, such as Stopped, with nothing that said it was taken over; tack
+// status lists it as TakenOver. Every version prints status.supersededBy in
+// a last column, TakenOverBy, so Phase and Age keep the places that v1.4.0
+// gave them.
+func TestCRDPrintsTakenOverLast(t *testing.T) {
+	for _, v := range readCRD(t).Spec.Versions {
+		cols := v.AdditionalPrinterColumns
+		if len(cols) != 10 {
+			t.Fatalf("version %s: %d columns, want 10", v.Name, len(cols))
+		}
+		if c := cols[9]; c.Name != "TakenOverBy" || c.JSONPath != ".status.supersededBy" || c.Priority != 0 {
+			t.Errorf("version %s: last column %s %s, priority %d, want TakenOverBy .status.supersededBy, priority 0", v.Name, c.Name, c.JSONPath, c.Priority)
+		}
+		if cols[7].Name != "Phase" || cols[8].Name != "Age" {
+			t.Errorf("version %s: Phase and Age moved: %s, %s", v.Name, cols[7].Name, cols[8].Name)
 		}
 	}
 }

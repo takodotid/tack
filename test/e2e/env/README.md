@@ -1,6 +1,6 @@
 # End-to-end environment
 
-Two sites, each a single-node kind cluster deployed by Flux from one local Git repository. Each site runs one CloudNativePG `Cluster` in the distributed topology, one read-write PgBouncer `Pooler`, and Strait. Site a is the primary at the start.
+Two sites, each a single-node kind cluster deployed by Flux from one local Git repository. Each site runs one CloudNativePG `Cluster` in the distributed topology, one read-write PgBouncer `Pooler`, and Strait. Site a is the primary at the start. `TACK_E2E_SITES="a b c"` adds site c, with a `Cluster` only, for the three-site scenarios.
 
 ## Use
 
@@ -10,7 +10,7 @@ Two sites, each a single-node kind cluster deployed by Flux from one local Git r
 | `source .e2e/env` | Sets `KUBECONFIG`, `TACK_E2E_CONTEXT_A`, `TACK_E2E_CONTEXT_B` and `TACK_E2E_GIT_URL`. |
 | `test/e2e/env/down.sh` | Deletes the environment. Safe to re-run. |
 
-`TACK_E2E_WORKDIR` overrides the work dir, `.e2e/` at the repo root by default. The work dir is gitignored.
+`TACK_E2E_WORKDIR` overrides the work dir, `.e2e/` at the repo root by default. The work dir is gitignored. `TACK_E2E_SITES="a b c"` builds three sites; `source .e2e/env` then also sets `TACK_E2E_CONTEXT_C`.
 
 ## What `up.sh` builds
 
@@ -19,28 +19,29 @@ Two sites, each a single-node kind cluster deployed by Flux from one local Git r
 | Docker network | `tack-e2e` | kind joins it through `KIND_EXPERIMENTAL_DOCKER_NETWORK`. |
 | Git server | container `tack-e2e-git` | Smart HTTP with push, built from `test/e2e/gitserver/`. No authentication. |
 | GitOps repository | `gitops.git` | Seeded from `test/e2e/fixtures/gitops/` only when the repository has no `main` branch. |
-| kind clusters | `tack-e2e-a`, `tack-e2e-b` | Contexts `kind-tack-e2e-a`, `kind-tack-e2e-b`. |
+| kind clusters | `tack-e2e-a`, `tack-e2e-b`, and `tack-e2e-c` with three sites | Contexts `kind-tack-e2e-a`, `kind-tack-e2e-b`, `kind-tack-e2e-c`. |
 | Images | `PREPULL_IMAGES` in `lib.sh` | Each named by the digest of its index, here and in the fixtures. Both nodes pull them in the background while the controllers install. The host's Docker is not used: `docker save` of a digest keeps neither its tag nor its index, so a pod that names the digest would not find the image. |
 | Flux | v2.10.0 | source-controller and kustomize-controller only, from `flux install --export`, with each image named by its digest. |
 | Flux sync | `GitRepository/tack-e2e`, `Kustomization/site-a` or `site-b` | Namespace `flux-system`. Path `./clusters/<site>`. Interval 30s. |
 | CloudNativePG | v1.30.1 | Release manifest, checked against a pinned SHA-256, with the operator's image named by its digest. |
 | Runtime Secrets | `tack-e2e-server-ca`, `tack-e2e-client-ca`, `app-credentials` | Namespace `db` at both sites. Generated once into `.e2e/secrets/`. Never in Git. |
 | Strait image | `tack-e2e-strait:<commit>` | Built once from Strait's source at `STRAIT_COMMIT` in `lib.sh`, loaded into both nodes from an archive. |
-| Strait | Helm release `strait`, namespace `strait-system` | Chart from the same commit. Pod Security `privileged`, for the gateway's `NET_ADMIN`. Exchange polls every 2s, peer timeout 6s. |
+| Strait | Helm release `strait`, namespace `strait-system`, at sites a and b only | Chart from the same commit. Pod Security `privileged`, for the gateway's `NET_ADMIN`. Exchange polls every 2s, peer timeout 6s. |
 | Strait links | `SitePeer` and `SiteLink <peer>-direct` at each site | One direct link to the other node's address on `tack-e2e`. No WireGuard link, so no WireGuard key. |
 
 ## Sites
 
-| | Site a | Site b |
-|---|---|---|
-| Cluster | `db/pg-a` | `db/pg-b` |
-| Bootstrap | `initdb` | `pg_basebackup` from `pg-a` |
-| Initial `.spec.replica.primary` | `pg-a` | `pg-a` |
-| Pooler | `db/pg-a-pooler-rw`, 1 instance | `db/pg-b-pooler-rw`, 0 instances |
-| Node container | `tack-e2e-a-control-plane` | `tack-e2e-b-control-plane` |
-| Pod subnet | 10.210.0.0/16 | 10.220.0.0/16 |
-| Service subnet | 10.211.0.0/16 | 10.221.0.0/16 |
-| PostgreSQL NodePort | 30432 | 30432 |
+| | Site a | Site b | Site c, with three sites |
+|---|---|---|---|
+| Cluster | `db/pg-a` | `db/pg-b` | `db/pg-c` |
+| Bootstrap | `initdb` | `pg_basebackup` from `pg-a` | `pg_basebackup` from `pg-a` |
+| Initial `.spec.replica.primary` | `pg-a` | `pg-a` | `pg-a` |
+| Replication source | `pg-b` | `pg-a` | `pg-a`, through its designated primary once `pg-a` is a replica |
+| Pooler | `db/pg-a-pooler-rw`, 1 instance | `db/pg-b-pooler-rw`, 0 instances | none |
+| Node container | `tack-e2e-a-control-plane` | `tack-e2e-b-control-plane` | `tack-e2e-c-control-plane` |
+| Pod subnet | 10.210.0.0/16 | 10.220.0.0/16 | 10.230.0.0/16 |
+| Service subnet | 10.211.0.0/16 | 10.221.0.0/16 | 10.231.0.0/16 |
+| PostgreSQL NodePort | 30432 | 30432 | 30432 |
 
 ## Cross-site replication
 
@@ -69,4 +70,4 @@ Two sites, each a single-node kind cluster deployed by Flux from one local Git r
 | `.e2e/cache/` | The CloudNativePG manifest, Strait's source and image archive. |
 | `.e2e/logs/` | Output of the kind, Flux and Strait installs. |
 
-`down.sh` deletes only the two kind clusters, the `tack-e2e-git` container and the `tack-e2e` network. It leaves the work dir and the `tack-e2e-gitserver:dev` and `tack-e2e-strait` images.
+`down.sh` deletes only the kind clusters `tack-e2e-a`, `tack-e2e-b` and `tack-e2e-c`, the `tack-e2e-git` container and the `tack-e2e` network. It leaves the work dir and the `tack-e2e-gitserver:dev` and `tack-e2e-strait` images.

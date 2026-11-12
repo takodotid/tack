@@ -33,7 +33,7 @@ type pager struct {
 }
 
 func (p *pager) client(objs ...client.Object) client.Client {
-	return interceptor.NewClient(fake.NewClientBuilder().WithScheme(kube.Scheme).WithObjects(objs...).Build(), interceptor.Funcs{
+	return interceptor.NewClient(fake.NewClientBuilder().WithScheme(kube.NewScheme()).WithObjects(objs...).Build(), interceptor.Funcs{
 		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
 			var o client.ListOptions
 			o.ApplyOptions(opts)

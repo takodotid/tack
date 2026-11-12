@@ -402,7 +402,7 @@ func TestVerifyNoop(t *testing.T) {
 	_, err = run(true, ready("True", ReasonSucceeded), liveCluster(map[string]string{AnnotationReconcile: "disabled"}), held, fields)
 	wantStop(t, err, failoverv1.ReasonHeldByAnotherRun, "held again")
 
-	if _, err = run(true, ready("False", "ReconciliationFailed"), liveCluster(nil), held, fields); err == nil || !strings.Contains(err.Error(), "ReconciliationFailed") {
+	if _, err = run(true, ready("False", "ReconciliationFailed"), liveCluster(nil), held, fields); err == nil || !strings.Contains(err.Error(), "the Kustomization flux-system/db at site a is failing after release: ReconciliationFailed") {
 		t.Fatalf("got %v", err)
 	}
 
@@ -461,7 +461,7 @@ func TestVerifyNoopRefusesSuspendedKustomization(t *testing.T) {
 	f.Poll = time.Millisecond
 	start := time.Now()
 	msg, err := f.VerifyNoop(ctx, "a", held, []failoverv1.ObjectField{primaryField}, true, time.Minute)
-	if err == nil || !strings.Contains(err.Error(), "Kustomization flux-system/db at site a is suspended (spec.suspend)") {
+	if err == nil || !strings.Contains(err.Error(), "the Kustomization flux-system/db at site a is suspended (spec.suspend)") {
 		t.Fatalf("%q, %v; want a failure naming spec.suspend", msg, err)
 	}
 	if d := time.Since(start); d > 10*time.Second {

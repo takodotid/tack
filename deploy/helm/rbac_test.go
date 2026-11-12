@@ -502,3 +502,36 @@ func TestNotesNameTheWriteCheck(t *testing.T) {
 		}
 	}
 }
+
+// #66. crds.keep kept its earlier value across helm upgrade without values, so a release once set to false stayed
+// false, and helm uninstall would then delete the CRD and every ledger. Each install and upgrade prints the values in
+// force, and warns while crds.keep is false ([RFC#0009] Requirement 29).
+func TestNotesPrintCRDValues(t *testing.T) {
+	const warning = "WARNING: crds.keep is false, so helm uninstall, or an upgrade with crds.install=false, deletes the CRD and every ledger at this site"
+	for _, tt := range []struct {
+		set     []string
+		want    string
+		warning bool
+		install bool
+	}{
+		{want: "The SiteFailover CRD: crds.install=true, crds.keep=true.", install: true},
+		{set: []string{"--set", "crds.keep=false"}, want: "The SiteFailover CRD: crds.install=true, crds.keep=false.", warning: true, install: true},
+		{set: []string{"--set", "crds.install=false"}, want: "The SiteFailover CRD: crds.install=false, crds.keep=true."},
+		{set: []string{"--set", "crds.install=false,crds.keep=false"}, want: "The SiteFailover CRD: crds.install=false, crds.keep=false."},
+	} {
+		out, err := helm(t, "", append([]string{"install", release, chart, "--dry-run=client", "--namespace", ledgerNS}, tt.set...)...)
+		if err != nil {
+			t.Fatalf("%v: helm install --dry-run: %v\n%s", tt.set, err, out)
+		}
+		_, notes, _ := strings.Cut(out, "\nNOTES:\n")
+		if !strings.Contains(notes, tt.want) || !strings.Contains(notes, "helm upgrade without values reuses these") {
+			t.Errorf("%v: the notes lack %q:\n%s", tt.set, tt.want, notes)
+		}
+		if strings.Contains(notes, warning) != tt.warning || strings.Contains(notes, "upgrade with --reset-then-reuse-values --set crds.keep=true") != tt.warning {
+			t.Errorf("%v: the warning: %v, want %v:\n%s", tt.set, !tt.warning, tt.warning, notes)
+		}
+		if strings.Contains(notes, "crds.install is false: this release does not install or upgrade the CRD") == tt.install {
+			t.Errorf("%v: the note of crds.install is wrong:\n%s", tt.set, notes)
+		}
+	}
+}

@@ -41,7 +41,8 @@ jobs:
       - name: helm, pinned
         run: hack/tools/install.sh "$RUNNER_TEMP/tools" helm && echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
       - run: make test-race
-  # The module's checksums, known vulnerabilities, the chart, and the pins ([RFC#0009] Requirements 25 and 26).
+  # The module's checksums, known vulnerabilities, staticcheck, the chart, and the pins ([RFC#0009] Requirements 25
+  # and 26).
   lint:
     runs-on: ubuntu-26.04
     steps:
@@ -54,6 +55,12 @@ jobs:
       - name: helm, pinned
         run: hack/tools/install.sh "$RUNNER_TEMP/tools" helm && echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
       - run: make lint
+      # Every pin of install.sh, for both architectures, so that a pull request of Renovate whose SHA-256 does not match
+      # its download fails here: the e2e installs only amd64, and cosign only in the release (#66).
+      - name: Every pin of install.sh
+        run: |
+          hack/tools/install.sh "$RUNNER_TEMP/pins-amd64" kind kubectl flux helm cosign
+          TACK_TOOLS_ARCH=arm64 hack/tools/install.sh "$RUNNER_TEMP/pins-arm64" kind kubectl flux helm cosign
   e2e:
     runs-on: ubuntu-26.04
     needs: test

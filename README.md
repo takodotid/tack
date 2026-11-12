@@ -168,9 +168,9 @@ done
 |---|---|
 | One release per cluster. | The CRD is cluster-scoped. A second release, under another name or in another namespace, fails with `invalid ownership metadata` and changes nothing. |
 | One way per cluster: the chart, or `kubectl apply --server-side` of the CRD. | The chart refuses a CRD that kubectl applied, with `invalid ownership metadata`. To hand such a CRD to the chart, label it `app.kubernetes.io/managed-by=Helm`, annotate it `meta.helm.sh/release-name=tack` and `meta.helm.sh/release-namespace=tack-system`, then install. |
-| Upgrade with the same command. | `helm upgrade` without values reuses the release's last values, `crds.keep` and `crds.install` included: `helm --kube-context "$ctx" -n tack-system get values tack` shows them. |
+| Upgrade with the same command. | `helm upgrade` without values reuses the release's last values, `crds.keep` and `crds.install` included: `helm --kube-context "$ctx" -n tack-system get values tack` shows them. With `--set` or `-f`, and without `--reset-then-reuse-values`, each value not given goes back to the chart's default; `--reuse-values` also drops the defaults that a newer chart adds. The chart's notes print `crds.install` and `crds.keep` after each install and upgrade. |
 | Before the first run, check at every site who may write ledgers: [docs/operations.md](docs/operations.md#who-may-write-ledgers). The chart prints the link after each install and upgrade. | Writing a ledger is privileged: `tack resume` acts on what a ledger holds. The chart's roles only grant access; they take none from a GitOps controller or another subject. |
-| Never set `crds.keep=false` while the site holds a ledger that matters: a run that is not `Succeeded`, or a `Rebuild` follow-up not yet done. | With `crds.keep=false`, `helm uninstall` deletes the CRD, and every ledger with it. So does an upgrade with `crds.install=false`. A lost `Rebuild` follow-up lets a planned run onto a member that diverged ([RFC#0003](rfcs/RFC0003.md#requirements), Requirement 14). The upgrade that sets `crds.keep=false` takes the keep policy off the CRD at once. |
+| Never set `crds.keep=false` while the site holds a ledger that matters: a run that is not `Succeeded`, or a `Rebuild` follow-up not yet done. | With `crds.keep=false`, `helm uninstall` deletes the CRD, and every ledger with it. So does an upgrade with `crds.install=false`. A lost `Rebuild` follow-up lets a planned run onto a member that diverged ([RFC#0003](rfcs/RFC0003.md#requirements), Requirement 14). The upgrade that sets `crds.keep=false` takes the keep policy off the CRD at once, and the value stays across upgrades without values; the notes warn while it is `false`. Set it back with `helm upgrade --reset-then-reuse-values --set crds.keep=true`. |
 
 `helm uninstall` with `crds.keep=true`, the default, leaves the CRD, every ledger and the namespace; installing again under the same release name and namespace takes the CRD back. Without Helm, apply the CRD instead: `kubectl --context "$ctx" apply --server-side -f $NAME/failover.tako.id_sitefailovers.yaml`, then create the ledger namespace.
 
@@ -219,6 +219,7 @@ Each release also needs:
 
 | From | To | CRD | Also before the new CLI runs |
 |---|---|---|---|
+| v1.5.x | v1.6.0 | no new field; the column TakenOverBy in `kubectl get sfo`, last | With a CRD of v1.5.x, everything works but that column. Each site's credentials are obtained before its checks and before each step of a run, one credential plugin at a time, with no time limit; Ctrl-C or SIGTERM ends the wait. A site whose credentials cannot be obtained stops the command, or the run before that site's step, and is never counted as lost ([RFC#0007](rfcs/RFC0007.md#requirements), Requirement 12). A planned switchover is refused when a site's Cluster does not name the new primary in `spec.externalClusters`; a site-loss plan warns, and the run stops at that site's step ([RFC#0004](rfcs/RFC0004.md#requirements), Requirement 12). `tack prune` deletes a run whose follow-up `Rebuild` is done, and needs `get` on the workload's objects for it (row 7 of [docs/operations.md](docs/operations.md#permissions)): without it, prune keeps that run. Prune keeps more than `--keep` runs when the clocks of two sites cannot order them. |
 | v1.4.x | v1.5.0 | unchanged | Grant `get`, `create` and `update` on `leases` in the ledger namespace (row 17 of [docs/operations.md](docs/operations.md#permissions); the chart's ledger Role has it with `rbac.create`): without it, a run holds no Lease and says so once. `tack abandon` and `tack run --take-over` now refuse a run that a process may still run; `--force` goes on. A build whose version names no release, such as `dev`, refuses ledgers that a release wrote. Quote a `kubeContext` that YAML reads as other text, such as `on`: v1.5.0 refuses it unquoted. |
 | v1.3.x | v1.4.0 | no new field; the column Abandoned in `kubectl get sfo`, after Reason: Phase and Age move one place right | With a CRD of v1.3.x, everything works but that column. `tack prune` needs `delete` on `sitefailovers` in the ledger namespace (row 16 of [docs/operations.md](docs/operations.md#permissions)): the chart grants it only with `rbac.prune`, so grant it only to the operators who prune. Once v1.4.0 writes a ledger, `tack resume` and `tack abandon` of v1.3.x refuse that run and name v1.4.0. |
 | v1.3.0 | v1.3.1 | unchanged | A script that runs `tack status -f` gets exit code 1 when a site gives no answer, with the runs it read: the list is incomplete ([docs/operations.md](docs/operations.md#reading-a-run)). |
@@ -226,8 +227,9 @@ Each release also needs:
 | v1.2.0 | v1.2.1 | unchanged | nothing |
 | v1.0.x or v1.1.x | v1.2.x | new optional fields: `spec.takeOver`, `spec.fingerprints`, `status.fingerprints`, `status.supersededBy`, `status.git.releaseRevision` | Grant `get` on the namespace `kube-system` at every site: the plan reads its UID to identify the site's cluster, and fails with `forbidden` without it. Move a user out of an `http` or `https` Git URL, such as `https://user@git.example.com/gitops.git`, into git's configuration (`credential.<url>.username`): Tack refuses such a URL. `ssh://git@git.example.com/gitops.git` and `git@git.example.com:gitops.git` still work. |
 
-| A ledger written by | Under v1.5.0 |
+| A ledger written by | Under v1.6.0 |
 |---|---|
+| v1.5.x | As below for v1.3.x. `tack prune` deletes a run with a follow-up `Rebuild` once that site's member was created again 10 s or more after the run's ledger; v1.5.x kept it until deleted by hand. |
 | v1.4.x | As below for v1.3.x. It has no Lease: `tack abandon` and `tack run --take-over` judge it by the ledger, and refuse a `Running` run written within its `Running` step's timeout and 5 minutes, unless `--force`. |
 | v1.3.x | `tack status` lists and shows it, with its history. `tack resume` continues it and keeps that history. `tack abandon` sees its mark. `tack prune` deletes it when its rules allow. |
 | v1.2.x | `tack resume` continues it. |
@@ -329,7 +331,7 @@ The end-to-end test builds two kind clusters with Flux, CloudNativePG, Strait an
 | git, openssl, curl, sha256sum | any |
 | Internet access | to pull images, and to fetch CloudNativePG's release manifest and Strait's source at the commit pinned in `test/e2e/env/lib.sh` |
 
-`hack/tools/install.sh [DIR]` installs kind, kubectl, flux and helm at these versions into `DIR` (default `bin/tools`), and fails unless each download matches the SHA-256 pinned in the script; add `DIR` to `PATH`. It runs on Linux, amd64 or arm64.
+`hack/tools/install.sh [DIR]` installs kind, kubectl, flux and helm at these versions into `DIR` (default `bin/tools`), and fails unless each download matches the SHA-256 pinned in the script; add `DIR` to `PATH`. It runs on Linux, amd64 or arm64. `TACK_TOOLS_ARCH=arm64` checks the downloads of the other architecture, as CI's `lint` job does.
 
 ```sh
 make e2e
@@ -349,6 +351,8 @@ make e2e
 | Command | Effect |
 |---|---|
 | `TACK_E2E_KEEP=1 make e2e` | keeps the environment after the tests. Their Workload file is `.e2e/workload.yaml`: after `make build`, `bin/tack --kubeconfig .e2e/kubeconfig status -f .e2e/workload.yaml` lists their runs |
+| `TACK_E2E_CRD_FROM=vX.Y.Z make e2e` | installs the chart and CRD of release `vX.Y.Z` in place of this tree's, and runs the scenarios with this tree's `tack`: the CLI against the CRD of a site not upgraded yet. Checks of printer columns added after that release are skipped |
+| `TACK_E2E_SITES="a b c" test/e2e/run.sh -run TestThreeSites` | builds three sites, the third with a Cluster only, and runs the three-site scenarios: a planned switchover with c following, a planned switchover with c down then resumed, and a run taken over at a lost site (#27) |
 | `make e2e-up` | builds the environment and leaves it running |
 | `make e2e-down` | removes it |
 

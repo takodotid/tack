@@ -6,9 +6,68 @@
   "packageRules": [
     {
       "description": "go.mod's replace pins kustomize to the version that kustomize-controller pins, as its comment says. Renovate lists each new version of these two, in the require lines and in the replace, on the Dependency Dashboard, and opens a pull request only once it is approved there. Approve it when the kustomize-controller of the e2e's Flux moves to that version, and change the replace in the same pull request: a bump of the require lines alone drags k8s.io/kube-openapi onto sigs.k8s.io/structured-merge-diff/v7, which k8s.io/apimachinery v0.37 cannot use (#13, #15).",
-      "matchManagers": ["gomod"],
-      "matchPackageNames": ["sigs.k8s.io/kustomize/api", "sigs.k8s.io/kustomize/kyaml"],
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchPackageNames": [
+        "sigs.k8s.io/kustomize/api",
+        "sigs.k8s.io/kustomize/kyaml"
+      ],
       "dependencyDashboardApproval": true
+    },
+    {
+      "description": "The tools of hack/tools/install.sh, in a pull request of their own, apart from group:allNonMajor: a pin that does not match its download fails install.sh, and so CI's lint job, which installs every pin for amd64 and arm64, until it is fixed.",
+      "matchManagers": [
+        "custom.regex"
+      ],
+      "matchFileNames": [
+        "hack/tools/install.sh"
+      ],
+      "groupName": "tools of hack/tools/install.sh"
+    },
+    {
+      "description": "kubectl and helm: Renovate cannot read the SHA-256 of their downloads, so it lists each new version on the Dependency Dashboard and opens a pull request only once it is approved there.",
+      "matchManagers": [
+        "custom.regex"
+      ],
+      "matchFileNames": [
+        "hack/tools/install.sh"
+      ],
+      "matchDepNames": [
+        "kubectl",
+        "helm"
+      ],
+      "groupName": "kubectl and helm of hack/tools/install.sh",
+      "dependencyDashboardApproval": true,
+      "prBodyNotes": [
+        "Renovate changed the version on each line of kubectl and helm in `hack/tools/install.sh`, not the SHA-256. Copy each from the project's published checksum, for amd64 and arm64: `https://dl.k8s.io/release/VERSION/bin/linux/ARCH/kubectl.sha256` and `https://get.helm.sh/helm-VERSION-linux-ARCH.tar.gz.sha256sum`. CI's lint job fails until both match."
+      ]
+    }
+  ],
+  "customManagers": [
+    {
+      "description": "hack/tools/install.sh: kind, flux and cosign, whose downloads are GitHub release assets. Renovate is asked to update each line's version and its SHA-256 together; CI's lint job fails a SHA-256 that does not match.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^hack/tools/install\\.sh$/"
+      ],
+      "matchStrings": [
+        "(?<depName>kind|flux|cosign) +(?<currentValue>v\\d+\\.\\d+\\.\\d+) +(?:amd64|arm64) +(?<currentDigest>[0-9a-f]{64})"
+      ],
+      "datasourceTemplate": "github-release-attachments",
+      "packageNameTemplate": "{{#if (equals depName 'kind')}}kubernetes-sigs/kind{{else if (equals depName 'flux')}}fluxcd/flux2{{else}}sigstore/cosign{{/if}}"
+    },
+    {
+      "description": "hack/tools/install.sh: kubectl and helm, whose downloads are not on GitHub. Renovate updates each line's version only: its SHA-256 is copied by hand.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^hack/tools/install\\.sh$/"
+      ],
+      "matchStrings": [
+        "(?<depName>kubectl|helm) +(?<currentValue>v\\d+\\.\\d+\\.\\d+) +(?:amd64|arm64) +[0-9a-f]{64}"
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "{{#if (equals depName 'kubectl')}}kubernetes/kubernetes{{else}}helm/helm{{/if}}"
     }
   ]
 }

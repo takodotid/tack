@@ -167,6 +167,9 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
+	if n, ok := e.Driver.(driver.Noter); ok {
+		notes = append(notes, n.Notes(req.Spec, topo, req.Request)...)
+	}
 	changes, err := e.Driver.GitChange(req.Spec, topo, req.Request)
 	if err != nil {
 		return nil, err

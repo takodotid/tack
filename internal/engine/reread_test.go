@@ -79,14 +79,14 @@ func failNth(at, what string, errs map[int]error) func(site, w string, n int) er
 }
 
 // resumeWith resumes run-1 at b with clients and opts, and returns the
-// ledger, the error and the progress lines.
-func (f *fixture) resumeWith(clients *failingClients, opts engine.Options) (*failoverv1.SiteFailover, error, string) {
+// ledger, the progress lines and the error.
+func (f *fixture) resumeWith(clients *failingClients, opts engine.Options) (*failoverv1.SiteFailover, string, error) {
 	f.t.Helper()
 	var out bytes.Buffer
 	env := f.env("b")
 	env.Clients, env.Out = clients, &out
 	err := env.Resume(context.Background(), f.ledger("b"), opts)
-	return f.ledger("b"), err, out.String()
+	return f.ledger("b"), out.String(), err
 }
 
 var unavailable = apierrors.NewServiceUnavailable("the server is currently unable to handle the request")
@@ -107,7 +107,7 @@ func TestReadBeforePromotionRepeatedAfterBlip(t *testing.T) {
 			f := newFixture(t)
 			f.diesBeforePromotion(f.plan("b", failoverv1.ModePlanned))
 			clients := &failingClients{Clients: f.clients, fail: failNth("a", "Cluster db/pg-a", map[int]error{1: blip})}
-			sf, err, out := f.resumeWith(clients, engine.Options{})
+			sf, out, err := f.resumeWith(clients, engine.Options{})
 			if err != nil || sf.Status.State != failoverv1.RunSucceeded {
 				t.Fatalf("resume: %v, %s %s: %s\n%s", err, sf.Status.State, sf.Status.Reason, sf.Status.Message, out)
 			}
@@ -136,7 +136,7 @@ func TestReadBeforePromotionThatKeepsFailingStops(t *testing.T) {
 	f.diesBeforePromotion(f.plan("b", failoverv1.ModePlanned))
 	before := resourceVersion(t, f.clients.Sites["b"], "Cluster", "pg-b")
 	clients := &failingClients{Clients: f.clients, fail: failNth("a", "Cluster db/pg-a", map[int]error{1: reset, 2: reset, 3: reset})}
-	sf, err, _ := f.resumeWith(clients, engine.Options{})
+	sf, _, err := f.resumeWith(clients, engine.Options{})
 	if !errors.Is(err, engine.ErrStopped) || sf.Status.Reason != failoverv1.ReasonStepFailed ||
 		!strings.HasPrefix(sf.Status.Message, "step promote-b: the read after the demotion: site a: read Cluster db/pg-a: 3 reads: ") &&
 			!strings.HasPrefix(sf.Status.Message, "step promote-b: the read before the promotion: site a: read Cluster db/pg-a: 3 reads: ") {
@@ -161,7 +161,7 @@ func TestReadRefusedIsNotRepeated(t *testing.T) {
 	f.diesBeforePromotion(f.plan("b", failoverv1.ModePlanned))
 	forbidden := apierrors.NewForbidden(schema.GroupResource{Group: "postgresql.cnpg.io", Resource: "clusters"}, "pg-a", errors.New("no"))
 	clients := &failingClients{Clients: f.clients, fail: failNth("a", "Cluster db/pg-a", map[int]error{1: forbidden, 2: forbidden, 3: forbidden})}
-	sf, err, out := f.resumeWith(clients, engine.Options{})
+	sf, out, err := f.resumeWith(clients, engine.Options{})
 	if !errors.Is(err, engine.ErrStopped) || sf.Status.Reason != failoverv1.ReasonStepFailed || strings.Contains(sf.Status.Message, "reads:") {
 		t.Fatalf("err %v, %s: %s", err, sf.Status.Reason, sf.Status.Message)
 	}
@@ -183,7 +183,7 @@ func TestReadsOfStepsRepeatedAfterBlip(t *testing.T) {
 	// promotion. With the failures, 3 repeats the capture, 5 is the compare
 	// and 6 repeats it.
 	clients := &failingClients{Clients: f.clients, fail: failNth("a", "Cluster db/pg-a", map[int]error{2: reset, 5: unavailable})}
-	sf, err, out := f.resumeWith(clients, engine.Options{})
+	sf, out, err := f.resumeWith(clients, engine.Options{})
 	if err != nil || sf.Status.State != failoverv1.RunSucceeded {
 		t.Fatalf("resume: %v, %s %s: %s\n%s", err, sf.Status.State, sf.Status.Reason, sf.Status.Message, out)
 	}
@@ -285,7 +285,7 @@ func TestReadBeforeStepsReadsOnlyItsSite(t *testing.T) {
 	f.lostSiteBack()
 	before := f.clients.Checks["b"]
 	clients := &failingClients{Clients: f.clients, fail: func(string, string, int) error { return nil }}
-	sf, err, out := f.resumeWith(clients, engine.Options{Fence: []string{"a"}})
+	sf, out, err := f.resumeWith(clients, engine.Options{Fence: []string{"a"}})
 	if err != nil || sf.Status.State != failoverv1.RunSucceeded {
 		t.Fatalf("resume: %v %s %s\n%s", err, sf.Status.State, sf.Status.Message, out)
 	}
@@ -314,7 +314,7 @@ func TestReadBeforeStepsIgnoresErrorAtAnotherSite(t *testing.T) {
 		}
 		return nil
 	}}
-	sf, err, out := f.resumeWith(clients, engine.Options{Fence: []string{"a"}})
+	sf, out, err := f.resumeWith(clients, engine.Options{Fence: []string{"a"}})
 	if err != nil || sf.Status.State != failoverv1.RunSucceeded {
 		t.Fatalf("resume: %v %s %s: %s\n%s", err, sf.Status.State, sf.Status.Reason, sf.Status.Message, out)
 	}
