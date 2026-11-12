@@ -95,7 +95,11 @@ EOF
       die "kind create cluster failed for site ${entry##*:}"
     }
   done
-  KUBECONFIG="$WORK/kubeconfig-a:$WORK/kubeconfig-b" kubectl config view --flatten \
+  local sources=()
+  for site in "${SITES[@]}"; do
+    sources+=("$WORK/kubeconfig-$site")
+  done
+  KUBECONFIG=$(IFS=:; echo "${sources[*]}") kubectl config view --flatten \
     >"$WORK/kubeconfig.tmp"
   chmod 600 "$WORK/kubeconfig.tmp"
   mv "$WORK/kubeconfig.tmp" "$KUBECONFIG_FILE"
@@ -303,14 +307,17 @@ verify_replication() {
   done
   [[ $primaries -eq 1 ]] || die "expected exactly one primary, found $primaries"
   [[ -n $replica ]] || die "no replica site found"
-  for i in $(seq 1 60); do
-    status=$(psql_at "$replica" 'select status from pg_stat_wal_receiver')
-    [[ $status == streaming ]] && break
-    sleep 5
+  for site in "${SITES[@]}"; do
+    [[ $(psql_at "$site" 'select pg_is_in_recovery()') == t ]] || continue
+    for i in $(seq 1 60); do
+      status=$(psql_at "$site" 'select status from pg_stat_wal_receiver')
+      [[ $status == streaming ]] && break
+      sleep 5
+    done
+    [[ $status == streaming ]] || die "site $site is not streaming (status '$status')"
+    log "site $site: pg-$site streams from" \
+      "$(psql_at "$site" "select sender_host || ':' || sender_port || ' timeline ' || received_tli || ', replayed ' || pg_last_wal_replay_lsn() from pg_stat_wal_receiver")"
   done
-  [[ $status == streaming ]] || die "site $replica is not streaming (status '$status')"
-  log "site $replica: pg-$replica streams from" \
-    "$(psql_at "$replica" "select sender_host || ':' || sender_port || ' timeline ' || received_tli || ', replayed ' || pg_last_wal_replay_lsn() from pg_stat_wal_receiver")"
 }
 
 # Builds Strait's image from its source at the pinned commit, once.
@@ -338,19 +345,19 @@ node_ip() {
 
 other_site() { if [[ $1 == a ]]; then echo b; else echo a; fi; }
 
-# Installs Strait at each site from its Helm chart, and links the sites with
+# Installs Strait at sites a and b from its Helm chart, and links them with
 # one direct link over the tack-e2e network. A Site needs a WireGuard
 # identity only for wireguard links, so there is none.
 install_strait() {
   local site peer archive=$WORK/cache/strait-image.tar
   build_strait_image
   docker save --platform "linux/$(node_arch)" -o "$archive" "$STRAIT_IMAGE"
-  for site in "${SITES[@]}"; do
+  for site in "${STRAIT_SITES[@]}"; do
     kind load image-archive --name "$(cluster_name "$site")" "$archive" \
       >"$WORK/logs/strait-load-$site.log" 2>&1 ||
       die "loading the Strait image failed for site $site, see $WORK/logs/strait-load-$site.log"
   done
-  for site in "${SITES[@]}"; do
+  for site in "${STRAIT_SITES[@]}"; do
     kc "$site" create namespace "$STRAIT_NAMESPACE" --dry-run=client -o yaml |
       kc "$site" apply --server-side --field-manager tack-e2e-up -f - >/dev/null
     kc "$site" label namespace "$STRAIT_NAMESPACE" --overwrite \
@@ -370,7 +377,7 @@ EOF
       --wait --timeout 5m >"$WORK/logs/strait-$site.log" 2>&1 ||
       die "Strait install failed for site $site, see $WORK/logs/strait-$site.log"
   done
-  for site in "${SITES[@]}"; do
+  for site in "${STRAIT_SITES[@]}"; do
     peer=$(other_site "$site")
     kc "$site" apply --server-side --field-manager tack-e2e-up -f - >/dev/null <<EOF
 apiVersion: strait.tako.id/v1
@@ -391,7 +398,7 @@ spec:
   direct: {address: $(node_ip "$peer")}
 EOF
   done
-  for site in "${SITES[@]}"; do
+  for site in "${STRAIT_SITES[@]}"; do
     peer=$(other_site "$site")
     kc "$site" wait "sitelink/$peer-direct" --for=jsonpath='{.status.active}'=true --timeout 3m >/dev/null
     kc "$site" wait "sitepeer/$peer" --for=jsonpath='{.status.reachable}'=true --timeout 3m >/dev/null
@@ -407,6 +414,9 @@ export TACK_E2E_CONTEXT_A=$(context_name a)
 export TACK_E2E_CONTEXT_B=$(context_name b)
 export TACK_E2E_GIT_URL=$GIT_HOST_URL
 EOF
+  if [[ " ${SITES[*]} " == *" c "* ]]; then
+    echo "export TACK_E2E_CONTEXT_C=$(context_name c)" >>"$WORK/env"
+  fi
 }
 
 main() {

@@ -350,6 +350,7 @@ make e2e
 |---|---|
 | `TACK_E2E_KEEP=1 make e2e` | keeps the environment after the tests. Their Workload file is `.e2e/workload.yaml`: after `make build`, `bin/tack --kubeconfig .e2e/kubeconfig status -f .e2e/workload.yaml` lists their runs |
 | `TACK_E2E_CRD_FROM=vX.Y.Z make e2e` | installs the chart and CRD of release `vX.Y.Z` in place of this tree's, and runs the scenarios with this tree's `tack`: the CLI against the CRD of a site not upgraded yet. Checks of printer columns added after that release are skipped |
+| `TACK_E2E_SITES="a b c" test/e2e/run.sh -run TestThreeSites` | builds three sites, the third with a Cluster only, and runs the three-site scenarios: a planned switchover with c following, a planned switchover with c down then resumed, and a run taken over at a lost site (#27) |
 | `make e2e-up` | builds the environment and leaves it running |
 | `make e2e-down` | removes it |
 

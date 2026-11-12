@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -33,7 +34,10 @@ var (
 	// installs in place of this tree's: the scenarios then run this tack
 	// against the CRD of that release. Checks of what the CRD prints that
 	// came after it are skipped.
-	crdFrom  = os.Getenv("TACK_E2E_CRD_FROM")
+	crdFrom = os.Getenv("TACK_E2E_CRD_FROM")
+	// sites are the environment's sites, as TACK_E2E_SITES names them for
+	// up.sh: a and b, or a, b and c for the three-site scenarios.
+	sites    = strings.Fields(envOr("TACK_E2E_SITES", "a b"))
 	workload = filepath.Join(work, "workload.yaml")
 	gitDir   = filepath.Join(work, "gitops-clone")
 )
@@ -134,7 +138,7 @@ func setup() error {
 		chart = filepath.Join(dir, "deploy/helm/tack")
 		fmt.Printf("e2e: the chart and CRD of %s, and this tack %s\n", crdFrom, version.Version)
 	}
-	for _, s := range []string{"a", "b"} {
+	for _, s := range sites {
 		helm := exec.Command("helm", "--kubeconfig", kubeconfig, "--kube-context", context(s),
 			"upgrade", "--install", "tack", chart,
 			"--namespace", ledgerNS, "--create-namespace", "--wait", "-f", values)
@@ -154,7 +158,13 @@ func setup() error {
 		return err
 	}
 	w := fmt.Sprintf(workloadTemplate, url)
-	return os.WriteFile(workload, []byte(w), 0o644)
+	if err := os.WriteFile(workload, []byte(w), 0o644); err != nil {
+		return err
+	}
+	if slices.Contains(sites, "c") {
+		return os.WriteFile(workload3, []byte(fmt.Sprintf(workload3Template, url)), 0o644)
+	}
+	return nil
 }
 
 // gitURL reads the Git URL that up.sh wrote into the work dir's env file.

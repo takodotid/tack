@@ -6,7 +6,16 @@ WORK=${TACK_E2E_WORKDIR:-$REPO/.e2e}
 KUBECONFIG_FILE=$WORK/kubeconfig
 
 NETWORK=tack-e2e
-SITES=(a b)
+# The sites: a and b. TACK_E2E_SITES="a b c" adds site c, for the
+# three-site scenarios. down.sh deletes every site of ALL_SITES.
+read -r -a SITES <<<"${TACK_E2E_SITES:-a b}"
+ALL_SITES=(a b c)
+case "${SITES[*]}" in
+"a b" | "a b c") ;;
+*) echo "TACK_E2E_SITES must be \"a b\" or \"a b c\", not \"${SITES[*]}\"" >&2; exit 1 ;;
+esac
+# Strait runs at a and b: the three-site scenarios do not route.
+STRAIT_SITES=(a b)
 GIT_CONTAINER=tack-e2e-git
 GIT_IMAGE=tack-e2e-gitserver:dev
 GIT_REPO=gitops
@@ -55,8 +64,8 @@ PREPULL_IMAGES=(
 DB_NAMESPACE=db
 
 # Pod and Service subnets per site. Strait needs them distinct between sites.
-declare -A POD_SUBNET=([a]=10.210.0.0/16 [b]=10.220.0.0/16)
-declare -A SERVICE_SUBNET=([a]=10.211.0.0/16 [b]=10.221.0.0/16)
+declare -A POD_SUBNET=([a]=10.210.0.0/16 [b]=10.220.0.0/16 [c]=10.230.0.0/16)
+declare -A SERVICE_SUBNET=([a]=10.211.0.0/16 [b]=10.221.0.0/16 [c]=10.231.0.0/16)
 
 cluster_name() { echo "tack-e2e-$1"; }
 context_name() { echo "kind-tack-e2e-$1"; }
