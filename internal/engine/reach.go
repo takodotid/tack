@@ -217,7 +217,52 @@ func CheckAhead(ctx context.Context, c kube.Clients, spec *failoverv1.WorkloadSp
 }
 
 func (c *SiteChecks) ahead(ctx context.Context, sites []string) func() {
+	c.credentials(ctx, sites)
 	return c.checkAhead(ctx, sites, c.Reachable)
+}
+
+// CredentialsWait is how long a site's credentials may take before a
+// progress line says that Tack waits for them ([RFC#0007] Requirement 12).
+var CredentialsWait = 2 * time.Second
+
+// Credentials implements kube.Credentialed when c's clients do.
+func (c *SiteChecks) Credentials(ctx context.Context, site string) error {
+	if cr, ok := c.Clients.(kube.Credentialed); ok {
+		return cr.Credentials(ctx, site)
+	}
+	return nil
+}
+
+// credentials obtains the credentials of each site, one at a time, in the
+// order of sites, before any of their checks starts ([RFC#0007]
+// Requirement 12): a credential plugin may prompt on the terminal, and its
+// time must not count toward a check. A failure is left to the site's
+// check, which returns it.
+func (c *SiteChecks) credentials(ctx context.Context, sites []string) {
+	if _, ok := c.Clients.(kube.Credentialed); !ok {
+		return
+	}
+	for _, site := range sites {
+		if ctx.Err() != nil {
+			return
+		}
+		done := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			t := time.NewTimer(CredentialsWait)
+			defer t.Stop()
+			select {
+			case <-done:
+			case <-t.C:
+				c.print(site, "  waiting   for the credentials of site %s: the credential plugin of its kube context runs, with no time limit\n", site)
+			}
+		}()
+		_ = c.Credentials(ctx, site)
+		close(done)
+		wg.Wait()
+	}
 }
 
 // checkAhead runs reach for each site in a goroutine of its own. Until

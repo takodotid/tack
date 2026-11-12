@@ -903,6 +903,13 @@ func (c runChecks) Reachable(ctx context.Context, site string) error {
 // the site c skips and a site that gave no answer in this process get no
 // check, as in the read.
 func (c runChecks) ahead(ctx context.Context, sites []string) func() {
+	var checked []string
+	for _, site := range sites {
+		if err := c.r.reachable[site]; site != c.skip && (err == nil || !kube.IsUnreachable(err)) {
+			checked = append(checked, site)
+		}
+	}
+	c.r.checks.credentials(ctx, checked)
 	return c.r.checks.checkAhead(ctx, sites, c.Reachable)
 }
 
