@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -457,6 +458,7 @@ type runner struct {
 }
 
 func (r *runner) run(ctx context.Context) error {
+	defer r.checkDeferrable(ctx)()
 	for i := range r.sf.Spec.Steps {
 		step := &r.sf.Spec.Steps[i]
 		st := r.stepStatus(step.ID)
@@ -1101,6 +1103,39 @@ func (r *runner) finish(ctx context.Context) error {
 // as unreachable only when every check fails, so a short network blip
 // neither stops nor defers a step. A deferrable step of a SiteLoss run has
 // one check: the run does not wait for a site it can do without.
+// checkDeferrable starts at once the checks before the first step of each
+// site whose steps are deferrable and not all Succeeded ([RFC#0007]
+// Requirement 5), so that sites that give no answer wait together, not
+// one after another (#58 row 4). Each site gets the checks it would get
+// before its first step, no more, and that step waits for them
+// (SiteChecks.Check holds the site). The end stops the checks still
+// running: a check stopped so does not count.
+func (r *runner) checkDeferrable(ctx context.Context) (end func()) {
+	ctx, cancel := context.WithCancel(ctx)
+	var wg sync.WaitGroup
+	started := map[string]bool{}
+	for i := range r.sf.Spec.Steps {
+		step := &r.sf.Spec.Steps[i]
+		if step.Site == "" || !step.Deferrable || started[step.Site] || r.stepStatus(step.ID).State == failoverv1.StepSucceeded {
+			continue
+		}
+		if _, ok := r.reachable[step.Site]; ok {
+			continue
+		}
+		started[step.Site] = true
+		once := r.sf.Spec.Mode == failoverv1.ModeSiteLoss
+		wg.Add(1)
+		go func(site string) {
+			defer wg.Done()
+			_ = r.checks.Check(ctx, site, once)
+		}(step.Site)
+	}
+	return func() {
+		cancel()
+		wg.Wait()
+	}
+}
+
 func (r *runner) siteReachable(ctx context.Context, step *failoverv1.Step) error {
 	site := step.Site
 	if err, ok := r.reachable[site]; ok {
