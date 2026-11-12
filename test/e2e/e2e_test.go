@@ -463,8 +463,8 @@ func assertRecorded(t *testing.T, run, out string) {
 			t.Errorf("no Event %s on the ledger:\n%s", want, events)
 		}
 	}
-	if head := strings.SplitN(kubectl(t, "b", "-n", ledgerNS, "get", "sfo", run), "\n", 2)[0]; !regexp.MustCompile(`STATE\s+REASON\s+ABANDONED\s+PHASE\s+AGE`).MatchString(head) {
-		t.Errorf("kubectl get sfo prints %q, want the columns STATE, REASON, ABANDONED, PHASE, AGE ([RFC#0003] Requirement 15)", head)
+	if head := strings.SplitN(kubectl(t, "b", "-n", ledgerNS, "get", "sfo", run), "\n", 2)[0]; !regexp.MustCompile(`STATE\s+REASON\s+ABANDONED\s+PHASE\s+AGE\s+TAKENOVERBY$`).MatchString(head) {
+		t.Errorf("kubectl get sfo prints %q, want the columns STATE, REASON, ABANDONED, PHASE, AGE, TAKENOVERBY ([RFC#0003] Requirement 15)", head)
 	}
 	status := tackOK(t, "status", run, "-f", workload)
 	if !strings.Contains(status, "History:\n") || !strings.Contains(status, "Written by: tack "+version.Version) || !strings.Contains(status, ", attempts 1\n") {
@@ -989,6 +989,12 @@ func TestTakeOver(t *testing.T) {
 	}
 	if got := strings.TrimSpace(kubectl(t, "b", "-n", ledgerNS, "get", "sitefailover", old, "-o", "jsonpath={.status.supersededBy}")); got != run {
 		t.Errorf("%s: status.supersededBy %q, want %s", old, got, run)
+	}
+	// The table, as an operator reads it: the last column names the run
+	// that took it over (#66).
+	if lines := strings.Split(strings.TrimSpace(kubectl(t, "b", "-n", ledgerNS, "get", "sfo", old)), "\n"); len(lines) != 2 ||
+		!strings.HasSuffix(lines[0], "TAKENOVERBY") || !strings.HasSuffix(lines[1], " "+run) {
+		t.Errorf("kubectl get sfo %s does not end with TAKENOVERBY %s:\n%s", old, run, strings.Join(lines, "\n"))
 	}
 
 	out, code = tack(t, nil, "resume", old, "-f", workload, "--yes")
