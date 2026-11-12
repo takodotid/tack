@@ -121,7 +121,13 @@ func (c *SiteChecks) Check(ctx context.Context, site string, once bool) error {
 			case <-time.After(waits[s.n-1]):
 			}
 		}
-		err := c.Clients.Reachable(ctx, site)
+		// The site's credentials first, apart from the check, with a line
+		// when they take a while, also outside a read that obtains them
+		// all first, such as before a run's first step at the site.
+		err := c.obtain(ctx, site)
+		if err == nil {
+			err = c.Clients.Reachable(ctx, site)
+		}
 		if err != nil && ctx.Err() != nil {
 			return err
 		}
@@ -233,35 +239,44 @@ func (c *SiteChecks) Credentials(ctx context.Context, site string) error {
 	return nil
 }
 
+// obtain obtains the site's credentials, and prints a line once they took
+// CredentialsWait, for the site's credential plugin or for another site's
+// that runs ([RFC#0007] Requirement 12). It returns at once when c's
+// clients do not obtain credentials apart from their checks.
+func (c *SiteChecks) obtain(ctx context.Context, site string) error {
+	if _, ok := c.Clients.(kube.Credentialed); !ok {
+		return nil
+	}
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		t := time.NewTimer(CredentialsWait)
+		defer t.Stop()
+		select {
+		case <-done:
+		case <-t.C:
+			c.print(site, "  waiting   for the credentials of site %s: the credential plugin of its kube context runs, or another site's does, with no time limit\n", site)
+		}
+	}()
+	err := c.Credentials(ctx, site)
+	close(done)
+	wg.Wait()
+	return err
+}
+
 // credentials obtains the credentials of each site, one at a time, in the
 // order of sites, before any of their checks starts ([RFC#0007]
 // Requirement 12): a credential plugin may prompt on the terminal, and its
 // time must not count toward a check. A failure is left to the site's
 // check, which returns it.
 func (c *SiteChecks) credentials(ctx context.Context, sites []string) {
-	if _, ok := c.Clients.(kube.Credentialed); !ok {
-		return
-	}
 	for _, site := range sites {
 		if ctx.Err() != nil {
 			return
 		}
-		done := make(chan struct{})
-		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			t := time.NewTimer(CredentialsWait)
-			defer t.Stop()
-			select {
-			case <-done:
-			case <-t.C:
-				c.print(site, "  waiting   for the credentials of site %s: the credential plugin of its kube context runs, with no time limit\n", site)
-			}
-		}()
-		_ = c.Credentials(ctx, site)
-		close(done)
-		wg.Wait()
+		_ = c.obtain(ctx, site)
 	}
 }
 

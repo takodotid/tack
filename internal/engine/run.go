@@ -548,6 +548,19 @@ func (r *runner) run(ctx context.Context) error {
 				}
 			}
 		}
+		if step.Site != "" {
+			// The site's credentials again, with a line when they take a
+			// while: they may have expired since its check, such as
+			// during a wait at another site. client-go would otherwise run
+			// the credential plugin inside the step's request, where an
+			// interrupt does not end the wait ([RFC#0007] Requirement 12).
+			if err := r.checks.obtain(ctx, step.Site); err != nil {
+				if ctx.Err() != nil {
+					return r.stopBefore(ctx, step, ctx.Err())
+				}
+				return r.stopBefore(ctx, step, stop.Ask(failoverv1.ReasonStepFailed, "site %s: %v", step.Site, err))
+			}
+		}
 		if step.Type == failoverv1.StepRelease && !r.verified[step.Site] {
 			// The check of Git against live ran in an earlier process,
 			// maybe hours ago: run it again before the site's first
@@ -1104,27 +1117,38 @@ func (r *runner) finish(ctx context.Context) error {
 // Requirement 5), so that sites that give no answer wait together, not
 // one after another (#58 row 4). Each site gets the checks it would get
 // before its first step, no more, and that step waits for them
-// (SiteChecks.Check holds the site). The end stops the checks still
-// running: a check stopped so does not count.
+// (SiteChecks.Check holds the site). Their credentials come first, one
+// site at a time, in the order of the steps ([RFC#0007] Requirement 12).
+// The end stops the checks still running: a check stopped so does not
+// count.
 func (r *runner) checkDeferrable(ctx context.Context) (end func()) {
 	ctx, cancel := context.WithCancel(ctx)
-	var wg sync.WaitGroup
-	started := map[string]bool{}
+	var sites []string
 	for i := range r.sf.Spec.Steps {
 		step := &r.sf.Spec.Steps[i]
-		if step.Site == "" || !step.Deferrable || started[step.Site] || r.stepStatus(step.ID).State == failoverv1.StepSucceeded {
+		if step.Site == "" || !step.Deferrable || slices.Contains(sites, step.Site) || r.stepStatus(step.ID).State == failoverv1.StepSucceeded {
 			continue
 		}
 		if _, ok := r.reachable[step.Site]; ok {
 			continue
 		}
-		started[step.Site] = true
-		once := r.sf.Spec.Mode == failoverv1.ModeSiteLoss
+		sites = append(sites, step.Site)
+	}
+	once := r.sf.Spec.Mode == failoverv1.ModeSiteLoss
+	var wg sync.WaitGroup
+	if len(sites) > 0 {
 		wg.Add(1)
-		go func(site string) {
+		go func() {
 			defer wg.Done()
-			_ = r.checks.Check(ctx, site, once)
-		}(step.Site)
+			r.checks.credentials(ctx, sites)
+			for _, site := range sites {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					_ = r.checks.Check(ctx, site, once)
+				}()
+			}
+		}()
 	}
 	return func() {
 		cancel()
