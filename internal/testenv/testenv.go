@@ -3,6 +3,7 @@ package testenv
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -12,11 +13,13 @@ import (
 	authenticationv1 "k8s.io/api/authentication/v1"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -147,8 +150,54 @@ func NewClient(objs ...client.Object) client.Client {
 				}
 				return c.Create(ctx, o, opts...)
 			},
+			Patch: func(ctx context.Context, c client.WithWatch, o client.Object, p client.Patch, opts ...client.PatchOption) error {
+				if err := unknownPrimary(ctx, c, o, p); err != nil {
+					return err
+				}
+				return c.Patch(ctx, o, p, opts...)
+			},
 		}).
 		Build()
+}
+
+// unknownPrimary refuses, as CloudNativePG's webhook does, a patch that
+// makes a Cluster declare a primary that its spec.externalClusters do not
+// name. The text is the one observed on kind (#66). A Cluster without
+// spec.externalClusters is not checked.
+func unknownPrimary(ctx context.Context, c client.Client, o client.Object, p client.Patch) error {
+	gvk := o.GetObjectKind().GroupVersionKind()
+	if gvk.Group != "postgresql.cnpg.io" || gvk.Kind != "Cluster" {
+		return nil
+	}
+	data, err := p.Data(o)
+	if err != nil {
+		return err
+	}
+	var patch map[string]any
+	if json.Unmarshal(data, &patch) != nil {
+		return nil
+	}
+	primary, _, _ := unstructured.NestedString(patch, "spec", "replica", "primary")
+	if primary == "" {
+		return nil
+	}
+	cur := &unstructured.Unstructured{}
+	cur.SetGroupVersionKind(gvk)
+	if err := c.Get(ctx, client.ObjectKeyFromObject(o), cur); err != nil {
+		return nil
+	}
+	list, found, _ := unstructured.NestedSlice(cur.Object, "spec", "externalClusters")
+	if !found {
+		return nil
+	}
+	for _, e := range list {
+		if m, ok := e.(map[string]any); ok && m["name"] == primary {
+			return nil
+		}
+	}
+	return apierrors.NewInvalid(gvk.GroupKind(), o.GetName(), field.ErrorList{
+		field.Invalid(field.NewPath("spec", "replicaCluster", "primary"), primary, "External cluster "+primary+" not found"),
+	})
 }
 
 // CreateLedger creates sf with its status, as a run writes a ledger: the

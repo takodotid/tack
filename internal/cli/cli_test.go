@@ -16,6 +16,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
@@ -941,5 +942,58 @@ func TestRunRefusesPrimaryNotAmongExternalClusters(t *testing.T) {
 	}
 	if got := runsAt(t, f, "b"); len(got) != 0 || len(f.flux.Calls) > 0 {
 		t.Errorf("the refused run left ledgers %v and Flux calls %v", got, f.flux.Calls)
+	}
+}
+
+// A site-loss plan does not refuse it: Git, the way to add the new primary
+// to the list, may have gone with the lost site (coordinator review of PR
+// #68). The plan warns, and names the step where the run stops. The run
+// promotes b, and stops there, as CloudNativePG refuses the step: c keeps
+// declaring a, and holds no primary.
+func TestSiteLossWarnsOfPrimaryNotAmongExternalClusters(t *testing.T) {
+	c := testenv.Cluster("c", "a", false, nil)
+	c.Object["spec"].(map[string]any)["externalClusters"] = []any{map[string]any{"name": "pg-a"}, map[string]any{"name": "pg-c"}}
+	f := newFactory(map[string][]client.Object{
+		"a": {testenv.Cluster("a", "a", true, nil)},
+		"b": {testenv.Cluster("b", "a", false, nil)},
+		"c": {c},
+	}, "a")
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go (&testenv.Operator{Clients: f.clients, Sites: []string{"a", "b", "c"}}).Run(ctx)
+	const warning = "warning: site c: Cluster pg-c does not name pg-b among its spec.externalClusters, so CloudNativePG refuses to make it declare pg-b primary: the run stops at step declare-c, after the promotion of pg-b"
+	out, code := run(t, f, "plan", "-f", "testdata/workload-3.yaml", "--to", "b", "--mode", "site-loss")
+	if code != ExitOK || !strings.Contains(out, warning) {
+		t.Fatalf("plan: exit %d, want 0 with the warning:\n%s", code, out)
+	}
+	out, code = run(t, f, "run", "-f", "testdata/workload-3.yaml", "--to", "b", "--mode", "site-loss", "--yes")
+	if code != ExitStopped || !strings.Contains(out, warning) {
+		t.Fatalf("run: exit %d, want %d with the warning:\n%s", code, ExitStopped, out)
+	}
+	runs := runsAt(t, f, "b")
+	if len(runs) != 1 {
+		t.Fatalf("runs at b: %v", runs)
+	}
+	sf := ledgerAt(t, f, "b", runs[0])
+	state := map[string]failoverv1.StepStatus{}
+	for _, st := range sf.Status.Steps {
+		state[st.ID] = st
+	}
+	if st := state["promote-b"]; st.State != failoverv1.StepSucceeded {
+		t.Errorf("promote-b: %s, want Succeeded", st.State)
+	}
+	if st := state["declare-c"]; st.State != failoverv1.StepFailed || !strings.Contains(st.Message, `spec.replicaCluster.primary: Invalid value: "pg-b": External cluster pg-b not found`) {
+		t.Errorf("declare-c: %s (%s), want Failed with CloudNativePG's refusal", st.State, st.Message)
+	}
+	if sf.Status.State != failoverv1.RunStopped {
+		t.Errorf("run: %s, want Stopped", sf.Status.State)
+	}
+	u := &unstructured.Unstructured{}
+	u.SetGroupVersionKind(schema.GroupVersionKind{Group: "postgresql.cnpg.io", Version: "v1", Kind: "Cluster"})
+	if err := f.clients.Sites["c"].Get(context.Background(), client.ObjectKey{Namespace: "db", Name: "pg-c"}, u); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, _ := unstructured.NestedString(u.Object, "spec", "replica", "primary"); got != "pg-a" {
+		t.Errorf("pg-c declares %s primary, want pg-a: the refused step changed it", got)
 	}
 }

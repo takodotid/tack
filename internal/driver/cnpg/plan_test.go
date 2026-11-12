@@ -480,10 +480,12 @@ func TestDemotionNamesPlannedSteps(t *testing.T) {
 
 // Observed on kind in the first three-site e2e: CloudNativePG's webhook
 // refused to make pg-b declare pg-c primary, "External cluster pg-c not
-// found", in a step after the promotion. The plan now refuses, before any
-// step, a site whose Cluster does not name the new primary among its
-// spec.externalClusters. The new primary's own list, and a site that gives
-// no answer, are not read.
+// found", in a step after the promotion. A planned plan now refuses, before
+// any step, a site whose Cluster does not name the new primary among its
+// spec.externalClusters. A site-loss plan notes it instead, with the step
+// where the run stops (coordinator review of PR #68: Git, the way to add
+// it, may have gone with the lost site). The new primary's own list, and a
+// site that gives no answer, are not read.
 func TestPlanRefusesPrimaryNotAmongExternalClusters(t *testing.T) {
 	without := func(site, name string) func(map[string]*unstructured.Unstructured) {
 		return func(cs map[string]*unstructured.Unstructured) {
@@ -503,14 +505,19 @@ func TestPlanRefusesPrimaryNotAmongExternalClusters(t *testing.T) {
 		req  driver.Request
 		edit func(map[string]*unstructured.Unstructured)
 		down string
-		want string
+		// fenced: a, the lost site, answers, and runs no primary.
+		fenced bool
+		want   string
+		note   string
 	}{
 		{name: "a third site", req: planned, edit: without("c", "pg-b"),
 			want: "site c: Cluster pg-c does not name pg-b among its spec.externalClusters, so CloudNativePG would refuse to make it declare pg-b primary"},
 		{name: "from", req: planned, edit: without("a", "pg-b"),
 			want: "site a: Cluster pg-a does not name pg-b among its spec.externalClusters"},
 		{name: "a third site, in a site loss", req: siteLoss, edit: without("c", "pg-b"), down: "a",
-			want: "site c: Cluster pg-c does not name pg-b among its spec.externalClusters"},
+			note: "warning: site c: Cluster pg-c does not name pg-b among its spec.externalClusters, so CloudNativePG refuses to make it declare pg-b primary: the run stops at step declare-c, after the promotion of pg-b, and that step changes nothing. To go on, add pg-b to that list, at the site and in Git, then resume the run"},
+		{name: "from that answers, in a site loss", req: siteLoss, edit: without("a", "pg-b"), fenced: true,
+			note: "warning: site a: Cluster pg-a does not name pg-b among its spec.externalClusters, so CloudNativePG refuses to make it declare pg-b primary: the run stops at step fence-a, before the promotion of pg-b, and that step changes nothing."},
 		{name: "to's own list", req: planned, edit: without("b", "pg-b")},
 		{name: "a site that gives no answer", req: siteLoss, edit: without("a", "pg-b"), down: "a"},
 	} {
@@ -518,7 +525,7 @@ func TestPlanRefusesPrimaryNotAmongExternalClusters(t *testing.T) {
 			cs := map[string]*unstructured.Unstructured{}
 			objects := map[string][]client.Object{}
 			for _, s := range []string{"a", "b", "c"} {
-				primary := s == "a" && tt.down == ""
+				primary := s == "a" && tt.down == "" && !tt.fenced
 				cs[s] = testenv.Cluster(s, "a", primary, nil)
 			}
 			tt.edit(cs)
@@ -540,6 +547,13 @@ func TestPlanRefusesPrimaryNotAmongExternalClusters(t *testing.T) {
 				t.Errorf("refused: %v", err)
 			case tt.want != "" && (err == nil || !strings.Contains(err.Error(), tt.want)):
 				t.Errorf("err %v, want %q", err, tt.want)
+			}
+			notes := strings.Join(Driver{}.Notes(w, topo, tt.req), "\n")
+			switch {
+			case tt.note == "" && notes != "":
+				t.Errorf("notes %q, want none", notes)
+			case tt.note != "" && !strings.Contains(notes, tt.note):
+				t.Errorf("notes %q, want %q", notes, tt.note)
 			}
 		})
 	}
