@@ -161,6 +161,9 @@ type scripted struct {
 	clock  time.Time
 	// last is closed once b and c gave their last answer.
 	last chan struct{}
+	// done, when set, waits until the checks of b and c ended, their
+	// lines printed: a gives its answer only then.
+	done func()
 }
 
 func newScripted() *scripted {
@@ -195,6 +198,9 @@ func (s *scripted) Reachable(ctx context.Context, site string) error {
 	if site == "a" && answer {
 		select {
 		case <-s.last:
+			if s.done != nil {
+				s.done()
+			}
 		case <-time.After(2 * time.Second):
 		}
 	}
@@ -235,6 +241,10 @@ func TestChecksAtOncePrintInSiteOrder(t *testing.T) {
 	c := newScripted()
 	out := &stampLines{now: c.now}
 	checks := &engine.SiteChecks{Clients: c, Waits: []time.Duration{time.Millisecond, time.Millisecond}, Out: out, Now: c.now}
+	// b and c answered when their last check was called; their lines
+	// are printed once their checks end, which Note waits for. Under
+	// load, a answered before that (PR #67, and CI's race job here).
+	c.done = func() { checks.Note("b"); checks.Note("c") }
 	ctx := context.Background()
 	end := engine.CheckAhead(ctx, checks, threeSites)
 	for _, site := range []string{"a", "b", "c"} {
