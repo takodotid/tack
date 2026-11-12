@@ -51,7 +51,7 @@ func readStatus(ctx context.Context, c kube.Clients, site string, u *unstructure
 	}
 	pod, _, _ := unstructured.NestedString(u.Object, "status", "currentPrimary")
 	if pod == "" {
-		return nil, fmt.Errorf("Cluster %s/%s names no current primary pod", u.GetNamespace(), u.GetName())
+		return nil, fmt.Errorf("the Cluster %s/%s names no current primary pod", u.GetNamespace(), u.GetName())
 	}
 	cl, err := c.Client(site)
 	if err != nil {
@@ -67,7 +67,7 @@ func readStatus(ctx context.Context, c kube.Clients, site string, u *unstructure
 	}
 	st := &instanceStatus{}
 	if err := json.Unmarshal(body, st); err != nil {
-		return nil, fmt.Errorf("Pod %s/%s: its status is not what CloudNativePG v1.30 writes: %w", u.GetNamespace(), pod, err)
+		return nil, fmt.Errorf("the status of Pod %s/%s is not what CloudNativePG v1.30 writes: %w", u.GetNamespace(), pod, err)
 	}
 	return st, nil
 }
