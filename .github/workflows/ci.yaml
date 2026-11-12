@@ -41,7 +41,7 @@ jobs:
       - name: helm, pinned
         run: hack/tools/install.sh "$RUNNER_TEMP/tools" helm && echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
       - run: make test-race
-  # The module's checksums, known vulnerabilities, error strings, the chart, and the pins ([RFC#0009] Requirements 25
+  # The module's checksums, known vulnerabilities, staticcheck, the chart, and the pins ([RFC#0009] Requirements 25
   # and 26).
   lint:
     runs-on: ubuntu-26.04
