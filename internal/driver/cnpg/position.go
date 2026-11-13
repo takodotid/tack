@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -26,6 +27,9 @@ const (
 	StatusPort = 8000
 	StatusPath = "/pg/status"
 )
+
+// PositionTimeout bounds the read of one site's position.
+const PositionTimeout = 5 * time.Second
 
 // instanceStatus holds the fields of CloudNativePG's PostgresqlStatus
 // (pkg/postgres/status.go) that Tack reads.
@@ -95,6 +99,9 @@ func scheme(p *corev1.Pod) string {
 // position reads a site's position. An error is kept in it: a plan never
 // fails for a position it cannot read.
 func position(ctx context.Context, c kube.Clients, site string, u *unstructured.Unstructured) *driver.Position {
+	// A pod that the API server cannot reach must not hold a plan.
+	ctx, cancel := context.WithTimeout(ctx, PositionTimeout)
+	defer cancel()
 	st, err := readStatus(ctx, c, site, u)
 	if err != nil {
 		return &driver.Position{Error: err.Error()}

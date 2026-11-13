@@ -318,7 +318,7 @@ func check(t *driver.Topology, r driver.Request) error {
 		}
 		if a := ahead(t, r); len(a) > 0 && !r.AcceptBehind {
 			s := a[0]
-			return fmt.Errorf("site %s holds WAL past site %s: %s. Promoting %s loses the writes that %s holds, and site %s must then be rebuilt. Promote the most caught-up site instead (--to %s), or pass --accept-behind to promote %s anyway",
+			return fmt.Errorf("site %s holds WAL past site %s: %s. Promoting %s loses the writes that %s holds, and site %s must then be rebuilt. Promote the most caught-up site instead (--to %s), or pass --accept-behind to tack plan and tack run to promote %s anyway",
 				s.Name, r.To, aheadOf(&s, toSt), r.To, s.Name, s.Name, best(t, a), r.To)
 		}
 	default:

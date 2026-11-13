@@ -117,7 +117,7 @@ func TestSiteLossRefusesTargetBehind(t *testing.T) {
 	if err == nil {
 		t.Fatal("a site loss toward a replica behind another was not refused")
 	}
-	for _, want := range []string{"site c holds WAL past site b", "c reaches 0/5A01C2F0", "b reaches 0/3000060", "--to c", "--accept-behind"} {
+	for _, want := range []string{"site c holds WAL past site b", "c reaches 0/5A01C2F0", "b reaches 0/3000060", "--to c", "--accept-behind to tack plan and tack run"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("refusal %q does not say %q", err, want)
 		}
