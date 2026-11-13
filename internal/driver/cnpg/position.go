@@ -41,7 +41,18 @@ const (
 	// instance is a primary or replayed all the WAL it received, else the
 	// seconds since the last transaction it replayed committed.
 	LagMetric = "cnpg_pg_replication_lag"
+	// ReplayTimeMetric is the column of Tack's replay-time query,
+	// deploy/cnpg/replay-time.yaml, which an operator may add to a Cluster
+	// (docs/workload.md#replay-time): the commit time, in seconds since
+	// 1970, of the last transaction the instance replayed. Commit times
+	// are not in WAL order: see committedUpTo. CloudNativePG
+	// names a custom metric cnpg_<query>_<column>, and writes NULL as NaN
+	// (pkg/management/postgres/utils/utils.go, DBToFloat64).
+	ReplayTimeMetric = "cnpg_tack_replay_timestamp_seconds"
 )
+
+// now is Tack's clock, for the age of a replay time; tests replace it.
+var now = time.Now
 
 // PositionTimeout bounds each read of one site's position: its status,
 // then its replay lag.
@@ -96,38 +107,68 @@ func readStatus(ctx context.Context, c kube.Clients, site string, u *unstructure
 	return st, po, nil
 }
 
-// readLag reads a replica's replay lag from its instance manager's
-// metrics, through the API server: a GET only.
-func readLag(ctx context.Context, c kube.Clients, site string, po *corev1.Pod) (time.Duration, error) {
+// readMetrics reads a replica's instance manager's metrics, through the
+// API server: a GET only.
+func readMetrics(ctx context.Context, c kube.Clients, site string, po *corev1.Pod) ([]byte, error) {
 	p, ok := c.(kube.Proxier)
 	if !ok {
-		return 0, fmt.Errorf("these clients cannot read a pod through the API server")
+		return nil, fmt.Errorf("these clients cannot read a pod through the API server")
 	}
 	body, err := p.ProxyGet(ctx, site, po.Namespace, po.Name, metricsScheme(po), MetricsPort, MetricsPath)
 	if err != nil {
-		return 0, fmt.Errorf("read the metrics of Pod %s/%s through the API server: %w", po.Namespace, po.Name, err)
+		return nil, fmt.Errorf("read the metrics of Pod %s/%s through the API server: %w", po.Namespace, po.Name, err)
 	}
-	return parseLag(body)
+	return body, nil
+}
+
+// metric finds the value of the metric name in metrics of the Prometheus
+// text format, whatever its labels.
+func metric(body []byte, name string) (string, bool) {
+	for line := range strings.Lines(string(body)) {
+		n, rest, ok := strings.Cut(strings.TrimSpace(line), " ")
+		if !ok || strings.HasPrefix(n, "#") {
+			continue
+		}
+		if n, _, _ = strings.Cut(n, "{"); n != name {
+			continue
+		}
+		value, _, _ := strings.Cut(strings.TrimSpace(rest), " ")
+		return value, true
+	}
+	return "", false
 }
 
 // parseLag finds LagMetric in metrics of the Prometheus text format.
 func parseLag(body []byte) (time.Duration, error) {
-	for line := range strings.Lines(string(body)) {
-		name, rest, ok := strings.Cut(strings.TrimSpace(line), " ")
-		if !ok || strings.HasPrefix(name, "#") {
-			continue
-		}
-		if n, _, _ := strings.Cut(name, "{"); n != LagMetric {
-			continue
-		}
-		value, _, _ := strings.Cut(strings.TrimSpace(rest), " ")
-		f, err := strconv.ParseFloat(value, 64)
-		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) || f < 0 {
-			return 0, fmt.Errorf("%s is %q, not a number of seconds", LagMetric, value)
-		}
-		return time.Duration(f * float64(time.Second)).Round(time.Second), nil
+	value, ok := metric(body, LagMetric)
+	if !ok {
+		return 0, fmt.Errorf("the metrics hold no %s: CloudNativePG exports it with its default monitoring queries, which spec.monitoring.disableDefaultQueries turns off", LagMetric)
 	}
-	return 0, fmt.Errorf("the metrics hold no %s: CloudNativePG exports it with its default monitoring queries, which spec.monitoring.disableDefaultQueries turns off", LagMetric)
+	f, err := strconv.ParseFloat(value, 64)
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) || f < 0 {
+		return 0, fmt.Errorf("%s is %q, not a number of seconds", LagMetric, value)
+	}
+	return time.Duration(f * float64(time.Second)).Round(time.Second), nil
+}
+
+// replayTime fills the position's last replayed commit from
+// ReplayTimeMetric. Without the metric, it leaves the position as it is.
+func replayTime(pos *driver.Position, body []byte) {
+	value, ok := metric(body, ReplayTimeMetric)
+	if !ok {
+		return
+	}
+	f, err := strconv.ParseFloat(value, 64)
+	switch {
+	case err == nil && math.IsNaN(f):
+		pos.CommitNote = "replayed no transaction since it started"
+	case err != nil || math.IsInf(f, 0) || f <= 0:
+		pos.CommitNote = fmt.Sprintf("replay time not read: %s is %q, not a time", ReplayTimeMetric, value)
+	default:
+		t := time.UnixMilli(int64(math.Round(f * 1000))).UTC()
+		pos.LastCommit = &t
+		pos.CommitAge = now().Sub(t).Truncate(time.Second)
+	}
 }
 
 // scheme is the status endpoint's scheme, as CloudNativePG finds it:
@@ -173,11 +214,17 @@ func position(ctx context.Context, c kube.Clients, site string, u *unstructured.
 	pos.Received, pos.Replayed = st.ReceivedLsn, st.ReplayLsn
 	lctx, lcancel := context.WithTimeout(ctx, PositionTimeout)
 	defer lcancel()
-	if lag, err := readLag(lctx, c, site, po); err != nil {
+	body, err := readMetrics(lctx, c, site, po)
+	if err != nil {
+		pos.LagError = err.Error()
+		return pos
+	}
+	if lag, err := parseLag(body); err != nil {
 		pos.LagError = err.Error()
 	} else {
 		pos.ReplayLag = &lag
 	}
+	replayTime(pos, body)
 	return pos
 }
 
@@ -346,10 +393,13 @@ func positionNotes(w *failoverv1.WorkloadSpec, t *driver.Topology, r driver.Requ
 		return notes
 	}
 	if l, ok := reach(tp); ok {
-		notes = append(notes, fmt.Sprintf("site loss: replication between sites is asynchronous. Site %s reaches %s. The writes that the old primary took after that are not in it: this run loses them (the RPO), and they stay only at site %s, which the follow-up Rebuild recreates",
-			r.To, l, r.From))
+		notes = append(notes, fmt.Sprintf("site loss: replication between sites is asynchronous. Site %s reaches %s.%s The writes that the old primary took after that are not in it: this run loses them (the RPO), and they stay only at site %s, which the follow-up Rebuild recreates",
+			r.To, l, committedUpTo(tp), r.From))
 	} else {
 		notes = append(notes, fmt.Sprintf("site loss: replication between sites is asynchronous. The writes that the old primary took after the last WAL that site %s received are not in it: this run loses them (the RPO)", r.To))
+	}
+	if tp != nil && tp.Error == "" && tp.LastCommit == nil && tp.CommitNote != "" {
+		notes = append(notes, fmt.Sprintf("site %s: %s, so the plan cannot say when its last replayed commit was", r.To, tp.CommitNote))
 	}
 	if d := toSt.Facts[factMinApplyDelay]; d != "" {
 		notes = append(notes, fmt.Sprintf("warning: site %s: Cluster sets spec.replica.minApplyDelay %s, so it replays WAL that long after it receives it; its replayed position lags what it received", r.To, d))
@@ -361,6 +411,23 @@ func positionNotes(w *failoverv1.WorkloadSpec, t *driver.Topology, r driver.Requ
 		}
 	}
 	return notes
+}
+
+// committedUpTo says, from the replay-time query, when the last commit
+// that a replica replayed was; "" without it. It is no guarantee:
+// PostgreSQL stamps a commit before it inserts the commit record
+// (xact.c, RecordTransactionCommit), so under concurrent writes a commit
+// stamped just before may come later in the WAL, and is not replayed yet.
+func committedUpTo(p *driver.Position) string {
+	if p.LastCommit == nil {
+		return ""
+	}
+	at := p.LastCommit.Format(driver.CommitTimeLayout)
+	when := fmt.Sprintf("%s before this plan, by Tack's clock", p.CommitAge)
+	if p.CommitAge < 0 {
+		when = fmt.Sprintf("that clock is ahead of Tack's by %s or more", -p.CommitAge)
+	}
+	return fmt.Sprintf(" Its last replayed commit is from %s, by the old primary's clock (%s). The writes that the old primary committed after it are lost, and so may be a few committed just before it, under concurrent writes.", at, when)
 }
 
 // best is the site, among those ahead of to, whose data reaches furthest.

@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/yaml"
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/driver"
@@ -314,5 +317,137 @@ func TestSiteLossNotes(t *testing.T) {
 	planned := strings.Join(Driver{}.Notes(w, topo, driver.Request{From: "a", To: "b", Mode: failoverv1.ModePlanned}), "\n")
 	if strings.Contains(planned, "RPO") || strings.Contains(planned, "minApplyDelay") {
 		t.Errorf("a planned plan notes %q", planned)
+	}
+}
+
+// #94, [RFC#0004] Requirement 13: with Tack's replay-time query, a
+// site-loss plan says when the target's last replayed commit was. It
+// reads the same /metrics GET, and keeps the replay lag.
+func TestSiteLossSaysTheLastReplayedCommit(t *testing.T) {
+	c := threeSites(false)
+	c.SetDown("a", true)
+	c.SetMetrics("b", "cnpg_pg_replication_lag 0\ncnpg_tack_replay_timestamp_seconds 1.7945604005e+09\n", nil)
+	w, topo := discover(t, c)
+	notes := strings.Join(Driver{}.Notes(w, topo, driver.Request{From: "a", To: "b", Mode: failoverv1.ModeSiteLoss}), "\n")
+	want := "Site b reaches 0/3000060. Its last replayed commit is from 2026-11-13T09:00:00.5Z, by the old primary's clock"
+	if !strings.Contains(notes, want) {
+		t.Errorf("notes %q do not say %q", notes, want)
+	}
+}
+
+// #94: the replay time, its age by Tack's clock, and what is printed
+// without it.
+func TestReplayTime(t *testing.T) {
+	defer func(f func() time.Time) { now = f }(now)
+	now = func() time.Time { return time.Date(2026, 11, 13, 10, 0, 0, 0, time.UTC) }
+	c := threeSites(false)
+	c.SetDown("a", true)
+	at := time.Date(2026, 11, 13, 9, 0, 0, 0, time.UTC)
+	site := func(s string) *driver.Position {
+		t.Helper()
+		_, topo := discover(t, c)
+		st, _ := topo.Site(s)
+		return st.Position
+	}
+	notesTo := func(s string) string {
+		w, topo := discover(t, c)
+		return strings.Join(Driver{}.Notes(w, topo, driver.Request{From: "a", To: s, Mode: failoverv1.ModeSiteLoss, AcceptBehind: true}), "\n")
+	}
+	without := notesTo("b")
+
+	c.SetMetrics("b", "cnpg_pg_replication_lag 0\ncnpg_tack_replay_timestamp_seconds 1794560400.5\n", nil)
+	p := site("b")
+	if p.LastCommit == nil || !p.LastCommit.Equal(at.Add(500*time.Millisecond)) || p.CommitAge != time.Hour-time.Second || p.CommitNote != "" || p.ReplayLag == nil {
+		t.Errorf("site b: %+v", p)
+	}
+	if n := notesTo("b"); !strings.Contains(n, "Its last replayed commit is from 2026-11-13T09:00:00.5Z, by the old primary's clock (59m59s before this plan, by Tack's clock). The writes that the old primary committed after it are lost, and so may be a few committed just before it, under concurrent writes. The writes that the old primary took after that are not in it") || strings.Contains(n, "at least") {
+		t.Errorf("notes %q", n)
+	}
+
+	// The old primary's clock ahead of Tack's.
+	now = func() time.Time { return at.Add(-time.Minute) }
+	if n := notesTo("b"); !strings.Contains(n, "by the old primary's clock (that clock is ahead of Tack's by 1m0s or more).") {
+		t.Errorf("notes %q", n)
+	}
+	now = func() time.Time { return time.Date(2026, 11, 13, 10, 0, 0, 0, time.UTC) }
+
+	// With disableDefaultQueries, the replay time alone.
+	c.SetMetrics("b", "cnpg_tack_replay_timestamp_seconds 1794560400\n", nil)
+	if p := site("b"); p.LastCommit == nil || p.ReplayLag != nil || !strings.Contains(p.LagError, "disableDefaultQueries") {
+		t.Errorf("site b: %+v", p)
+	}
+
+	// NULL: no transaction replayed since the instance started.
+	c.SetMetrics("b", "cnpg_pg_replication_lag 0\ncnpg_tack_replay_timestamp_seconds NaN\n", nil)
+	if p := site("b"); p.LastCommit != nil || p.CommitNote != "replayed no transaction since it started" {
+		t.Errorf("site b: %+v", p)
+	}
+	if n := notesTo("b"); !strings.Contains(n, "site b: replayed no transaction since it started, so the plan cannot say when its last replayed commit was") || strings.Contains(n, "last replayed commit is from") {
+		t.Errorf("notes %q", n)
+	}
+	for _, bad := range []string{"0", "-1", "+Inf", "x"} {
+		c.SetMetrics("b", "cnpg_pg_replication_lag 0\ncnpg_tack_replay_timestamp_seconds "+bad+"\n", nil)
+		if p := site("b"); p.LastCommit != nil || !strings.Contains(p.CommitNote, "not a time") {
+			t.Errorf("value %s: site b: %+v", bad, p)
+		}
+	}
+
+	// Without the query, the notes are what they were.
+	c.SetMetrics("b", "cnpg_pg_replication_lag 0\n", nil)
+	if p := site("b"); p.LastCommit != nil || p.CommitNote != "" {
+		t.Errorf("site b: %+v", p)
+	}
+	if n := notesTo("b"); n != without {
+		t.Errorf("without the query, notes\n%s\nwant\n%s", n, without)
+	}
+}
+
+// #94: the e2e's copy of the query is deploy/cnpg/replay-time.yaml, and
+// the metric it makes is the one Tack reads: cnpg_<query>_<column>.
+func TestReplayTimeQuery(t *testing.T) {
+	read := func(path string) *corev1.ConfigMap {
+		t.Helper()
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cm := &corev1.ConfigMap{}
+		if err := yaml.UnmarshalStrict(b, cm); err != nil {
+			t.Fatal(err)
+		}
+		return cm
+	}
+	cm := read("../../../deploy/cnpg/replay-time.yaml")
+	cp := read("../../../test/e2e/fixtures/gitops/clusters/a/replay-time.yaml")
+	if cp.Namespace != "db" {
+		t.Errorf("the e2e's copy is in namespace %q, want db", cp.Namespace)
+	}
+	cp.Namespace = ""
+	if !reflect.DeepEqual(cm, cp) {
+		t.Errorf("the e2e's copy differs from deploy/cnpg/replay-time.yaml:\n%+v\n%+v", cp, cm)
+	}
+	if _, ok := cm.Labels["cnpg.io/reload"]; !ok {
+		t.Error("no cnpg.io/reload label: CloudNativePG would not reload the queries when they change")
+	}
+	var queries map[string]struct {
+		Query   string                         `json:"query"`
+		Metrics []map[string]map[string]string `json:"metrics"`
+	}
+	if err := yaml.UnmarshalStrict([]byte(cm.Data["queries"]), &queries); err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for q, v := range queries {
+		if !strings.Contains(v.Query, "pg_last_xact_replay_timestamp()") {
+			t.Errorf("query %s does not read pg_last_xact_replay_timestamp()", q)
+		}
+		for _, m := range v.Metrics {
+			for col, spec := range m {
+				names = append(names, "cnpg_"+q+"_"+col+" "+spec["usage"])
+			}
+		}
+	}
+	if strings.Join(names, ",") != ReplayTimeMetric+" GAUGE" {
+		t.Errorf("the query makes %v, want %s GAUGE", names, ReplayTimeMetric)
 	}
 }

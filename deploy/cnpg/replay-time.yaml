@@ -1,0 +1,21 @@
+# Tack's replay-time query, opt-in (docs/workload.md#replay-time). Apply it
+# in the namespace of each Cluster, and name it in the Cluster's
+# spec.monitoring.customQueriesConfigMap. A Cluster that names it before it
+# exists runs without it, with a warning, until it exists. Keep the query
+# and column names: Tack reads the metric cnpg_tack_replay_timestamp_seconds.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tack-replay-time
+  labels:
+    # CloudNativePG reloads the queries when this ConfigMap changes.
+    cnpg.io/reload: "true"
+data:
+  queries: |
+    tack_replay:
+      query: |
+        SELECT pg_catalog.date_part('epoch', pg_catalog.pg_last_xact_replay_timestamp()) AS timestamp_seconds
+      metrics:
+        - timestamp_seconds:
+            usage: GAUGE
+            description: Commit time, in seconds since 1970, of the last transaction this instance replayed; NaN when it replayed none since it started

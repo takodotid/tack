@@ -723,6 +723,26 @@ func TestGitChangedDuringRun(t *testing.T) {
 }
 
 func TestSiteLossBreakGlassAndReturn(t *testing.T) {
+	// #94: site a's Cluster has Tack's replay-time query. A commit at b reaches a; the plan shows a's last
+	// replayed commit at or after it. CloudNativePG reruns the query at most every 30 seconds.
+	mark := psql(t, "b", "insert into marks values ('before-site-loss-' || clock_timestamp()); select floor(extract(epoch from clock_timestamp()))::bigint")
+	// psql prints each statement's result: the time is on the last line.
+	committed, err := strconv.ParseInt(mark[strings.LastIndex(mark, "\n")+1:], 10, 64)
+	if err != nil {
+		t.Fatalf("commit time %q: %v", mark, err)
+	}
+	lastCommit := regexp.MustCompile(`(?m)^  a  received .*  last replayed commit (\S+) \(`)
+	eventually(t, 2*time.Minute, "site a's last replayed commit reaches the commit at b", func() string {
+		m := lastCommit.FindStringSubmatch(tackOK(t, "plan", "-f", workload, "--to", "a"))
+		if m == nil {
+			return "no replay time in the plan"
+		}
+		if at, err := time.Parse(time.RFC3339, m[1]); err != nil || at.Unix() < committed {
+			return "last replayed commit " + m[1]
+		}
+		return ""
+	})
+
 	// Site b (the primary) and Git are lost.
 	docker(t, "pause", node("b"))
 	docker(t, "stop", gitContainer)
@@ -737,6 +757,12 @@ func TestSiteLossBreakGlassAndReturn(t *testing.T) {
 	}
 	if !strings.Contains(out, "If site b still runs, it stays primary") || !strings.Contains(out, version.DocLink("docs/runbooks/site-loss.md")) {
 		t.Error("the site-loss plan lacks the note on a site cut off from this host (issue #26)")
+	}
+	// #94: the RPO note says when site a's last replayed commit was. Nothing else writes, so it is the commit at b, or later.
+	if m := regexp.MustCompile(`Its last replayed commit is from (\S+), by the old primary's clock`).FindStringSubmatch(out); m == nil {
+		t.Errorf("the site-loss plan does not say when site a's last replayed commit was:\n%s", out)
+	} else if at, err := time.Parse(time.RFC3339, m[1]); err != nil || at.Unix() < committed {
+		t.Errorf("the site-loss plan says site a's last replayed commit is from %s, before the commit at b at %d", m[1], committed)
 	}
 	eventually(t, 3*time.Minute, "site a promoted during break-glass", func() string {
 		if ip := jsonpath(t, "a", "cluster", "pg-a", "{.status.instancesReportedState.*.isPrimary}"); !strings.Contains(ip, "true") {
@@ -927,7 +953,7 @@ func TestRoutingFromStrait(t *testing.T) {
 	// [RFC#0004] Requirement 13 through the chart's row 18: the plan reads each site's WAL position, and the replica's replay lag from its metrics.
 	plan := tackOK(t, "plan", "--kubeconfig", restricted, "-f", routed, "--to", "a")
 	if !strings.Contains(plan, "WAL positions:") || strings.Contains(plan, "could not be read") ||
-		!regexp.MustCompile(`(?m)^  a  received [0-9A-F]+/[0-9A-F]+ +replayed [0-9A-F]+/[0-9A-F]+ +timeline [0-9]+, streaming +(replayed all it received|last replayed commit [0-9hms]+ ago) +most caught up$`).MatchString(plan) ||
+		!regexp.MustCompile(`(?m)^  a  received [0-9A-F]+/[0-9A-F]+ +replayed [0-9A-F]+/[0-9A-F]+ +timeline [0-9]+, streaming +(replayed all it received|last replayed commit [0-9hms]+ ago|last replayed commit [0-9TZ:.-]+ \([0-9hms]+ ago\)) +most caught up$`).MatchString(plan) ||
 		!regexp.MustCompile(`(?m)^  b  writes at [0-9A-F]+/[0-9A-F]+ +timeline [0-9]+ +primary$`).MatchString(plan) {
 		t.Errorf("the plan as the chart's roles does not show both sites' WAL positions:\n%s", plan)
 	}
