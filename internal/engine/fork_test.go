@@ -150,8 +150,7 @@ func TestSiteLossSnapshotsTheOldPrimary(t *testing.T) {
 func TestFailedSnapshotStopsTheRun(t *testing.T) {
 	f := newFixture(t)
 	f.w.Spec.Sites[0].CNPG.Snapshot = true
-	testenv.BackupFails = "no volumeSnapshot section defined on the target cluster"
-	t.Cleanup(func() { testenv.BackupFails = "" })
+	f.clients.SetFault(testenv.FaultBackup, "no volumeSnapshot section defined on the target cluster")
 	f.clients.SetDown("a", true)
 	if _, err := f.start("b", failoverv1.ModeSiteLoss, engine.Options{}); err != nil {
 		t.Fatalf("run: %v", err)
