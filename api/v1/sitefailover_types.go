@@ -760,6 +760,13 @@ type ForkPoint struct {
 	// ParentTimeline is the timeline that position is on.
 	// +optional
 	ParentTimeline int32 `json:"parentTimeline,omitempty"`
+	// LastCommit is, read with the position, the commit time of the last
+	// transaction the new primary replayed, by the old primary's clock.
+	// The old primary's writes committed after it are lost, and so may be
+	// a few committed just before it, under concurrent writes. Only with
+	// the opt-in replay-time query (docs/workload.md#replay-time).
+	// +optional
+	LastCommit *metav1.MicroTime `json:"lastCommit,omitempty"`
 	// Timeline is the new primary's timeline after its promotion.
 	// +optional
 	Timeline int32 `json:"timeline,omitempty"`

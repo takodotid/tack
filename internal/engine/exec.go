@@ -646,6 +646,9 @@ func (r *runner) keep(site string, got *driver.Recorded) {
 		if f.ParentTimeline != 0 {
 			st.Fork.ParentTimeline = f.ParentTimeline
 		}
+		if f.LastCommit != nil {
+			st.Fork.LastCommit = f.LastCommit
+		}
 		if f.Timeline != 0 {
 			st.Fork.Timeline = f.Timeline
 		}

@@ -772,6 +772,12 @@ func TestSiteLossBreakGlassAndReturn(t *testing.T) {
 	})
 	psql(t, "a", "insert into marks values ('during-site-loss')")
 	run := runName(latestRun(t, "a"))
+	// #94: the ledger keeps the last replayed commit's time, read at record-position-a, through the CRD.
+	if lc := strings.TrimSpace(kubectl(t, "a", "-n", ledgerNS, "get", "sitefailover", run, "-o", "jsonpath={.status.fork.lastCommit}")); lc == "" {
+		t.Error("the ledger has no status.fork.lastCommit")
+	} else if at, err := time.Parse(time.RFC3339, lc); err != nil || at.Unix() < committed {
+		t.Errorf("status.fork.lastCommit %q, before the commit at b at %d", lc, committed)
+	}
 
 	// Site b comes back, still primary: Git, which Flux at b reads, is down.
 	docker(t, "unpause", node("b"))
@@ -844,7 +850,8 @@ func TestSiteLossBreakGlassAndReturn(t *testing.T) {
 	}
 	// [RFC#0004] Requirement 15 on CloudNativePG: the fork point, read from a's instance around its promotion,
 	// and b's archive, recorded once b answered.
-	fork := regexp.MustCompile(`(?m)^Fork: site a's new history leaves the old one at [0-9A-F]+/[0-9A-F]+ on timeline ([0-9]+) or just after; new timeline ([0-9]+); promoted by `).FindStringSubmatch(out)
+	// #94: with site a's replay-time query, the line holds the last replayed commit's time.
+	fork := regexp.MustCompile(`(?m)^Fork: site a's new history leaves the old one at [0-9A-F]+/[0-9A-F]+ on timeline ([0-9]+) or just after; its last replayed commit is from [0-9TZ:.-]+, by the old primary's clock; new timeline ([0-9]+); promoted by `).FindStringSubmatch(out)
 	if fork == nil || fork[1] == fork[2] {
 		t.Errorf("status lacks the fork point, or its timelines do not differ:\n%s", out)
 	}
