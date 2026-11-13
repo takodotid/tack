@@ -772,6 +772,12 @@ func TestSiteLossBreakGlassAndReturn(t *testing.T) {
 	})
 	psql(t, "a", "insert into marks values ('during-site-loss')")
 	run := runName(latestRun(t, "a"))
+	// #94: the ledger keeps the last replayed commit's time, read at record-position-a, through the CRD.
+	if lc := strings.TrimSpace(kubectl(t, "a", "-n", ledgerNS, "get", "sitefailover", run, "-o", "jsonpath={.status.fork.lastCommit}")); lc == "" {
+		t.Error("the ledger has no status.fork.lastCommit")
+	} else if at, err := time.Parse(time.RFC3339, lc); err != nil || at.Unix() < committed {
+		t.Errorf("status.fork.lastCommit %q, before the commit at b at %d", lc, committed)
+	}
 
 	// Site b comes back, still primary: Git, which Flux at b reads, is down.
 	docker(t, "unpause", node("b"))

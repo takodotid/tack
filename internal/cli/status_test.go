@@ -7,6 +7,7 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/yaml"
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
 )
@@ -37,6 +38,30 @@ func TestStatusShowsWritesDownAndAttempts(t *testing.T) {
 	b.Reset()
 	printStatus(&b, sf)
 	if want := "Writes down: by 2026-10-27 14:31:07Z at the latest (the run's start: the site was lost before), until 2026-10-27 14:36:52Z: at least 5m45s\n"; !strings.Contains(b.String(), want) {
+		t.Errorf("status lacks %q:\n%s", want, b.String())
+	}
+}
+
+// #94, [RFC#0004] Requirement 15: tack status prints the recorded last
+// commit with the fork point. A fork recorded without it, as before,
+// prints as before.
+func TestStatusShowsTheForkLastCommit(t *testing.T) {
+	ledger := func(fork string) *failoverv1.SiteFailover {
+		t.Helper()
+		sf := &failoverv1.SiteFailover{}
+		if err := yaml.Unmarshal([]byte("status:\n  fork:\n"+fork), sf); err != nil {
+			t.Fatal(err)
+		}
+		return sf
+	}
+	var b bytes.Buffer
+	printStatus(&b, ledger("    site: b\n    position: 0/3000060\n    parentTimeline: 1\n    timeline: 2\n    lastCommit: \"2026-11-13T09:00:00.250000Z\"\n"))
+	if want := "Fork: site b's new history leaves the old one at 0/3000060 on timeline 1 or just after; its last replayed commit is from 2026-11-13T09:00:00.25Z, by the old primary's clock; new timeline 2\n"; !strings.Contains(b.String(), want) {
+		t.Errorf("status lacks %q:\n%s", want, b.String())
+	}
+	b.Reset()
+	printStatus(&b, ledger("    site: b\n    position: 0/3000060\n    parentTimeline: 1\n    timeline: 2\n"))
+	if want := "Fork: site b's new history leaves the old one at 0/3000060 on timeline 1 or just after; new timeline 2\n"; !strings.Contains(b.String(), want) {
 		t.Errorf("status lacks %q:\n%s", want, b.String())
 	}
 }

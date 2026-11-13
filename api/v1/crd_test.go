@@ -140,3 +140,15 @@ func TestCRDKnowsEveryStepType(t *testing.T) {
 		}
 	}
 }
+
+// #94, RFC0004 Requirement 15: every version's schema keeps
+// status.fork.lastCommit. A CRD without it drops the field from every
+// status write, without an error.
+func TestCRDKeepsTheForkLastCommit(t *testing.T) {
+	for _, v := range readCRD(t).Spec.Versions {
+		f, ok := v.Schema.OpenAPIV3Schema.Properties["status"].Properties["fork"].Properties["lastCommit"]
+		if !ok || f.Type != "string" || f.Format != "date-time" {
+			t.Errorf("version %s: status.fork.lastCommit is %+v, want a date-time string", v.Name, f)
+		}
+	}
+}

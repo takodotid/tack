@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -54,10 +55,11 @@ func (d Driver) Record(ctx context.Context, w *failoverv1.WorkloadSpec, c kube.C
 	switch s.Record.What {
 	case RecordPosition, RecordFork:
 		var st *instanceStatus
+		var po *corev1.Pod
 		var err error
 		for i := 0; i < readTries; i++ {
 			if err = cl.Get(ctx, key, u); err == nil {
-				if st, _, err = readStatus(ctx, c, s.Site, u); err == nil {
+				if st, po, err = readStatus(ctx, c, s.Site, u); err == nil {
 					break
 				}
 			}
@@ -68,7 +70,11 @@ func (d Driver) Record(ctx context.Context, w *failoverv1.WorkloadSpec, c kube.C
 			}
 		}
 		if s.Record.What == RecordPosition {
-			return recordPosition(s.Site, st, err), nil
+			rec := recordPosition(s.Site, st, err)
+			if err == nil {
+				recordLastCommit(ctx, c, s.Site, po, rec)
+			}
+			return rec, nil
 		}
 		return recordFork(s.Site, st, err), nil
 	case RecordSnapshot:
@@ -108,6 +114,32 @@ func recordPosition(site string, st *instanceStatus, err error) *driver.Recorded
 	}
 	f.Position, f.ParentTimeline = l.String(), int32(st.TimeLineID)
 	return &driver.Recorded{Done: true, Fork: f, Message: fmt.Sprintf("site %s reaches %s on timeline %d", site, f.Position, f.ParentTimeline)}
+}
+
+// recordLastCommit adds to a recorded position the commit time of the
+// last transaction to replayed, from the opt-in replay-time query, read
+// from the same metrics as the plan reads ([RFC#0004] Requirement 15).
+// Without the query, or when the metrics cannot be read, the record is as
+// it was: the replay time is opt-in, and the position is what the record
+// is for.
+func recordLastCommit(ctx context.Context, c kube.Clients, site string, po *corev1.Pod, rec *driver.Recorded) {
+	ctx, cancel := context.WithTimeout(ctx, PositionTimeout)
+	defer cancel()
+	body, err := readMetrics(ctx, c, site, po)
+	if err != nil {
+		return
+	}
+	var pos driver.Position
+	replayTime(&pos, body)
+	switch {
+	case pos.LastCommit != nil:
+		t := metav1.NewMicroTime(*pos.LastCommit)
+		rec.Fork.LastCommit = &t
+		rec.Message += fmt.Sprintf("; its last replayed commit is from %s, by the old primary's clock", pos.LastCommit.Format(driver.CommitTimeLayout))
+	case pos.CommitNote != "":
+		rec.Fork.Message = strings.TrimPrefix(rec.Fork.Message+"; "+pos.CommitNote, "; ")
+		rec.Message += "; " + pos.CommitNote
+	}
 }
 
 // recordFork records the new primary's timeline: the first 8 hexadecimal

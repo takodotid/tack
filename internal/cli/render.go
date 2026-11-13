@@ -351,6 +351,9 @@ func printStatus(w io.Writer, sf *failoverv1.SiteFailover) {
 		if f.Position != "" {
 			fmt.Fprint(w, " or just after")
 		}
+		if f.LastCommit != nil {
+			fmt.Fprintf(w, "; its last replayed commit is from %s, by the old primary's clock", f.LastCommit.UTC().Format(driver.CommitTimeLayout))
+		}
 		if f.Timeline != 0 {
 			fmt.Fprintf(w, "; new timeline %d", f.Timeline)
 		}

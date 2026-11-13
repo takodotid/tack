@@ -6,7 +6,7 @@ Do this before [the rebuild](rebuild-old-primary.md). Tack does none of it, but 
 
 | Record | Where | Written by |
 |---|---|---|
-| The fork point: the new primary's WAL position right before its promotion, its timeline then, and its new timeline | `tack status RUN -f workload.yaml`, line `Fork:`; `status.fork` | `record-position-<to>` and `record-fork-<to>` |
+| The fork point: the new primary's WAL position right before its promotion, its timeline then, and its new timeline. With the replay-time query ([workload.md](../workload.md#replay-time)), the commit time of the last transaction it replayed, by the old primary's clock: the old primary's writes committed after it are lost, and so may be a few committed just before it | `tack status RUN -f workload.yaml`, line `Fork:`; `status.fork` | `record-position-<to>` and `record-fork-<to>` |
 | The snapshot of the old primary: a CloudNativePG `Backup` and its VolumeSnapshots | the follow-up `Rebuild` of the old site; `status.followUps[].snapshot` | `snapshot-<from>` and `record-snapshot-<from>`, when the Workload sets `spec.sites[].cnpg.snapshot` for that site |
 | Where the old primary archived its WAL | the follow-up `Rebuild`; `status.followUps[].archive` | `record-snapshot-<from>` or `record-archive-<from>` |
 

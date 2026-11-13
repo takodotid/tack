@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -187,5 +188,57 @@ func TestCreateAdoptsOnlyItsOwnObject(t *testing.T) {
 	}
 	if st := stepOf(sf, "snapshot-a"); st.State != failoverv1.StepFailed || !strings.Contains(st.Message, "this run did not create it") {
 		t.Errorf("snapshot-a: %+v", st)
+	}
+}
+
+// #94, [RFC#0004] Requirement 15: with the opt-in replay-time query, the
+// site loss records the commit time of the last transaction the new
+// primary replayed, read with its position right before the promotion.
+func TestSiteLossRecordsTheLastCommit(t *testing.T) {
+	f := newFixture(t)
+	f.clients.SetDown("a", true)
+	f.clients.SetMetrics("b", "cnpg_pg_replication_lag 0\ncnpg_tack_replay_timestamp_seconds 1794560400.25\n", nil)
+	sf, err := f.start("b", failoverv1.ModeSiteLoss, engine.Options{})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	fork := sf.Status.Fork
+	want := time.Date(2026, 11, 13, 9, 0, 0, 250_000_000, time.UTC)
+	if fork == nil || fork.LastCommit == nil || !fork.LastCommit.Time.Equal(want) || fork.Position != "0/3000060" || fork.Message != "" {
+		t.Fatalf("fork %+v, want the last commit at %s", fork, want)
+	}
+	if st := stepOf(sf, "record-position-b"); !strings.Contains(st.Message, "; its last replayed commit is from 2026-11-13T09:00:00.25Z, by the old primary's clock") {
+		t.Errorf("record-position-b: %q", st.Message)
+	}
+}
+
+// Without the query, or when the metrics cannot be read, the fork is
+// recorded as before; NULL is recorded as such.
+func TestForkWithoutTheLastCommit(t *testing.T) {
+	for _, tt := range []struct {
+		name, metrics string
+		err           error
+		message       string
+	}{
+		{"no query", "", nil, ""},
+		{"metrics not read", "", errors.New(`pods "pg-b-1" is forbidden`), ""},
+		{"NULL", "cnpg_pg_replication_lag 0\ncnpg_tack_replay_timestamp_seconds NaN\n", nil, "replayed no transaction since it started"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFixture(t)
+			f.clients.SetDown("a", true)
+			f.clients.SetMetrics("b", tt.metrics, tt.err)
+			sf, err := f.start("b", failoverv1.ModeSiteLoss, engine.Options{})
+			if err != nil {
+				t.Fatalf("run: %v", err)
+			}
+			fork := sf.Status.Fork
+			if fork == nil || fork.LastCommit != nil || fork.Position != "0/3000060" || fork.Message != tt.message {
+				t.Errorf("fork %+v, want no last commit and message %q", fork, tt.message)
+			}
+			if st := stepOf(sf, "record-position-b"); st.State != failoverv1.StepSucceeded {
+				t.Errorf("record-position-b: %+v", st)
+			}
+		})
 	}
 }

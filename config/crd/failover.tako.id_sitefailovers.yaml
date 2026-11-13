@@ -1107,6 +1107,15 @@ spec:
                     description: At is when the promotion was seen done.
                     format: date-time
                     type: string
+                  lastCommit:
+                    description: |-
+                      LastCommit is, read with the position, the commit time of the last
+                      transaction the new primary replayed, by the old primary's clock.
+                      The old primary's writes committed after it are lost, and so may be
+                      a few committed just before it, under concurrent writes. Only with
+                      the opt-in replay-time query (docs/workload.md#replay-time).
+                    format: date-time
+                    type: string
                   message:
                     description: Message says what could not be read, if anything.
                     type: string
@@ -2528,6 +2537,15 @@ spec:
                 properties:
                   at:
                     description: At is when the promotion was seen done.
+                    format: date-time
+                    type: string
+                  lastCommit:
+                    description: |-
+                      LastCommit is, read with the position, the commit time of the last
+                      transaction the new primary replayed, by the old primary's clock.
+                      The old primary's writes committed after it are lost, and so may be
+                      a few committed just before it, under concurrent writes. Only with
+                      the opt-in replay-time query (docs/workload.md#replay-time).
                     format: date-time
                     type: string
                   message:
