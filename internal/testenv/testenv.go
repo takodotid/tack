@@ -62,6 +62,29 @@ type Clients struct {
 	status    map[string]map[string]any
 	statusErr map[string]error
 	proxied   []Proxied
+	// faults are the failures the fake CloudNativePG reports (SetFault).
+	faults map[string]string
+}
+
+// FaultBackup makes every Backup of the fake CloudNativePG fail.
+const FaultBackup = "backup"
+
+// SetFault makes the fake CloudNativePG fail what kind names with msg, or
+// work again with "". The Operator's goroutine reads it under the lock.
+func (c *Clients) SetFault(kind, msg string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.faults == nil {
+		c.faults = map[string]string{}
+	}
+	c.faults[kind] = msg
+}
+
+// Fault returns the failure SetFault set for kind.
+func (c *Clients) Fault(kind string) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.faults[kind]
 }
 
 // NewClients returns fake clients for the sites, seeded with objects. Each

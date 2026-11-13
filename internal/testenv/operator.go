@@ -112,8 +112,6 @@ func set(u *unstructured.Unstructured, v any, path ...string) {
 	_ = unstructured.SetNestedField(u.Object, v, path...)
 }
 
-// BackupFails makes every Backup of the fake fail with this error.
-var BackupFails string
 
 // backups completes each volumeSnapshot Backup with one VolumeSnapshot of
 // its data, as CloudNativePG does once the snapshot is ready.
@@ -129,9 +127,9 @@ func (o *Operator) backups(ctx context.Context, c client.Client) {
 		if phase, _, _ := unstructured.NestedString(b.Object, "status", "phase"); phase != "" {
 			continue
 		}
-		if BackupFails != "" {
+		if msg := o.Clients.Fault(FaultBackup); msg != "" {
 			set(b, "failed", "status", "phase")
-			set(b, BackupFails, "status", "error")
+			set(b, msg, "status", "error")
 		} else {
 			set(b, "completed", "status", "phase")
 			b.Object["status"].(map[string]any)["snapshotBackupStatus"] = map[string]any{"elements": []any{
