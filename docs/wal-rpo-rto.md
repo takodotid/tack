@@ -1,24 +1,24 @@
 # WAL archiving, data loss (RPO) and downtime (RTO)
 
-This guide says what each mode of a run can lose, how long writes stay down, and what to read before you choose `--to`.
+This guide says what each mode of a run can lose, how long writes stay down, and what the operator reads before choosing `--to`.
 
-- **RPO** is how much recent data a run can lose: the writes the new primary never got.
-- **RTO** is how long writes stay down: from the moment clients can no longer write to the moment they can again.
+- **RPO** is how much recent data a run can lose: the writes that the new primary never got.
+- **RTO** is how long writes stay down: from the moment clients can no longer write to the moment they can write again.
 
 ## What each mode costs
 
 | Mode | RPO | RTO starts | RTO ends |
 |---|---|---|---|
-| `Planned` | **0.** The old primary demotes and publishes a token. The new one promotes only after it has replayed up to that token ([RFC0004](../rfcs/RFC0004.md#requirements), Requirement 6). | when the old Pooler goes to 0 (`pooler-<from>`), or the demotion starts without a Pooler | when the new Pooler is ready (`wait-pooler-<to>`), or the new primary is healthy without one; then Strait's route change |
-| `SiteLoss` | **The WAL the new primary never received, plus any writes the old primary took before it was fenced.** Replication between sites is asynchronous. The plan shows how far each replica got. | when the site was lost. Tack cannot see that moment: it records the run's start, marked as an estimate | as for `Planned` |
+| `Planned` | **0.** The old primary demotes and publishes a token. The new one promotes only after it has replayed up to that token ([RFC0004](../rfcs/RFC0004.md#requirements), Requirement 6). | when the old Pooler goes to 0 (`pooler-<from>`). Without a Pooler, when the demotion starts | when the new Pooler is ready (`wait-pooler-<to>`). Without a Pooler, when the new primary is healthy. Then Strait changes its route |
+| `SiteLoss` | **The WAL that the new primary never received, plus any writes that the old primary took before it was fenced.** Replication between sites is asynchronous. The plan shows how far each replica got. | when the site was lost. Tack cannot see that moment, so it records the run's start, marked as an estimate | as for `Planned` |
 
-In a site loss, RTO starts with people: someone must notice the loss, confirm it, cut the old site off, and decide to fail over. Tack starts only when the operator runs it.
+In a site loss, RTO starts with people. Someone must notice the loss, confirm it, cut the old site off, and decide to fail over. Tack starts only when the operator runs it.
 
 ## Before you choose `--to` in a site loss
 
-1. **Run `tack plan -f workload.yaml --to SITE --mode site-loss`.** Its `WAL positions` table shows, for each site that answers, how far its replica received and replayed, and marks one `most caught up`. Promote that one. The plan refuses a target that another replica is ahead of, unless `--accept-behind` ([site-loss.md](runbooks/site-loss.md)).
+1. **Run `tack plan -f workload.yaml --to SITE --mode site-loss`.** Its `WAL positions` table shows how far each answering site's replica received and replayed WAL. It marks one site `most caught up`. Promote that one. The plan refuses a target that another replica is ahead of, unless `--accept-behind` is passed ([site-loss.md](runbooks/site-loss.md)).
 2. **Read the notes.** The plan states what the run will lose: the writes after the target's position. It warns when the target delays replay (`minApplyDelay`), when its replay is paused, and when a position could not be read.
-3. **Check the archive.** A replica that streams nothing may still restore WAL from the old primary's archive. If the archive holds more than any replica, wait for that WAL to be replayed before you promote. Watch the position in the plan move.
+3. **Check the archive.** A replica that streams nothing may still restore WAL from the old primary's archive. If the archive holds more than any replica, wait until that WAL is replayed before promoting. Watch the position in the plan move.
 
 ## WAL archiving
 
@@ -27,15 +27,15 @@ Give each site's Cluster its own archive from day one: [workload.md](workload.md
 | Archive | What happens to it |
 |---|---|
 | The old primary's | kept. Tack records where it is on the `Rebuild` follow-up. The rebuilt Cluster must write to a new destination ([rebuild-old-primary.md](runbooks/rebuild-old-primary.md)). |
-| The new primary's | checked. After the promotion, `verify-archiving-<to>` waits until the new primary archives WAL of its new timeline. If it does not in time, the run warns and records `CheckArchiving`. Until archiving works, there is no point-in-time recovery after the promotion. |
+| The new primary's | checked. After the promotion, `verify-archiving-<to>` waits until the new primary archives WAL of its new timeline. If that does not happen in time, the run warns and records `CheckArchiving`. Until archiving works, there is no point-in-time recovery to any moment after the promotion. |
 
 ## The old primary's writes after a site loss
 
-The writes the old primary took after the fork point are not in the new primary. Tack never merges them. It records the fork point and, with `cnpg.snapshot`, a snapshot of the old primary. Then [recover-old-primary-writes.md](runbooks/recover-old-primary-writes.md) finds those writes and hands them to the people who own the data.
+The writes that the old primary took after the fork point are not in the new primary. The fork point is where the two histories split. Tack never merges those writes. It records the fork point and, with `cnpg.snapshot`, a snapshot of the old primary. Then [recover-old-primary-writes.md](runbooks/recover-old-primary-writes.md) finds those writes and hands them to the people who own the data.
 
 ## The failover-time budget
 
-Each row is one part of the time writes stay down. The bounds are the timeouts and settings that cap it. Fill in the measured column in staging with [measure-failover-time.md](runbooks/measure-failover-time.md): numbers from kind or CI do not count.
+Each row is one part of the time that writes stay down. The "Bounded by" column names the timeouts and settings that cap that part. Fill in the measured column in staging with [measure-failover-time.md](runbooks/measure-failover-time.md). Numbers from kind or CI do not count.
 
 ### Planned switchover
 
