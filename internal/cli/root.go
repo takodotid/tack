@@ -124,9 +124,11 @@ func NewRoot(f Factory) *cobra.Command {
 	}
 	root.PersistentFlags().StringVar(&o.kubeconfig, "kubeconfig", "", "kubeconfig file holding every site's context (default: the standard kubeconfig loading rules)")
 	root.Flags().BoolVar(&o.skill, "skill", false, "print a guide for AI agents as a skill document and exit")
-	root.AddCommand(newPlan(o), newRun(o), newResume(o), newStatus(o), newAbandon(o), newPrune(o))
+	root.AddCommand(newPlan(o), newRun(o), newResume(o), newStatus(o), newAbandon(o), newPrune(o), newCompletion())
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return usageError{err} })
+	// tack completion is its own command, with tack's help ([RFC#0009] Requirement 33).
 	root.CompletionOptions.DisableDefaultCmd = true
+	complete(root)
 	return root
 }
 
