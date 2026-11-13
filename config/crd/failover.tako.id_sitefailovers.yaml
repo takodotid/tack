@@ -390,6 +390,12 @@ spec:
                           type: object
                         timeout:
                           type: string
+                        warnAs:
+                          description: |-
+                            WarnAs, when set, makes a timeout a warning: the step ends with it,
+                            the run records a follow-up of this action at the step's site, and
+                            goes on.
+                          type: string
                         what:
                           description: 'What names the record: Position, Fork, Snapshot
                             or Archive.'
@@ -925,6 +931,11 @@ spec:
                       timeouts:
                         description: Timeouts bound the waits of a run.
                         properties:
+                          archiving:
+                            description: |-
+                              Archiving bounds the wait for the new primary to archive WAL after
+                              its promotion, 5m when unset ([RFC#0004] Requirement 17).
+                            type: string
                           demotion:
                             description: Demotion bounds the wait for the old primary
                               to demote.
@@ -1743,6 +1754,12 @@ spec:
                           type: object
                         timeout:
                           type: string
+                        warnAs:
+                          description: |-
+                            WarnAs, when set, makes a timeout a warning: the step ends with it,
+                            the run records a follow-up of this action at the step's site, and
+                            goes on.
+                          type: string
                         what:
                           description: 'What names the record: Position, Fork, Snapshot
                             or Archive.'
@@ -2278,6 +2295,11 @@ spec:
                       timeouts:
                         description: Timeouts bound the waits of a run.
                         properties:
+                          archiving:
+                            description: |-
+                              Archiving bounds the wait for the new primary to archive WAL after
+                              its promotion, 5m when unset ([RFC#0004] Requirement 17).
+                            type: string
                           demotion:
                             description: Demotion bounds the wait for the old primary
                               to demote.

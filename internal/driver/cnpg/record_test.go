@@ -68,7 +68,7 @@ func TestRecordSteps(t *testing.T) {
 	}
 	loss := driver.Request{From: "a", To: "b", Mode: failoverv1.ModeSiteLoss}
 	got := ids(loss)
-	want := []string{"fence-a", "pooler-a", "wait-pooler-a", "record-position-b", "promote-b", "wait-promoted-b", "record-fork-b", "declare-c", "pooler-b", "wait-pooler-b", "record-archive-a", "verify-b"}
+	want := []string{"fence-a", "pooler-a", "wait-pooler-a", "record-position-b", "promote-b", "wait-promoted-b", "record-fork-b", "declare-c", "pooler-b", "wait-pooler-b", "record-archive-a", "verify-b", "verify-archiving-b"}
 	if !slices.Equal(got, want) {
 		t.Errorf("site loss: %v\nwant %v", got, want)
 	}

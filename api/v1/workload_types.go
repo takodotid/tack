@@ -207,4 +207,8 @@ type Timeouts struct {
 	// unset ([RFC#0004] Requirement 15).
 	// +optional
 	Snapshot *metav1.Duration `json:"snapshot,omitempty"`
+	// Archiving bounds the wait for the new primary to archive WAL after
+	// its promotion, 5m when unset ([RFC#0004] Requirement 17).
+	// +optional
+	Archiving *metav1.Duration `json:"archiving,omitempty"`
 }

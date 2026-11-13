@@ -592,7 +592,15 @@ func (r *runner) recordStep(ctx context.Context, s *failoverv1.Step) (string, er
 			return got.Message, nil
 		}
 		if deadline.IsZero() || r.now().After(deadline) {
-			return "", fmt.Errorf("timed out after %s: %s", durationOf(rs.Timeout), got.Message)
+			if rs.WarnAs == "" {
+				return "", fmt.Errorf("timed out after %s: %s", durationOf(rs.Timeout), got.Message)
+			}
+			// A warning, not a stop: the run records a follow-up and goes on.
+			msg := fmt.Sprintf("warning: not done after %s: %s", durationOf(rs.Timeout), got.Message)
+			r.keep(s.Site, got)
+			r.sf.Status.FollowUps = append(r.sf.Status.FollowUps, failoverv1.FollowUp{Site: s.Site, Action: rs.WarnAs, Reason: msg})
+			r.printf("  warning   %s: %s\n", s.ID, msg)
+			return msg, nil
 		}
 		select {
 		case <-ctx.Done():

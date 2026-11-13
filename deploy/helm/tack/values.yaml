@@ -15,9 +15,10 @@ rbac:
   # The objects of the Workload files, by namespace and name. A kind without names gets no rule.
   objects: []
   # - namespace: db
-  #   clusters: [pg-a]
+  #   clusters: [pg-a] # also grants get on pods and pods/proxy, and get and create on backups, in the namespace
   #   poolers: [pg-a-pooler-rw] # also grants get on the Deployment of the same name
   #   siteServices: [postgres]
+  #   objectStores: [pg-a-store] # the barman-cloud ObjectStores that the Clusters archive WAL to
   # - namespace: flux-system
   #   kustomizations: [apps]
   #   gitRepositories: [gitops]

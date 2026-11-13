@@ -70,6 +70,13 @@ func (o *Operator) reconcile(ctx context.Context, site string) {
 	case primary == self && demotion != "":
 		set(u, "", "status", "demotionToken")
 	}
+	if _, store, _ := unstructured.NestedMap(u.Object, "spec", "backup", "barmanObjectStore"); store {
+		cond := map[string]any{"type": "ContinuousArchiving", "status": "True", "message": "Continuous archiving is working"}
+		if ArchiveFails != "" {
+			cond = map[string]any{"type": "ContinuousArchiving", "status": "False", "message": ArchiveFails}
+		}
+		set(u, []any{cond}, "status", "conditions")
+	}
 	if fmt.Sprint(before.Object) != fmt.Sprint(u.Object) {
 		_ = c.Update(ctx, u)
 	}
@@ -134,3 +141,6 @@ func (o *Operator) backups(ctx context.Context, c client.Client) {
 		_ = c.Update(ctx, b)
 	}
 }
+
+// ArchiveFails makes every archive of the fake fail with this error.
+var ArchiveFails string

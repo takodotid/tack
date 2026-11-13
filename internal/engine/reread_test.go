@@ -179,9 +179,10 @@ func TestReadsOfStepsRepeatedAfterBlip(t *testing.T) {
 	f.diesAt(f.plan("b", failoverv1.ModePlanned), "capture-token", false)
 	// Reads of Cluster pg-a in the resume, without a failure: 1 the read
 	// after the demotion, 2 the capture, 3 the read before the promotion, 4
-	// the compare of the token with its source, 5 to 9 the reads after the
-	// promotion. With the failures, 3 repeats the capture, 5 is the compare
-	// and 6 repeats it.
+	// the compare of the token with its source, 5 to 10 the reads after the
+	// promotion, one before each Failover step, verify-archiving-b the last.
+	// With the failures, 3 repeats the capture, 5 is the compare and 6
+	// repeats it.
 	clients := &failingClients{Clients: f.clients, fail: failNth("a", "Cluster db/pg-a", map[int]error{2: reset, 5: unavailable})}
 	sf, out, err := f.resumeWith(clients, engine.Options{})
 	if err != nil || sf.Status.State != failoverv1.RunSucceeded {
@@ -190,8 +191,8 @@ func TestReadsOfStepsRepeatedAfterBlip(t *testing.T) {
 	if n := strings.Count(out, "  answered  site a, read Cluster db/pg-a, on try 2 of 3\n"); n != 2 {
 		t.Errorf("%d answers after a repeat, want 2:\n%s", n, out)
 	}
-	if n := clients.count("a", "Cluster db/pg-a"); n != 11 {
-		t.Errorf("%d reads of Cluster pg-a, want 11", n)
+	if n := clients.count("a", "Cluster db/pg-a"); n != 12 {
+		t.Errorf("%d reads of Cluster pg-a, want 12", n)
 	}
 	if got := stepMessage(sf, "capture-token"); !strings.HasPrefix(got, "captured demotionToken") {
 		t.Errorf("capture-token: %s", got)

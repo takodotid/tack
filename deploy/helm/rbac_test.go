@@ -28,7 +28,7 @@ const (
 	tableDoc  = "../../docs/operations.md"
 	tableHead = "| # | Resource | Verbs | Namespace | Commands | For |"
 	// namedFact is the table's fact on resourceNames, which the test checks word for word.
-	namedFact = "| `resourceNames` | Rows 3 and 7 to 13 can name their objects."
+	namedFact = "| `resourceNames` | Rows 3, 7 to 13 and 20 can name their objects."
 	// pruneFact is the table's fact on row 16, which the test checks word for word.
 	pruneFact = "| Row 16 | Only `tack prune` needs it. The chart grants it only with `rbac.prune`. |"
 	// pruneRow is the row that only rbac.prune grants.
@@ -36,7 +36,7 @@ const (
 )
 
 // namedRows are the rows whose rules name their objects, as namedFact says.
-var namedRows = []int{3, 7, 8, 9, 10, 11, 12, 13}
+var namedRows = []int{3, 7, 8, 9, 10, 11, 12, 13, 20}
 
 // values names objects in two namespaces, every kind of rbac.objects among them.
 const values = `rbac:
@@ -49,6 +49,7 @@ const values = `rbac:
     clusters: [pg-a, pg-b]
     poolers: [pg-a-pooler-rw, pg-b-pooler-rw]
     siteServices: [postgres]
+    objectStores: [store-a, store-b]
   - namespace: flux-system
     kustomizations: [site-a, site-b]
     gitRepositories: [gitops]
@@ -251,6 +252,7 @@ var objectNames = map[string][]string{
 	"gitrepositories": {"gitops"},
 	"configmaps":      {"cluster-vars"},
 	"secrets":         {"cluster-secrets"},
+	"objectstores":    {"store-a", "store-b"},
 }
 
 // want returns the grants the table asks for, with the names that values gives.

@@ -192,8 +192,19 @@ With this block, a run ends with one `Routing` step per service: it waits until 
 | `flux` | `5m` | each Flux reconcile |
 | `routing` | `2m` | each Strait routing check |
 | `snapshot` | `30m` | the wait for the old primary's snapshot (`cnpg.snapshot`) |
+| `archiving` | `5m` | the wait, after the promotion, for the new primary to archive WAL of its new timeline. When it times out, the run warns, records the follow-up `CheckArchiving`, and goes on |
 
-A wait that times out stops the run with reason `StepFailed`.
+A wait that times out stops the run with reason `StepFailed`, except `archiving`.
+
+## WAL archives
+
+Give each site's Cluster a WAL archive of its own from day one: its own `destinationPath`, or its own `serverName` under a shared path. A replica Cluster archives too: CloudNativePG runs it with `archive_mode = always` (v1.30.1, `pkg/postgres/configuration.go:736-746`). So every site writes WAL to its archive all the time, not only after a promotion. Two sites with one destination write the same file names there, and CloudNativePG refuses to start a Cluster on an archive that is not empty (`docs/src/recovery.md:620-629`, `Expected empty archive`).
+
+| Tack | Does |
+|---|---|
+| `tack plan` | reads each site's destination: `spec.backup.barmanObjectStore`, or the `destinationPath` of the barman-cloud plugin's `ObjectStore`. A planned switchover is refused when two sites that answer share one; a site-loss plan warns, since the fix is in Git, which may have gone with the lost site. It also warns when the new primary reports `ContinuousArchiving` `False`. |
+| `verify-archiving-<to>`, after the promotion | waits up to `timeouts.archiving` until the new primary archives WAL of its new timeline: `ContinuousArchiving` is `True`, and its last archived file is of that timeline. A Cluster without an archive passes at once. When it times out, the run warns, records `CheckArchiving`, and goes on: writes are back, and the operator fixes the archive. |
+| after a site loss | records where the old primary archived on its `Rebuild`. The rebuilt Cluster gets a new destination; the old one is kept ([rebuild-old-primary.md](runbooks/rebuild-old-primary.md)). |
 
 ## When the file is checked
 

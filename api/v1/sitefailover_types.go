@@ -390,6 +390,11 @@ type RecordStep struct {
 	What string `json:"what"`
 	// +optional
 	Timeout *metav1.Duration `json:"timeout,omitempty"`
+	// WarnAs, when set, makes a timeout a warning: the step ends with it,
+	// the run records a follow-up of this action at the step's site, and
+	// goes on.
+	// +optional
+	WarnAs string `json:"warnAs,omitempty"`
 }
 
 // RoutingStep waits until Strait routes the workload to the new primary.

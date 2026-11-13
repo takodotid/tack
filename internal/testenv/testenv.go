@@ -36,6 +36,7 @@ var GVKs = []schema.GroupVersionKind{
 	{Group: "postgresql.cnpg.io", Version: "v1", Kind: "Cluster"},
 	{Group: "postgresql.cnpg.io", Version: "v1", Kind: "Pooler"},
 	{Group: "postgresql.cnpg.io", Version: "v1", Kind: "Backup"},
+	{Group: "barmancloud.cnpg.io", Version: "v1", Kind: "ObjectStore"},
 	{Group: "kustomize.toolkit.fluxcd.io", Version: "v1", Kind: "Kustomization"},
 	{Group: "source.toolkit.fluxcd.io", Version: "v1", Kind: "GitRepository"},
 	{Group: "strait.tako.id", Version: "v1", Kind: "SiteService"},
@@ -689,6 +690,12 @@ func (c *Clients) ProxyGet(ctx context.Context, site, namespace, pod, scheme str
 		if primary {
 			status["currentLsn"] = "0/3000060"
 			status["currentWAL"] = fmt.Sprintf("%08X0000000000000003", tl)
+		}
+		// An instance whose Cluster archives WAL has archived the history
+		// file of its timeline, unless ArchiveFails.
+		_, store, _ := unstructured.NestedMap(u.Object, "spec", "backup", "barmanObjectStore")
+		if store && ArchiveFails == "" {
+			status["lastArchivedWAL"], status["isArchivingWAL"] = fmt.Sprintf("%08X.history", tl), true
 		} else {
 			status["receivedLsn"], status["replayLsn"], status["isWalReceiverActive"] = "0/3000060", "0/3000060", true
 		}

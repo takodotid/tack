@@ -39,6 +39,9 @@ type instanceStatus struct {
 	IsWalReceiverActive bool   `json:"isWalReceiverActive"`
 	TimeLineID          int    `json:"timeLineID"`
 	CurrentWAL          string `json:"currentWAL"`
+	LastArchivedWAL     string `json:"lastArchivedWAL"`
+	LastFailedWAL       string `json:"lastFailedWAL"`
+	IsArchivingWAL      bool   `json:"isArchivingWAL"`
 }
 
 // readStatus reads the instance status of the Cluster's current primary
