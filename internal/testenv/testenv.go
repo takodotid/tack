@@ -61,7 +61,11 @@ type Clients struct {
 	// status and statusErr are what the site's pods report (SetStatus).
 	status    map[string]map[string]any
 	statusErr map[string]error
-	proxied   []Proxied
+	// metrics and metricsErr are the metrics the site's pods serve
+	// (SetMetrics).
+	metrics    map[string]string
+	metricsErr map[string]error
+	proxied    []Proxied
 	// faults are the failures the fake CloudNativePG reports (SetFault).
 	faults map[string]string
 }
@@ -678,6 +682,19 @@ func (c *Clients) SetStatus(site string, status map[string]any, err error) {
 	c.status[site], c.statusErr[site] = status, err
 }
 
+// SetMetrics sets the metrics, in the Prometheus text format, that the
+// site's pods serve; "" goes back to the default, a replay lag of 0. An
+// error makes the read fail.
+func (c *Clients) SetMetrics(site, metrics string, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.metrics == nil {
+		c.metrics = map[string]string{}
+		c.metricsErr = map[string]error{}
+	}
+	c.metrics[site], c.metricsErr[site] = metrics, err
+}
+
 // ProxyLog returns the GETs proxied so far.
 func (c *Clients) ProxyLog() []Proxied {
 	c.mu.Lock()
@@ -687,13 +704,25 @@ func (c *Clients) ProxyLog() []Proxied {
 
 // ProxyGet implements kube.Proxier. By default a pod reports the status
 // of an instance at 0/3000060 on timeline 1: a primary when its Cluster
-// reports it so, else a replica that streams.
+// reports it so, else a replica that streams. Its metrics, at /metrics,
+// hold a replay lag of 0.
 func (c *Clients) ProxyGet(ctx context.Context, site, namespace, pod, scheme string, port int, path string) ([]byte, error) {
 	if c.IsDown(site) {
 		return nil, &kube.UnreachableError{Err: fmt.Errorf("site %s is unreachable: connection refused", site)}
 	}
 	c.mu.Lock()
 	c.proxied = append(c.proxied, Proxied{Site: site, Namespace: namespace, Pod: pod, Scheme: scheme, Path: path, Port: port})
+	if path == "/metrics" {
+		metrics, err := c.metrics[site], c.metricsErr[site]
+		c.mu.Unlock()
+		if err != nil {
+			return nil, err
+		}
+		if metrics == "" {
+			metrics = "# HELP cnpg_pg_replication_lag Replication lag behind primary in seconds\n# TYPE cnpg_pg_replication_lag gauge\ncnpg_pg_replication_lag 0\n"
+		}
+		return []byte(metrics), nil
+	}
 	status, err := c.status[site], c.statusErr[site]
 	c.mu.Unlock()
 	if err != nil {

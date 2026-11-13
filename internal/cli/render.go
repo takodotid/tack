@@ -589,13 +589,13 @@ func printPositions(w io.Writer, t *driver.Topology) {
 			p := s.Position
 			switch {
 			case !s.Reachable:
-				rows = append(rows, []string{s.Name, "", "", "", "", l.dim("not read: the site is unreachable")})
+				rows = append(rows, []string{s.Name, "", "", "", "", "", l.dim("not read: the site is unreachable")})
 			case p == nil:
-				rows = append(rows, []string{s.Name, "", "", "", "", l.dim("not read")})
+				rows = append(rows, []string{s.Name, "", "", "", "", "", l.dim("not read")})
 			case p.Error != "":
-				rows = append(rows, []string{s.Name, "", "", "", "", l.yellow("not read: " + redact.Text(p.Error))})
+				rows = append(rows, []string{s.Name, "", "", "", "", "", l.yellow("not read: " + redact.Text(p.Error))})
 			case p.Current != "":
-				rows = append(rows, []string{s.Name, "writes at " + p.Current, "", fmt.Sprint(p.Timeline), "", p.Standing})
+				rows = append(rows, []string{s.Name, "writes at " + p.Current, "", fmt.Sprint(p.Timeline), "", "", p.Standing})
 			default:
 				stream := "no"
 				if p.ReceiverActive {
@@ -611,10 +611,14 @@ func printPositions(w io.Writer, t *driver.Topology) {
 				case strings.HasPrefix(standing, "behind "):
 					standing = l.yellow(standing)
 				}
-				rows = append(rows, []string{s.Name, orNone(p.Received), orNone(p.Replayed), fmt.Sprint(p.Timeline), stream, standing})
+				replay := replayLag(p)
+				if p.LagError != "" || p.ReplayLag != nil && *p.ReplayLag > 0 {
+					replay = l.yellow(replay)
+				}
+				rows = append(rows, []string{s.Name, orNone(p.Received), orNone(p.Replayed), fmt.Sprint(p.Timeline), stream, replay, standing})
 			}
 		}
-		l.box(w, "  ", []string{"Site", "Received", "Replayed", "Timeline", "Streaming", "Standing"}, map[int]bool{3: true}, rows)
+		l.box(w, "  ", []string{"Site", "Received", "Replayed", "Timeline", "Streaming", "Replay", "Standing"}, map[int]bool{3: true}, rows)
 		return
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
@@ -628,7 +632,7 @@ func printPositions(w io.Writer, t *driver.Topology) {
 		case p.Error != "":
 			fmt.Fprintf(tw, "  %s\tnot read: %s\n", s.Name, redact.Text(p.Error))
 		case p.Current != "":
-			fmt.Fprintf(tw, "  %s\twrites at %s\t\ttimeline %d\t%s\n", s.Name, p.Current, p.Timeline, p.Standing)
+			fmt.Fprintf(tw, "  %s\twrites at %s\t\ttimeline %d\t\t%s\n", s.Name, p.Current, p.Timeline, p.Standing)
 		default:
 			stream := "not streaming"
 			if p.ReceiverActive {
@@ -637,10 +641,24 @@ func printPositions(w io.Writer, t *driver.Topology) {
 			if p.ReplayPaused {
 				stream += ", replay paused"
 			}
-			fmt.Fprintf(tw, "  %s\treceived %s\treplayed %s\ttimeline %d, %s\t%s\n", s.Name, orNone(p.Received), orNone(p.Replayed), p.Timeline, stream, p.Standing)
+			fmt.Fprintf(tw, "  %s\treceived %s\treplayed %s\ttimeline %d, %s\t%s\t%s\n", s.Name, orNone(p.Received), orNone(p.Replayed), p.Timeline, stream, replayLag(p), p.Standing)
 		}
 	}
 	tw.Flush()
+}
+
+// replayLag says how far a replica's replay trails, from the replay lag
+// its database exports ([RFC#0004] Requirement 13).
+func replayLag(p *driver.Position) string {
+	switch {
+	case p.LagError != "":
+		return "replay lag not read"
+	case p.ReplayLag == nil:
+		return ""
+	case *p.ReplayLag == 0:
+		return "replayed all it received"
+	}
+	return fmt.Sprintf("last replayed commit %s ago", *p.ReplayLag)
 }
 
 // named is ref with $(run) in its name replaced by the run's name.

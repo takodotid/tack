@@ -402,7 +402,8 @@ type Proxier interface {
 }
 
 // ProxyGet implements Proxier. Only the cnpg driver calls it, for the
-// instance manager's status ([RFC#0004] Requirement 13).
+// instance manager's status and a replica's metrics ([RFC#0004]
+// Requirement 13).
 func (k *Kubeconfig) ProxyGet(ctx context.Context, site, namespace, pod, scheme string, port int, path string) ([]byte, error) {
 	k.mu.Lock()
 	cfg, err := k.restConfig(site)

@@ -3,8 +3,10 @@ package cnpg
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -60,13 +62,116 @@ func TestPositions(t *testing.T) {
 	if a, _ := topo.Site("a"); a.Position.Current != "0/3000060" {
 		t.Errorf("site a: %+v", a.Position)
 	}
-	log := c.ProxyLog()
-	if len(log) != 3 {
-		t.Fatalf("proxied %v, want one GET per site", log)
+	// A GET of the status per site, then a GET of the metrics per replica.
+	var got []string
+	for _, p := range c.ProxyLog() {
+		if p.Namespace != "db" || p.Pod != "pg-"+p.Site+"-1" {
+			t.Errorf("proxied %+v, want pod pg-<site>-1", p)
+		}
+		got = append(got, fmt.Sprintf("%s %s:%d%s", p.Site, p.Scheme, p.Port, p.Path))
 	}
-	for _, p := range log {
-		if p.Port != 8000 || p.Path != "/pg/status" || p.Scheme != "https" || p.Namespace != "db" || p.Pod != "pg-"+p.Site+"-1" {
-			t.Errorf("proxied %+v, want https to pod pg-<site>-1, port 8000, /pg/status", p)
+	want := "a https:8000/pg/status, b https:8000/pg/status, b http:9187/metrics, c https:8000/pg/status, c http:9187/metrics"
+	if strings.Join(got, ", ") != want {
+		t.Errorf("proxied %s, want %s", strings.Join(got, ", "), want)
+	}
+	if b, _ := topo.Site("b"); b.Position.ReplayLag == nil || *b.Position.ReplayLag != 0 || b.Position.LagError != "" {
+		t.Errorf("site b: replay lag %v, %q, want 0", b.Position.ReplayLag, b.Position.LagError)
+	}
+	if a, _ := topo.Site("a"); a.Position.ReplayLag != nil || a.Position.LagError != "" {
+		t.Errorf("the primary's replay lag was read: %v, %q", a.Position.ReplayLag, a.Position.LagError)
+	}
+}
+
+// RFC0004 Requirement 13: a replica's replay lag, from its instance
+// manager's metrics, with the scheme its postgres container serves them.
+func TestReplayLag(t *testing.T) {
+	c := threeSites(false)
+	c.SetDown("a", true)
+	c.SetStatus("b", map[string]any{"systemID": "7300000000000000001", "timeLineID": 1, "receivedLsn": "0/5000000", "replayLsn": "0/3000000"}, nil)
+	c.SetMetrics("b", `# HELP cnpg_pg_replication_lag Replication lag behind primary in seconds
+# TYPE cnpg_pg_replication_lag gauge
+cnpg_pg_replication_lag 130.4
+cnpg_pg_replication_in_recovery 1
+`, nil)
+	c.SetMetrics("c", "cnpg_pg_postmaster_start_time 1.7e+09\n", nil)
+	w, topo := discover(t, c)
+	b, _ := topo.Site("b")
+	if b.Position.ReplayLag == nil || *b.Position.ReplayLag != 130*time.Second {
+		t.Errorf("site b: replay lag %v, want 2m10s", b.Position.ReplayLag)
+	}
+	cs, _ := topo.Site("c")
+	if cs.Position.ReplayLag != nil || !strings.Contains(cs.Position.LagError, "spec.monitoring.disableDefaultQueries") {
+		t.Errorf("site c: replay lag %v, %q, want an error that names disableDefaultQueries", cs.Position.ReplayLag, cs.Position.LagError)
+	}
+	if cs.Position.Error != "" || cs.Position.Received == "" {
+		t.Errorf("site c: a replay lag that cannot be read loses the position: %+v", cs.Position)
+	}
+
+	notes := strings.Join(Driver{}.Notes(w, topo, driver.Request{From: "a", To: "b", Mode: failoverv1.ModeSiteLoss, AcceptBehind: true}), "\n")
+	want := "warning: site b: the last transaction it replayed committed 2m10s ago, by its clock. It holds 32.0 MiB of WAL it has not replayed: the promotion replays it before it takes writes, so writes stay down longer"
+	if !strings.Contains(notes, want) {
+		t.Errorf("notes %q do not say %q", notes, want)
+	}
+	planned := strings.Join(Driver{}.Notes(w, topo, driver.Request{From: "a", To: "b", Mode: failoverv1.ModePlanned}), "\n")
+	if strings.Contains(planned, "committed") {
+		t.Errorf("a planned plan warns of the replay lag: %q", planned)
+	}
+	toC := strings.Join(Driver{}.Notes(w, topo, driver.Request{From: "a", To: "c", Mode: failoverv1.ModeSiteLoss}), "\n")
+	if !strings.Contains(toC, "site c: the replay lag could not be read (the metrics hold no cnpg_pg_replication_lag") || strings.Contains(toC, "warning: site c: the replay lag") {
+		t.Errorf("notes %q do not say, without a warning, that c's replay lag could not be read", toC)
+	}
+
+	// A lag of 0 never warns.
+	c.SetMetrics("b", "", nil)
+	w, topo = discover(t, c)
+	if notes := strings.Join(Driver{}.Notes(w, topo, driver.Request{From: "a", To: "b", Mode: failoverv1.ModeSiteLoss, AcceptBehind: true}), "\n"); strings.Contains(notes, "committed") {
+		t.Errorf("a replay lag of 0 warns: %q", notes)
+	}
+
+	// A metrics read that fails keeps the position.
+	c.SetMetrics("b", "", errors.New(`pods "pg-b-1" is forbidden`))
+	_, topo = discover(t, c)
+	if b, _ := topo.Site("b"); b.Position.Error != "" || b.Position.Received != "0/5000000" || !strings.Contains(b.Position.LagError, "forbidden") {
+		t.Errorf("site b: %+v", b.Position)
+	}
+}
+
+// The metrics endpoint's scheme is CloudNativePG's: https only with
+// --metrics-port-tls.
+func TestMetricsScheme(t *testing.T) {
+	p := testenv.Pod("db", "pg-a-1")
+	if got := metricsScheme(p); got != "http" {
+		t.Errorf("scheme %s, want http", got)
+	}
+	p.Spec.Containers[0].Command = append(p.Spec.Containers[0].Command, "--metrics-port-tls")
+	if got := metricsScheme(p); got != "https" {
+		t.Errorf("scheme %s, want https", got)
+	}
+}
+
+// parseLag reads the one metric, whatever its labels, and nothing else.
+func TestParseLag(t *testing.T) {
+	for _, tt := range []struct {
+		body string
+		want time.Duration
+		err  string
+	}{
+		{"cnpg_pg_replication_lag 0\n", 0, ""},
+		{"# HELP cnpg_pg_replication_lag x\ncnpg_pg_replication_lag_other 9\ncnpg_pg_replication_lag 1.5e+01\n", 15 * time.Second, ""},
+		{`cnpg_pg_replication_lag{instance="pg-b-1"} 61.6 1700000000000` + "\n", 62 * time.Second, ""},
+		{"cnpg_pg_replication_lag NaN\n", 0, "not a number of seconds"},
+		{"cnpg_pg_replication_lag -1\n", 0, "not a number of seconds"},
+		{"", 0, "hold no cnpg_pg_replication_lag"},
+	} {
+		got, err := parseLag([]byte(tt.body))
+		if tt.err != "" {
+			if err == nil || !strings.Contains(err.Error(), tt.err) {
+				t.Errorf("parseLag(%q) = %v, %v, want an error with %q", tt.body, got, err, tt.err)
+			}
+			continue
+		}
+		if err != nil || got != tt.want {
+			t.Errorf("parseLag(%q) = %v, %v, want %v", tt.body, got, err, tt.want)
 		}
 	}
 }

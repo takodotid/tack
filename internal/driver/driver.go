@@ -93,6 +93,12 @@ type Position struct {
 	ReceiverActive bool
 	// ReplayPaused is true when replay was paused.
 	ReplayPaused bool
+	// ReplayLag is, for a replica, the time since the last transaction it
+	// replayed committed, while it holds WAL it has not replayed; 0 once it
+	// replayed all it received. Nil when it was not read; LagError says
+	// why.
+	ReplayLag *time.Duration
+	LagError  string
 	// Standing compares the member with the other sites, such as
 	// "most caught up" or "behind b by 16 KiB".
 	Standing string

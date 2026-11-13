@@ -261,8 +261,8 @@ func TestNoExec(t *testing.T) {
 			}
 		}
 	}
-	// The only request through a pod's proxy: a GET of the instance manager's status, from the cnpg driver.
-	proxied := 0
+	// The only requests through a pod's proxy: a GET of the instance manager's status, and one of its metrics, from the cnpg driver.
+	proxied, reads := 0, map[string]int{}
 	calls(func(p *packages.Package, call *ast.CallExpr, fn *types.Func) {
 		if fn == nil || fn.Pkg() == nil {
 			return
@@ -283,15 +283,19 @@ func TestNoExec(t *testing.T) {
 				return
 			}
 			port, path := p.TypesInfo.Types[call.Args[5]].Value, p.TypesInfo.Types[call.Args[6]].Value
-			if p.PkgPath != module+"/internal/driver/cnpg" || port == nil || path == nil ||
-				port.String() != "8000" || constant.StringVal(path) != "/pg/status" {
-				t.Errorf("%s: a GET through a pod's proxy that is not the cnpg driver's read of /pg/status on port 8000", p.Fset.Position(call.Pos()))
+			read := ""
+			if port != nil && path != nil && path.Kind() == constant.String {
+				read = port.String() + " " + constant.StringVal(path)
 			}
+			if p.PkgPath != module+"/internal/driver/cnpg" || read != "8000 /pg/status" && read != "9187 /metrics" {
+				t.Errorf("%s: a GET through a pod's proxy that is not the cnpg driver's read of /pg/status on port 8000 or /metrics on port 9187", p.Fset.Position(call.Pos()))
+			}
+			reads[read]++
 			proxied++
 		}
 	})
-	if proxied == 0 {
-		t.Error("no call of kube.ProxyGet found: the check of the proxy reads nothing")
+	if proxied == 0 || reads["8000 /pg/status"] != 1 || reads["9187 /metrics"] != 1 {
+		t.Errorf("calls of kube.ProxyGet, by read: %v; want one read of /pg/status and one of /metrics", reads)
 	}
 	calls(func(p *packages.Package, call *ast.CallExpr, fn *types.Func) {
 		if fn == nil || fn.Name() != "SubResource" || len(call.Args) != 1 {
