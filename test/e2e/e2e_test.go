@@ -850,7 +850,8 @@ func TestSiteLossBreakGlassAndReturn(t *testing.T) {
 	}
 	// [RFC#0004] Requirement 15 on CloudNativePG: the fork point, read from a's instance around its promotion,
 	// and b's archive, recorded once b answered.
-	fork := regexp.MustCompile(`(?m)^Fork: site a's new history leaves the old one at [0-9A-F]+/[0-9A-F]+ on timeline ([0-9]+) or just after; new timeline ([0-9]+); promoted by `).FindStringSubmatch(out)
+	// #94: with site a's replay-time query, the line holds the last replayed commit's time.
+	fork := regexp.MustCompile(`(?m)^Fork: site a's new history leaves the old one at [0-9A-F]+/[0-9A-F]+ on timeline ([0-9]+) or just after; its last replayed commit is from [0-9TZ:.-]+, by the old primary's clock; new timeline ([0-9]+); promoted by `).FindStringSubmatch(out)
 	if fork == nil || fork[1] == fork[2] {
 		t.Errorf("status lacks the fork point, or its timelines do not differ:\n%s", out)
 	}
