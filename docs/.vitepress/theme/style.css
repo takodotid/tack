@@ -1,0 +1,250 @@
+/* The chart table on VitePress's default theme: its variables take the tokens, then a few rules make it flat and square. */
+
+:root,
+.dark {
+    --vp-c-bg: var(--chart-paper);
+    --vp-c-bg-alt: var(--chart-paper);
+    --vp-c-bg-elv: var(--chart-card);
+    --vp-c-bg-soft: var(--chart-sea);
+
+    --vp-c-text-1: var(--chart-ink);
+    --vp-c-text-2: var(--chart-soft-ink);
+    --vp-c-text-3: var(--chart-soft-ink);
+
+    --vp-c-divider: var(--chart-contour);
+    --vp-c-border: var(--chart-contour);
+    --vp-c-gutter: var(--chart-contour);
+
+    --vp-c-brand-1: var(--chart-magenta);
+    --vp-c-brand-2: var(--chart-magenta-hover);
+    --vp-c-brand-3: var(--chart-magenta);
+    --vp-c-brand-soft: var(--chart-sea);
+
+    --vp-c-tip-1: var(--chart-tip);
+    --vp-c-tip-soft: var(--chart-sea);
+    --vp-c-note-1: var(--chart-ink);
+    --vp-c-note-soft: var(--chart-sea);
+    --vp-c-warning-1: var(--chart-warning);
+    --vp-c-warning-soft: var(--chart-sea);
+    --vp-c-danger-1: var(--chart-danger);
+    --vp-c-danger-soft: var(--chart-sea);
+
+    --vp-font-family-base: var(--chart-font-text);
+    --vp-font-family-mono: var(--chart-font-mono);
+
+    --vp-code-bg: var(--chart-card);
+    --vp-code-color: var(--chart-ink);
+    --vp-code-block-bg: var(--chart-card);
+    --vp-code-block-divider-color: var(--chart-contour);
+    --vp-code-copy-code-bg: var(--chart-card);
+    --vp-code-copy-code-hover-bg: var(--chart-sea);
+    --vp-code-tab-bg: var(--chart-card);
+
+    --vp-button-brand-bg: var(--chart-magenta);
+    --vp-button-brand-border: var(--chart-magenta);
+    --vp-button-brand-text: var(--chart-on-magenta);
+    --vp-button-brand-hover-bg: var(--chart-magenta-hover);
+    --vp-button-brand-hover-border: var(--chart-magenta-hover);
+    --vp-button-brand-hover-text: var(--chart-on-magenta);
+    --vp-button-brand-active-bg: var(--chart-magenta-hover);
+    --vp-button-alt-bg: var(--chart-card);
+    --vp-button-alt-text: var(--chart-ink);
+    --vp-button-alt-border: var(--chart-ink);
+    --vp-button-alt-hover-bg: var(--chart-sea);
+    --vp-button-alt-hover-text: var(--chart-ink);
+
+    --vp-home-hero-name-color: var(--chart-ink);
+    --vp-home-hero-image-background-image: none;
+
+    --vp-nav-bg-color: var(--chart-paper);
+    --vp-sidebar-bg-color: var(--chart-paper);
+    --vp-local-search-bg: var(--chart-paper);
+    --vp-local-search-result-bg: var(--chart-card);
+    --vp-local-search-highlight-bg: var(--chart-magenta);
+    --vp-local-search-highlight-text: var(--chart-on-magenta);
+
+    --vp-shadow-1: none;
+    --vp-shadow-2: none;
+    --vp-shadow-3: none;
+    --vp-shadow-4: none;
+    --vp-shadow-5: none;
+}
+
+/* Flat and square: no radius, no shadow, no blur. */
+.VPButton,
+.VPFeature,
+.custom-block,
+.vp-doc div[class*="language-"],
+.vp-doc table,
+.vp-doc :not(pre) > code,
+.VPLocalSearchBox .shell,
+.DocSearch-Button,
+.VPNavBarSearch button,
+.VPSwitch,
+.VPSwitch .check {
+    border-radius: var(--chart-radius) !important;
+    box-shadow: none !important;
+}
+.VPNav,
+.VPNavBar,
+.VPLocalNav {
+    backdrop-filter: none !important;
+}
+
+/* The wordmark: Spectral, no logo. */
+.VPNavBarTitle .title {
+    font-family: var(--chart-font-text);
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 0;
+}
+
+/* Labels: short, upright caps in Plex Sans Condensed, tracked. Headings and reading text stay in sentence case. */
+.VPNavBarMenuLink,
+.VPNavBarMenuGroup .text,
+.VPSidebarItem.level-0 > .item > .text,
+.VPSidebarItem.level-0 > .item .text,
+.vp-doc th,
+.VPBadge,
+.custom-block-title,
+.VPDocAsideOutline .outline-title,
+.VPHomeFeatures .VPFeature .title {
+    font-family: var(--chart-font-label);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: var(--chart-label-tracking);
+}
+.VPNavBarMenuLink,
+.VPNavBarMenuGroup .text,
+.VPSidebarItem.level-0 > .item .text,
+.vp-doc th,
+.custom-block-title,
+.VPDocAsideOutline .outline-title {
+    font-size: 12px;
+}
+
+/* Headings in Spectral, sentence case. */
+.vp-doc h1,
+.vp-doc h2,
+.vp-doc h3,
+.vp-doc h4,
+.VPHero .name,
+.VPHero .text {
+    font-family: var(--chart-font-text);
+    letter-spacing: -0.01em;
+}
+.vp-doc h2 {
+    border-top: 2px solid var(--chart-ink);
+}
+
+/* Reading text. */
+.vp-doc p,
+.vp-doc li {
+    font-size: 17px;
+    line-height: 1.7;
+}
+
+/* Links: magenta, the one accent. */
+.vp-doc a {
+    color: var(--chart-magenta);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+.vp-doc a:hover {
+    color: var(--chart-magenta-hover);
+}
+
+/* Tables: a card with a contour frame; the head is a tinted band, not a rule. */
+.vp-doc table {
+    background: var(--chart-card);
+    border: 1px solid var(--chart-contour);
+}
+.vp-doc tr {
+    background: var(--chart-card);
+}
+.vp-doc tr:nth-child(2n) {
+    background: var(--chart-card);
+}
+.vp-doc th {
+    background: var(--chart-sea);
+    color: var(--chart-ink);
+}
+.vp-doc th,
+.vp-doc td {
+    border: 1px solid var(--chart-contour);
+}
+
+/* Code: ink on card, framed. */
+.vp-doc div[class*="language-"] {
+    border: 1px solid var(--chart-contour);
+}
+.vp-doc :not(pre) > code {
+    border: 1px solid var(--chart-contour);
+}
+
+/* Callouts: a sea band with a 2px frame in the state's colour, and its word as the title. Text stays ink. */
+.custom-block {
+    background: var(--chart-sea);
+    color: var(--chart-ink);
+    border: 2px solid var(--chart-contour);
+}
+.custom-block.tip {
+    border-color: var(--chart-tip);
+}
+.custom-block.warning {
+    border-color: var(--chart-warning);
+}
+.custom-block.danger {
+    border-color: var(--chart-danger);
+}
+.custom-block.info,
+.custom-block.details {
+    border-color: var(--chart-ink);
+}
+.custom-block p,
+.custom-block .custom-block-title {
+    color: var(--chart-ink);
+}
+
+/* The current page in the sidebar: a sea band behind it, in magenta. */
+.VPSidebarItem.is-active > .item {
+    background: var(--chart-sea);
+}
+
+/* The home page's opening, on land. */
+.VPHome .VPHero {
+    background: var(--chart-land);
+    border-bottom: 2px solid var(--chart-ink);
+}
+.VPHome .VPFeature {
+    background: var(--chart-card);
+    border: 1px solid var(--chart-contour);
+}
+
+/* Selection in the accent, with a second cue: the text keeps its weight and the colour changes. */
+::selection {
+    background: var(--chart-magenta);
+    color: var(--chart-on-magenta);
+}
+
+/* The tagline on land stays ink: soft ink on land is under 4.5:1. */
+.VPHero .tagline {
+    color: var(--chart-ink);
+}
+
+/* Badges: ink on card, framed in the state's colour, so the word carries the state and the text keeps its contrast. */
+.VPBadge {
+    background: var(--chart-card) !important;
+    color: var(--chart-ink) !important;
+    border: 1px solid var(--chart-contour);
+    border-radius: var(--chart-radius) !important;
+}
+.VPBadge.tip {
+    border-color: var(--chart-tip);
+}
+.VPBadge.warning {
+    border-color: var(--chart-warning);
+}
+.VPBadge.danger {
+    border-color: var(--chart-danger);
+}
