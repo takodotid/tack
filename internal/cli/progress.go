@@ -17,6 +17,9 @@ type stamped struct {
 	now func() time.Time
 	// mid is set while a line has started and not ended.
 	mid bool
+	// look is how lines look on w: on a terminal, coloured
+	// ([RFC#0009] Requirement 31).
+	look look
 }
 
 var _ engine.StampWriter = (*stamped)(nil)
@@ -25,7 +28,7 @@ var _ engine.StampWriter = (*stamped)(nil)
 // engine's, the site checks' and Flux's. The plan, the status and the
 // prompts go to w as they are.
 func (o *options) progress(w io.Writer) io.Writer {
-	return &stamped{w: w, now: o.now}
+	return &stamped{w: w, now: o.now, look: lookOf(w)}
 }
 
 func (s *stamped) Write(p []byte) (int, error) {
@@ -48,17 +51,21 @@ func (s *stamped) write(p []byte, at time.Time) (int, error) {
 	n := len(p)
 	var b []byte
 	for len(p) > 0 {
+		stamp := ""
 		if !s.mid {
-			b = at.UTC().AppendFormat(b, time.RFC3339)
-			b = append(b, ' ')
+			stamp = at.UTC().Format(time.RFC3339) + " "
 		}
 		i := bytes.IndexByte(p, '\n')
 		if i < 0 {
-			b = append(b, p...)
+			b = append(b, s.look.progressLine(stamp, string(p))...)
 			s.mid = true
 			break
 		}
-		b = append(b, p[:i+1]...)
+		if s.mid {
+			b = append(b, p[:i+1]...)
+		} else {
+			b = append(b, s.look.progressLine(stamp, string(p[:i]))+"\n"...)
+		}
 		p = p[i+1:]
 		s.mid = false
 	}
