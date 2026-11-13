@@ -390,6 +390,27 @@ Everything the test creates is named `tack-e2e*`. [test/e2e/env/README.md](test/
 | `tack --help`, `tack <command> --help`, `man tack` | every command, flag and exit code |
 | `tack --skill` | the guide for AI agents |
 
+## How this project is built
+
+Tack is built with AI coding agents (Claude Code), and a person directs and approves the work.
+
+**What the agents do:** write code, tests and docs, review each other's changes, and look for bugs and gaps.
+
+**What a person decides:**
+- **Design.** Every change starts as an RFC, and a maintainer approves each RFC and each change to one.
+- **Scope.** A maintainer decides what goes into each round of work and what waits.
+- **Merges and releases.** Only a maintainer merges a pull request. Releases come from tags signed by a maintainer, and a maintainer approves each release run.
+
+**How the work is checked:**
+- Each fix comes with a test that fails without the fix.
+- CI runs the unit tests, the race detector, and end-to-end tests on kind for every pull request.
+- Before a release, the change is tested on real clusters, not only in CI.
+- Releases are signed, and you can verify every release asset (see [Verify a release](#verify-a-release)).
+
+**Why we trust it in production:** we run Tack ourselves, for our own databases. A failover tool that loses data or leaves two primaries would hurt us first.
+
+If you find a problem, open an issue. Saying that it looks AI-written is fine, as long as you say what's wrong.
+
 ## Contributing
 
 - [AGENTS.md](AGENTS.md) holds the rules for every change, by a human or an agent.
