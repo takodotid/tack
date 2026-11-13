@@ -73,7 +73,7 @@ rules:
 {{- fail (printf "rbac.objects[%d] repeats namespace %s: name its objects in one entry" $i $o.namespace) }}
 {{- end }}
 {{- $_ := set $namespaces $o.namespace true }}
-{{- if not (or $o.clusters $o.poolers $o.kustomizations $o.gitRepositories $o.configMaps $o.secrets $o.siteServices) }}
+{{- if not (or $o.clusters $o.poolers $o.kustomizations $o.gitRepositories $o.configMaps $o.secrets $o.siteServices $o.objectStores) }}
 {{- fail (printf "rbac.objects[%d] names no object" $i) }}
 {{- end }}
 ---
@@ -110,6 +110,13 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments"]
     resourceNames: {{ toJson $o.poolers }}
+    verbs: ["get"]
+  {{- end }}
+  {{- if $o.objectStores }}
+  # Row 20
+  - apiGroups: ["barmancloud.cnpg.io"]
+    resources: ["objectstores"]
+    resourceNames: {{ toJson $o.objectStores }}
     verbs: ["get"]
   {{- end }}
   {{- if $o.kustomizations }}

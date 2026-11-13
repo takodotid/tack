@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -13,6 +14,7 @@ import (
 	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/driver"
 	"github.com/takodotid/tack/internal/kube"
+	"github.com/takodotid/tack/internal/version"
 )
 
 // What a Record step records ([RFC#0004] Requirement 15).
@@ -72,6 +74,12 @@ func (d Driver) Record(ctx context.Context, w *failoverv1.WorkloadSpec, c kube.C
 			return nil, fmt.Errorf("read Backup %s/%s: %w", key.Namespace, key.Name, err)
 		}
 		return d.recordSnapshot(ctx, w, cl, s, u)
+	case RecordArchiving:
+		if err := cl.Get(ctx, key, u); err != nil {
+			return &driver.Recorded{Message: err.Error()}, nil
+		}
+		ok, msg := archiving(ctx, c, s.Site, u)
+		return &driver.Recorded{Done: ok, Message: msg}, nil
 	case RecordArchive:
 		if err := cl.Get(ctx, key, u); err != nil {
 			return nil, fmt.Errorf("read Cluster %s/%s: %w", key.Namespace, key.Name, err)
@@ -222,4 +230,162 @@ func (a archive) String() string {
 		return fmt.Sprintf("plugin %s, ObjectStore %s, serverName %s", a.Kind, orNone(a.Store), a.Server)
 	}
 	return fmt.Sprintf("barmanObjectStore %s, serverName %s", orNone(a.Path), a.Server)
+}
+
+// RecordArchiving waits until the new primary archives WAL of its own
+// timeline ([RFC#0004] Requirement 17).
+const RecordArchiving = "Archiving"
+
+// DefaultArchivingTimeout bounds the wait for archiving after a promotion
+// when the Workload sets no timeouts.archiving.
+const DefaultArchivingTimeout = 5 * time.Minute
+
+// FollowUpCheckArchiving is the follow-up of a new primary that did not
+// archive WAL within its timeout.
+const FollowUpCheckArchiving = "CheckArchiving"
+
+// archiving tells whether the Cluster's primary archives WAL of the
+// timeline it writes: the Cluster's ContinuousArchiving condition is True,
+// and the last file it archived, the timeline's history file or a segment
+// of it, names that timeline, with no failure since. A replica Cluster
+// archives too (archive_mode always), so the condition alone may predate
+// the promotion.
+func archiving(ctx context.Context, c kube.Clients, site string, u *unstructured.Unstructured) (bool, string) {
+	if archiveOf(u).Kind == "" {
+		return true, "no WAL archive configured: nothing to check"
+	}
+	status, msg := condition(u, "ContinuousArchiving")
+	if status != "True" {
+		return false, fmt.Sprintf("condition ContinuousArchiving is %s (%s)", orNone(status), orNone(msg))
+	}
+	st, err := readStatus(ctx, c, site, u)
+	if err != nil {
+		return false, err.Error()
+	}
+	if !st.IsPrimary {
+		return false, "the instance does not report itself primary"
+	}
+	if len(st.CurrentWAL) < 8 || len(st.LastArchivedWAL) < 8 || st.LastArchivedWAL[:8] != st.CurrentWAL[:8] {
+		return false, fmt.Sprintf("the last WAL archived is %q, not yet of the timeline of %q", st.LastArchivedWAL, st.CurrentWAL)
+	}
+	if !st.IsArchivingWAL {
+		return false, fmt.Sprintf("archiving %q failed after %q was archived", st.LastFailedWAL, st.LastArchivedWAL)
+	}
+	return true, fmt.Sprintf("archives WAL of its timeline: last archived %s", st.LastArchivedWAL)
+}
+
+// condition returns a Cluster condition's status and message.
+func condition(u *unstructured.Unstructured, kind string) (string, string) {
+	conds, _, _ := unstructured.NestedSlice(u.Object, "status", "conditions")
+	for _, c := range conds {
+		if m, ok := c.(map[string]any); ok && m["type"] == kind {
+			s, _ := m["status"].(string)
+			msg, _ := m["message"].(string)
+			return s, msg
+		}
+	}
+	return "", ""
+}
+
+// Facts of a site's WAL archive.
+const (
+	// factArchive is where the Cluster's spec says it archives.
+	factArchive = "archive"
+	// factDestination is the bucket path and server name its WAL goes to,
+	// empty when it archives nowhere or cannot be read.
+	factDestination = "archiveDestination"
+	// factArchiveError says why the destination could not be read.
+	factArchiveError = "archiveError"
+	// factArchiving is the Cluster's ContinuousArchiving condition.
+	factArchiving = "continuousArchiving"
+)
+
+// ObjectStoreAPIVersion is the barman-cloud plugin's ObjectStore
+// (CloudNativePG v1.30.1, docs/src/recovery.md:72-90).
+const ObjectStoreAPIVersion = "barmancloud.cnpg.io/v1"
+
+// readArchive fills a site's archive facts. A plugin's destination is in
+// its ObjectStore, which it reads; a read that fails is kept as a fact,
+// and the plan notes it.
+func readArchive(ctx context.Context, cl client.Client, f map[string]string, u *unstructured.Unstructured) {
+	a := archiveOf(u)
+	f[factArchive] = a.String()
+	status, msg := condition(u, "ContinuousArchiving")
+	if status != "" {
+		f[factArchiving] = strings.TrimSpace(status + " " + msg)
+	}
+	switch a.Kind {
+	case "":
+		return
+	case barmanPlugin:
+		if a.Store == "" {
+			f[factArchiveError] = "the plugin names no barmanObjectName"
+			return
+		}
+		o := &unstructured.Unstructured{}
+		o.SetAPIVersion(ObjectStoreAPIVersion)
+		o.SetKind("ObjectStore")
+		if err := cl.Get(ctx, client.ObjectKey{Namespace: u.GetNamespace(), Name: a.Store}, o); err != nil {
+			f[factArchiveError] = fmt.Sprintf("read ObjectStore %s/%s: %v", u.GetNamespace(), a.Store, err)
+			return
+		}
+		a.Path, _, _ = unstructured.NestedString(o.Object, "spec", "configuration", "destinationPath")
+	}
+	if a.Path == "" {
+		f[factArchiveError] = "no destinationPath"
+		return
+	}
+	f[factDestination] = strings.TrimSuffix(a.Path, "/") + "/" + a.Server
+}
+
+// sharedArchives returns the pairs of sites that answer whose Clusters
+// archive WAL to the same destination: the same path and server name.
+func sharedArchives(t *driver.Topology) [][2]driver.SiteState {
+	var out [][2]driver.SiteState
+	for i, a := range t.Sites {
+		for _, b := range t.Sites[i+1:] {
+			if a.Reachable && b.Reachable && a.Facts[factDestination] != "" && a.Facts[factDestination] == b.Facts[factDestination] {
+				out = append(out, [2]driver.SiteState{a, b})
+			}
+		}
+	}
+	return out
+}
+
+// sharedMessage says that two sites archive to one destination.
+func sharedMessage(p [2]driver.SiteState) string {
+	return fmt.Sprintf("sites %s and %s archive WAL to the same destination, %s (Cluster %s: %s; Cluster %s: %s): both write the same WAL file names there, and a site's archive must hold only its own Cluster's history. Give each Cluster its own destination, such as its own serverName (%s)",
+		p[0].Name, p[1].Name, p[0].Facts[factDestination], p[0].Facts[factCluster], p[0].Facts[factArchive], p[1].Facts[factCluster], p[1].Facts[factArchive],
+		version.DocLink("docs/workload.md#wal-archives"))
+}
+
+// archiveNotes are the plan's notes about WAL archives.
+func archiveNotes(t *driver.Topology, r driver.Request) []string {
+	var notes []string
+	configured := false
+	for _, s := range t.Sites {
+		if !s.Reachable {
+			continue
+		}
+		configured = configured || s.Facts[factDestination] != ""
+		if e := s.Facts[factArchiveError]; e != "" {
+			notes = append(notes, fmt.Sprintf("warning: site %s: the WAL archive's destination could not be read (%s): the plan cannot check that it is the site's own. Reading a barman-cloud ObjectStore needs get on objectstores (%s)",
+				s.Name, e, version.DocLink("docs/operations.md#permissions")))
+		}
+	}
+	if toSt, ok := t.Site(r.To); ok {
+		if a := toSt.Facts[factArchiving]; strings.HasPrefix(a, "False") {
+			notes = append(notes, fmt.Sprintf("warning: site %s: Cluster %s reports ContinuousArchiving %s: its archiving fails now, and the run waits for it after the promotion, then warns", r.To, toSt.Facts[factCluster], a))
+		}
+	}
+	shared := sharedArchives(t)
+	for _, p := range shared {
+		if r.Mode == failoverv1.ModeSiteLoss {
+			notes = append(notes, "warning: "+sharedMessage(p))
+		}
+	}
+	if configured && len(shared) == 0 {
+		notes = append(notes, "WAL archives: each site that answers archives to a destination of its own")
+	}
+	return notes
 }

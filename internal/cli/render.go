@@ -238,12 +238,15 @@ func stepDetail(s *failoverv1.Step, run string, mode failoverv1.Mode) []string {
 		}
 	case failoverv1.StepRecord:
 		read := ref(named(s.Record.Object, run))
-		if s.Record.What == "Position" || s.Record.What == "Fork" {
+		if s.Record.What == "Position" || s.Record.What == "Fork" || s.Record.What == "Archiving" {
 			read += " and its current primary's status, through the API server"
 		}
 		line := fmt.Sprintf("read %s, change nothing, and record %s", read, recordWhat(s.Record.What))
 		if s.Record.Timeout != nil {
 			line += fmt.Sprintf("; wait up to %s", s.Record.Timeout.Duration)
+		}
+		if s.Record.WarnAs != "" {
+			line += fmt.Sprintf(", then warn, record the follow-up %s, and go on", s.Record.WarnAs)
 		}
 		return []string{line}
 	case failoverv1.StepRouting:
@@ -571,6 +574,8 @@ func recordWhat(what string) string {
 		return "the Backup's VolumeSnapshots and the Cluster's WAL archive on the follow-up Rebuild, once the Backup completes; a failed Backup stops the run"
 	case "Archive":
 		return "the Cluster's WAL archive on the follow-up Rebuild"
+	case "Archiving":
+		return "nothing until it archives WAL of its new timeline: condition ContinuousArchiving True, and its last archived file of that timeline; at once without a WAL archive"
 	}
 	return what
 }

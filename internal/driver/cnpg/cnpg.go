@@ -149,6 +149,7 @@ func (Driver) Discover(ctx context.Context, w *failoverv1.WorkloadSpec, c kube.C
 			return nil, fmt.Errorf("site %s: read Cluster %s/%s: %w", s.Name, s.CNPG.Cluster.Namespace, s.CNPG.Cluster.Name, err)
 		}
 		read(&st, u, byCluster)
+		readArchive(ctx, cl, st.Facts, u)
 		st.Created = u.GetCreationTimestamp().Time
 		st.Position = position(ctx, c, s.Name, u)
 		if s.CNPG.Pooler != nil {
@@ -276,6 +277,12 @@ func check(t *driver.Topology, r driver.Request) error {
 	// Each other site's Cluster will declare to's primary: CloudNativePG
 	// refuses a primary that it does not name among its external clusters.
 	// A site loss goes on: its notes say where the run stops (Notes).
+	// Two sites that archive to one destination write the same WAL file
+	// names there ([RFC#0004] Requirement 16). A site loss goes on, warned:
+	// the fix is in Git, which may have gone with the lost site.
+	if p := sharedArchives(t); r.Mode == failoverv1.ModePlanned && len(p) > 0 {
+		return fmt.Errorf("%s; fix it before a planned switchover", sharedMessage(p[0]))
+	}
 	if l := lacksTo(t, r); r.Mode == failoverv1.ModePlanned && len(l) > 0 {
 		s := l[0]
 		return fmt.Errorf("site %s: Cluster %s does not name %s among its spec.externalClusters, so CloudNativePG would refuse to make it declare %s primary; add %s there, through Git, before the run",
@@ -342,7 +349,7 @@ func lacksTo(t *driver.Topology, r driver.Request) []driver.SiteState {
 // declare to's primary fails, as CloudNativePG refuses it, and the run
 // stops there.
 func (d Driver) Notes(w *failoverv1.WorkloadSpec, t *driver.Topology, r driver.Request) []string {
-	notes := positionNotes(w, t, r)
+	notes := append(positionNotes(w, t, r), archiveNotes(t, r)...)
 	if r.Mode != failoverv1.ModeSiteLoss {
 		return notes
 	}
@@ -443,6 +450,16 @@ func (d Driver) Steps(w *failoverv1.WorkloadSpec, r driver.Request) ([]failoverv
 		return nil, nil, err
 	}
 	b.steps = append(b.steps, verify...)
+	if !r.Legacy {
+		timeout := DefaultArchivingTimeout
+		if t := w.Timeouts.Archiving; t != nil {
+			timeout = t.Duration
+		}
+		b.add(failoverv1.Step{ID: "verify-archiving-" + to.Name, Type: failoverv1.StepRecord, Site: to.Name,
+			Description: "wait until Cluster " + toName + " archives WAL of its new timeline, when it has a WAL archive; a warning and a follow-up if it does not in time",
+			Record: &failoverv1.RecordStep{Object: ClusterRef(to), What: RecordArchiving,
+				Timeout: &metav1.Duration{Duration: timeout}, WarnAs: FollowUpCheckArchiving}})
+	}
 	return b.steps, follow, nil
 }
 

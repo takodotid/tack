@@ -72,8 +72,11 @@ Failover
           {.spec.replica.primary} Equals "pg-b"
           {.status.instancesReportedState.*.isPrimary} Contains "true"
           {.status.phase} Equals "Cluster in healthy state"
+  15. verify-archiving-b  site b
+      wait until Cluster pg-b archives WAL of its new timeline, when it has a WAL archive; a warning and a follow-up if it does not in time
+        read Cluster db/pg-b and its current primary's status, through the API server, change nothing, and record nothing until it archives WAL of its new timeline: condition ContinuousArchiving True, and its last archived file of that timeline; at once without a WAL archive; wait up to 5m0s, then warn, record the follow-up CheckArchiving, and go on
 PromoteToGitOps
-  15. git-commit  Git
+  16. git-commit  Git
       commit the live state to https://git.example.com/gitops.git branch main
         clusters/a/cluster.yaml: spec.replica.primary = "pg-b"  (site a, Cluster db/pg-a spec.replica.primary)
         clusters/a/cluster.yaml: spec.replica.promotionToken removed  (site a, Cluster db/pg-a spec.replica.promotionToken)
@@ -82,68 +85,68 @@ PromoteToGitOps
         clusters/c/cluster.yaml: spec.replica.primary = "pg-b"  (site c, Cluster db/pg-c spec.replica.primary)
         clusters/c/cluster.yaml: spec.replica.promotionToken removed  (site c, Cluster db/pg-c spec.replica.promotionToken)
         commit message: tack: pg-main primary a to b (planned)
-  16. reconcile-git-a  site a
+  17. reconcile-git-a  site a
       wait for Flux at site a to apply the run's commit (held objects stay as they are)
         request a reconcile of Kustomizations flux-system/a and their GitRepository; wait up to 5m0s
         until Flux has applied the branch head, which must contain the run's commit $(git.commit)
-  17. reconcile-git-b  site b
+  18. reconcile-git-b  site b
       wait for Flux at site b to apply the run's commit (held objects stay as they are)
         request a reconcile of Kustomizations flux-system/b and their GitRepository; wait up to 5m0s
         until Flux has applied the branch head, which must contain the run's commit $(git.commit)
-  18. reconcile-git-c  site c (waits for the site if unreachable)
+  19. reconcile-git-c  site c (waits for the site if unreachable)
       wait for Flux at site c to apply the run's commit (held objects stay as they are)
         request a reconcile of Kustomizations flux-system/c and their GitRepository; wait up to 5m0s
         until Flux has applied the branch head, which must contain the run's commit $(git.commit)
 Release
-  19. verify-git-a  site a
+  20. verify-git-a  site a
       check at site a that Git, as Flux renders it, equals live
         stop if the branch moved past the run's commit
         render the run's commit as Flux would and diff it against 1 live objects; stop if they differ
-  20. release-a-cluster-pg-a  site a
+  21. release-a-cluster-pg-a  site a
       release Cluster db/pg-a at site a: Flux applies it again
         remove from Cluster db/pg-a: kustomize.toolkit.fluxcd.io/reconcile, failover.tako.id/held-by
-  21. reconcile-release-a  site a
+  22. reconcile-release-a  site a
       reconcile Flux at site a with the released objects
         request a reconcile of Kustomizations flux-system/a and their GitRepository; wait up to 5m0s
         until Flux has applied the branch head, which must contain the run's commit $(git.commit)
-  22. verify-noop-a  site a
+  23. verify-noop-a  site a
       check at site a that Flux changed nothing
         check that the generation of 1 released objects did not change
-  23. verify-git-b  site b
+  24. verify-git-b  site b
       check at site b that Git, as Flux renders it, equals live
         stop if the branch moved past the run's commit
         render the run's commit as Flux would and diff it against 1 live objects; stop if they differ
-  24. release-b-cluster-pg-b  site b
+  25. release-b-cluster-pg-b  site b
       release Cluster db/pg-b at site b: Flux applies it again
         remove from Cluster db/pg-b: kustomize.toolkit.fluxcd.io/reconcile, failover.tako.id/held-by
-  25. reconcile-release-b  site b
+  26. reconcile-release-b  site b
       reconcile Flux at site b with the released objects
         request a reconcile of Kustomizations flux-system/b and their GitRepository; wait up to 5m0s
         until Flux has applied the branch head, which must contain the run's commit $(git.commit)
-  26. verify-noop-b  site b
+  27. verify-noop-b  site b
       check at site b that Flux changed nothing
         check that the generation of 1 released objects did not change
-  27. verify-git-c  site c (waits for the site if unreachable)
+  28. verify-git-c  site c (waits for the site if unreachable)
       check at site c that Git, as Flux renders it, equals live
         stop if the branch moved past the run's commit
         render the run's commit as Flux would and diff it against 1 live objects; stop if they differ
-  28. release-c-cluster-pg-c  site c (waits for the site if unreachable)
+  29. release-c-cluster-pg-c  site c (waits for the site if unreachable)
       release Cluster db/pg-c at site c: Flux applies it again
         remove from Cluster db/pg-c: kustomize.toolkit.fluxcd.io/reconcile, failover.tako.id/held-by
-  29. reconcile-release-c  site c (waits for the site if unreachable)
+  30. reconcile-release-c  site c (waits for the site if unreachable)
       reconcile Flux at site c with the released objects
         request a reconcile of Kustomizations flux-system/c and their GitRepository; wait up to 5m0s
         until Flux has applied the branch head, which must contain the run's commit $(git.commit)
-  30. verify-noop-c  site c (waits for the site if unreachable)
+  31. verify-noop-c  site c (waits for the site if unreachable)
       check at site c that Flux changed nothing
         check that the generation of 1 released objects did not change
-  31. routing-a  site a
+  32. routing-a  site a
       wait for Strait at site a to route apps/postgres to member pg-b only
         read SiteService apps/postgres until status.route.members is [pg-b] with reason Active; wait up to 2m0s
-  32. routing-b  site b
+  33. routing-b  site b
       wait for Strait at site b to route apps/postgres to member pg-b only
         read SiteService apps/postgres until status.route.members is [pg-b] with reason Active; wait up to 2m0s
-  33. routing-c  site c (waits for the site if unreachable)
+  34. routing-c  site c (waits for the site if unreachable)
       wait for Strait at site c to route apps/postgres to member pg-b only
         read SiteService apps/postgres until status.route.members is [pg-b] with reason Active; wait up to 2m0s
 
