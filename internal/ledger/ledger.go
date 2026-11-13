@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	authenticationv1 "k8s.io/api/authentication/v1"
@@ -37,6 +38,11 @@ func (s *Store) Create(ctx context.Context, sf *failoverv1.SiteFailover) error {
 	sf.Namespace = s.Namespace
 	dry := sf.DeepCopy()
 	if err := s.Client.Create(ctx, dry, client.DryRunAll, client.FieldOwner(kube.FieldManager)); err != nil {
+		// A CRD older than this Tack refuses the step types it does not
+		// know, such as Record.
+		if apierrors.IsInvalid(err) && strings.Contains(err.Error(), "spec.steps[") && strings.Contains(err.Error(), "Unsupported value") {
+			return fmt.Errorf("the cluster's SiteFailover CRD does not know a step type of this Tack version (%v): apply the CRD of this Tack version there; nothing was created", err)
+		}
 		return served(err)
 	}
 	if !equality.Semantic.DeepEqual(dry.Spec, sf.Spec) {
