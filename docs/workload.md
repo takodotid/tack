@@ -1,6 +1,6 @@
 # The Workload file
 
-A Workload file describes one workload: its sites, the Git repository Flux applies, and where Tack records runs. `tack plan` and `tack run` read it with `-f`. `tack status` and `tack resume` read it to find the sites; `tack resume` then runs with the copy stored in the run's ledger, not with the file.
+A Workload file describes one workload: its sites, the Git repository Flux applies, and where Tack records runs. `tack plan` and `tack run` read it with `-f`. `tack status` and `tack resume` read it to find the sites. `tack resume` then runs with the copy stored in the run's ledger, not with the file.
 
 ## Example
 
@@ -52,7 +52,7 @@ spec:
   timeouts: {demotion: 15m, promotion: 15m}
 ```
 
-The Git repository it assumes:
+The example assumes this Git repository:
 
 ```text
 clusters/site-a/db/kustomization.yaml
@@ -64,7 +64,7 @@ clusters/site-b/db/pooler.yaml              Pooler pg-b-pooler-rw
 clusters/site-b/db/pooler-instances.yaml    a patch of Pooler pg-b-pooler-rw that sets spec.instances
 ```
 
-For a switch to site b, `tack plan` resolves the Git change of this example to:
+For a switch to site b, `tack plan` turns this example into these Git changes:
 
 ```text
 clusters/site-a/db/cluster.yaml, document 0: spec.replica.primary = "pg-b"  (site a, Cluster db/pg-a spec.replica.primary)
@@ -87,30 +87,30 @@ Required fields have no default. Durations are Go durations, such as `90s`, `15m
 |---|---|---|---|
 | `apiVersion` | yes | | `failover.tako.id/v1`. Tack still reads `failover.tako.id/v1alpha1`, the version of v0.1.x, with a warning. |
 | `kind` | yes | | `Workload` |
-| `metadata.name` | yes | | The workload's name. A run is named `<name>-<UTC yyyymmdd-hhmmss>` and labelled `failover.tako.id/workload: <name>`, and the operator types the name to confirm a run. Use lowercase letters, digits and `-`. |
-| `spec.driver` | yes | | The built-in driver that knows the workload's API. Only `cnpg`. |
+| `metadata.name` | yes | | The workload's name. A run is named `<name>-<UTC yyyymmdd-hhmmss>` and labelled `failover.tako.id/workload: <name>`. The operator types this name to confirm a run. Use lowercase letters, digits and `-`. |
+| `spec.driver` | yes | | The built-in driver that knows the workload's API. The only driver is `cnpg`. |
 | `spec.sites` | yes | | Every site of the workload, at least two. |
 | `spec.git` | yes | | The Git repository Flux applies at every site. |
 | `spec.ledger.namespace` | no | `tack-system` | The namespace of the `SiteFailover` objects, at every site. It must exist at every site. A run's ledger is created at its `--to` site. |
 | `spec.routing` | no | | The routing check. Without it, a run has no routing check. |
-| `spec.timeouts` | no | | Bounds on the run's waits. |
+| `spec.timeouts` | no | | Time limits on the run's waits. |
 
 ### `spec.sites[]`
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
-| `name` | yes | | The site's name in `--to`, `--from`, `--fence` and the ledger. Unique. Lowercase letters, digits and `-`, starting and ending with a letter or digit, at most 63 characters. Quote a name that YAML reads as a boolean or a number, such as `"n"`, `"on"` or `"010"`, here and wherever a `site:` names it: Tack refuses it unquoted. |
-| `kubeContext` | yes | | The kubeconfig context for this site. A context missing from the kubeconfig is an error; Tack never uses the current context instead. Quote a context that YAML reads as a boolean or a number, such as `"on"`: Tack refuses it unquoted. [One kubeconfig](#every-sites-context-in-one-kubeconfig) holds every site's context. |
+| `name` | yes | | The site's name, as used in `--to`, `--from`, `--fence` and the ledger. It must be unique. It must use lowercase letters, digits and `-`, start and end with a letter or digit, and have at most 63 characters. Quote a name that YAML reads as a boolean or a number, such as `"n"`, `"on"` or `"010"`. Quote it here and wherever a `site:` names it: Tack refuses it unquoted. |
+| `kubeContext` | yes | | The kubeconfig context for this site. A context missing from the kubeconfig is an error: Tack never uses the current context instead. Quote a context that YAML reads as a boolean or a number, such as `"on"`: Tack refuses it unquoted. [One kubeconfig](#every-sites-context-in-one-kubeconfig) holds every site's context. |
 | `cnpg.cluster.namespace`, `cnpg.cluster.name` | yes | | The site's CloudNativePG `Cluster`. Each site's Cluster needs its own name. |
-| `cnpg.pooler.namespace`, `cnpg.pooler.name` | no | | The site's read-write `Pooler`. Tack also waits on the Deployment of the same name, which CloudNativePG runs for it. Without a pooler, Tack moves no Pooler at this site. Never name a Pooler `<cluster>-rw`, `<cluster>-ro` or `<cluster>-r`: its Service takes its name, the Cluster already owns Services with those names, and CloudNativePG then never reconciles the Pooler. |
-| `cnpg.pooler.instances` | with a pooler | | The Pooler's instances while this site is primary, at least 1. At every other site Tack sets it to 0. |
-| `cnpg.snapshot` | no | `false` | After a site loss that leaves this site's Cluster the old primary, take a cold snapshot of its volumes once the site answers again, before anyone rebuilds it: a CloudNativePG `Backup` with `method: volumeSnapshot`. The Cluster needs `spec.backup.volumeSnapshot`, and the site VolumeSnapshot support; a Backup that fails stops the run. Set it on every site: any site can be the old primary. See [recover-old-primary-writes.md](runbooks/recover-old-primary-writes.md). |
+| `cnpg.pooler.namespace`, `cnpg.pooler.name` | no | | The site's read-write `Pooler`. Tack also waits on the Deployment of the same name, which CloudNativePG runs for the Pooler. Without a pooler, Tack moves no Pooler at this site. Never name a Pooler `<cluster>-rw`, `<cluster>-ro` or `<cluster>-r`. The Pooler's Service takes the Pooler's name, and the Cluster already owns Services with those names. CloudNativePG then never reconciles the Pooler. |
+| `cnpg.pooler.instances` | with a pooler | | The Pooler's instances while this site is primary. At least 1. While another site is primary, Tack sets it to 0. |
+| `cnpg.snapshot` | no | `false` | Take a cold snapshot of the volumes of this site's Cluster, after a site loss that leaves this Cluster the old primary. Tack takes it once the site answers again, before anyone rebuilds the Cluster. The snapshot is a CloudNativePG `Backup` with `method: volumeSnapshot`. The Cluster needs `spec.backup.volumeSnapshot`, and the site needs VolumeSnapshot support. A Backup that fails stops the run. Set it on every site, because any site can be the old primary. See [recover-old-primary-writes.md](runbooks/recover-old-primary-writes.md). |
 
-`tack plan` checks the live objects too: each `Cluster` sets `.spec.replica.primary` and not `.spec.replica.enabled`, and a Flux Kustomization applies each `Cluster` and `Pooler`. [RFC#0004](../rfcs/RFC0004.md) and [RFC#0005](../rfcs/RFC0005.md) give every check.
+`tack plan` checks the live objects too. Each `Cluster` must set `.spec.replica.primary` and not `.spec.replica.enabled`. A Flux Kustomization must apply each `Cluster` and `Pooler`. [RFC#0004](../rfcs/RFC0004.md) and [RFC#0005](../rfcs/RFC0005.md) list every check.
 
 ### Every site's context in one kubeconfig
 
-Tack reads every site's `kubeContext` from one kubeconfig: the file `--kubeconfig` names, or else the standard loading rules. When each cluster has its own kubeconfig file, list the files in `KUBECONFIG`, and client-go merges them:
+Tack reads every site's `kubeContext` from one kubeconfig: the file `--kubeconfig` names, or else the one the standard loading rules find. When each cluster has its own kubeconfig file, list the files in `KUBECONFIG`. client-go then merges them:
 
 ```sh
 KUBECONFIG=site-a.kubeconfig:site-b.kubeconfig tack plan -f workload.yaml --to b
@@ -126,9 +126,9 @@ tack plan -f workload.yaml --to b
 | Rule | Why |
 |---|---|
 | `--kubeconfig` takes one file. | With it, Tack ignores `KUBECONFIG`. |
-| Context, cluster and user names differ between the files. | On a repeated name, the first file's entry wins and the others are dropped. A site's context could then reach another site's cluster or use its credentials. |
+| Context, cluster and user names differ between the files. | If a name repeats, the first file's entry wins and the others are dropped. A site's context could then reach another site's cluster, or use its credentials. |
 
-To keep one file instead, flatten the merge, then pass it with `--kubeconfig`:
+To keep a single file instead, flatten the merged files into one, then pass it with `--kubeconfig`:
 
 ```sh
 KUBECONFIG=site-a.kubeconfig:site-b.kubeconfig kubectl config view --flatten > sites.kubeconfig
@@ -141,13 +141,13 @@ The merged file holds every site's credentials. Protect it like the originals.
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
-| `url` | yes | | The repository, as `git` takes it: SSH, HTTPS or a path. Never put a credential in it; access comes from the operator's `git` configuration. Tack refuses a password, and a user in an HTTP or HTTPS URL; set the user with `git config credential.<url>.username` instead. |
+| `url` | yes | | The repository, as `git` takes it: SSH, HTTPS or a path. Never put a credential in it: access comes from the operator's `git` configuration. Tack refuses a URL with a password, and an HTTP or HTTPS URL with a user. Set the user with `git config credential.<url>.username` instead. |
 | `branch` | yes | | The branch Flux applies. |
-| `author.name`, `author.email` | no | git's own `user.name` and `user.email` | The author and committer of Tack's commit. Without `author`, git must have an identity configured; Tack never lets git guess one. |
-| `fields[]` | no | | Mappings: where a field lives in the repository. A mapping wins over `find`. |
+| `author.name`, `author.email` | no | git's own `user.name` and `user.email` | The author and committer of Tack's commit. Without `author`, git must have an identity configured. Tack never lets git guess one. |
+| `fields[]` | no | | Mappings. Each says where a field lives in the repository. A mapping wins over `find`. |
 | `find` | no | | Lets Tack find the manifest that defines an object, for every field without a mapping. |
 
-Every field a run changes needs a mapping or `find`, or the plan fails. One exception: when neither covers the removal of a used CloudNativePG promotion token, the plan leaves it out and says so. The fields each driver changes are in [RFC#0004](../rfcs/RFC0004.md) Requirement 8 for `cnpg`; `tack plan` prints each one with its file and path.
+Every field a run changes needs a mapping or `find`, or the plan fails. There is one exception: the removal of a used CloudNativePG promotion token. When neither covers it, the plan leaves that change out and says so. For `cnpg`, the fields the driver changes are in [RFC#0004](../rfcs/RFC0004.md) Requirement 8. `tack plan` prints each one with its file and path.
 
 ### `spec.git.fields[]`
 
@@ -158,10 +158,10 @@ Every field a run changes needs a mapping or `find`, or the plan fails. One exce
 | `object.namespace` | no | any namespace | The live object's namespace. |
 | `field` | yes | | The field's path in the live object, such as `spec.instances`. |
 | `file` | yes | | The file, relative to the repository root. |
-| `path` | yes | | The field's path in the file. `a.b.c` is key `c` under `b` under `a`; `a[2].b` is key `b` of the third item of list `a`. Keys that contain dots cannot be addressed. |
+| `path` | yes | | The field's path in the file. `a.b.c` is key `c` under `b` under `a`. `a[2].b` is key `b` of the third item of list `a`. Keys that contain dots cannot be addressed. |
 | `document` | no | | The YAML document to edit, counting from 0. Required when the file holds several documents. |
 
-A mapping matches a change on site, kind, name and field, and on namespace when it sets one. Two mappings that match the same change fail the plan. When Git answers at plan time, the file and the parent of `path` must exist in it.
+A mapping matches a change when site, kind, name and field match. If the mapping sets a namespace, the namespace must match too. If two mappings match the same change, the plan fails. When Git answers at plan time, the file and the parent of `path` must exist in it.
 
 ### `spec.git.find`
 
@@ -170,7 +170,7 @@ A mapping matches a change on site, kind, name and field, and on namespace when 
 | `paths[].site` | yes | | A site of the workload. |
 | `paths[].path` | yes | | A directory of the repository that holds this site's manifests. A site may have several. |
 
-`find: {}` searches the whole repository for every site, and so does any site without a `paths` entry. Tack reads the `.yaml` and `.yml` files there, at the branch's head, and looks for the one YAML document whose API group, kind, name and namespace match the object. A document without `metadata.namespace` matches any namespace. If none or several match, the plan fails; for several, it names them. A mapping, or narrower `paths`, resolves it.
+`find: {}` searches the whole repository for every site. A site without a `paths` entry is searched the same way. Tack reads the `.yaml` and `.yml` files there, at the branch's head. It looks for the one YAML document whose API group, kind, name and namespace match the object. A document without `metadata.namespace` matches any namespace. If no document matches, or several do, the plan fails. When several match, the plan names them. A mapping, or narrower `paths`, fixes that.
 
 The edit rules (what Tack changes in a file, and what it refuses to edit) are in [RFC#0006](../rfcs/RFC0006.md).
 
@@ -181,7 +181,7 @@ The edit rules (what Tack changes in a file, and what it refuses to edit) are in
 | `services[]` | yes | | The Strait `SiteService` to read, `{site, namespace, name}`, one per site that runs Strait. At least one. |
 | `members[]` | yes | | For every site of the workload, `{site, member}`: the name of the site's member in the `SiteService`. |
 
-With this block, a run ends with one `Routing` step per service: it waits until Strait at that site routes to the `--to` site's member only. [RFC#0008](../rfcs/RFC0008.md) has the details.
+With this block, a run ends with one `Routing` step per service. Each step waits until Strait at that site routes only to the `--to` site's member. [RFC#0008](../rfcs/RFC0008.md) has the details.
 
 ### `spec.timeouts`
 
@@ -194,23 +194,23 @@ With this block, a run ends with one `Routing` step per service: it waits until 
 | `snapshot` | `30m` | the wait for the old primary's snapshot (`cnpg.snapshot`) |
 | `archiving` | `5m` | the wait, after the promotion, for the new primary to archive WAL of its new timeline. When it times out, the run warns, records the follow-up `CheckArchiving`, and goes on |
 
-A wait that times out stops the run with reason `StepFailed`, except `archiving`.
+A wait that times out stops the run with reason `StepFailed`. The exception is `archiving`.
 
 ## WAL archives
 
-Give each site's Cluster a WAL archive of its own from day one: its own `destinationPath`, or its own `serverName` under a shared path. A replica Cluster archives too: CloudNativePG runs it with `archive_mode = always` (v1.30.1, `pkg/postgres/configuration.go:736-746`). So every site writes WAL to its archive all the time, not only after a promotion. Two sites with one destination write the same file names there, and CloudNativePG refuses to start a Cluster on an archive that is not empty (`docs/src/recovery.md:620-629`, `Expected empty archive`).
+Give each site's Cluster a WAL archive of its own from day one: its own `destinationPath`, or its own `serverName` under a shared path. A replica Cluster archives too, because CloudNativePG runs it with `archive_mode = always` (v1.30.1, `pkg/postgres/configuration.go:736-746`). So every site writes WAL to its archive all the time, not only after a promotion. Two sites with one destination write the same file names there. And CloudNativePG refuses to start a Cluster on an archive that is not empty (`docs/src/recovery.md:620-629`, `Expected empty archive`).
 
 | Tack | Does |
 |---|---|
-| `tack plan` | reads each site's destination: `spec.backup.barmanObjectStore`, or the `destinationPath` of the barman-cloud plugin's `ObjectStore`. A planned switchover is refused when two sites that answer share one; a site-loss plan warns, since the fix is in Git, which may have gone with the lost site. It also warns when the new primary reports `ContinuousArchiving` `False`. |
-| `verify-archiving-<to>`, after the promotion | waits up to `timeouts.archiving` until the new primary archives WAL of its new timeline: `ContinuousArchiving` is `True`, and its last archived file is of that timeline. A Cluster without an archive passes at once. When it times out, the run warns, records `CheckArchiving`, and goes on: writes are back, and the operator fixes the archive. |
-| after a site loss | records where the old primary archived on its `Rebuild`. The rebuilt Cluster gets a new destination; the old one is kept ([rebuild-old-primary.md](runbooks/rebuild-old-primary.md)). |
+| `tack plan` | reads each site's destination: `spec.backup.barmanObjectStore`, or the `destinationPath` of the barman-cloud plugin's `ObjectStore`. A planned switchover is refused when two sites that answer share one. A site-loss plan only warns, since the fix is in Git, and Git may have gone with the lost site. The plan also warns when the new primary reports `ContinuousArchiving` `False`. |
+| `verify-archiving-<to>`, after the promotion | waits up to `timeouts.archiving` until the new primary archives WAL of its new timeline. That means `ContinuousArchiving` is `True`, and its last archived file is of that timeline. A Cluster without an archive passes at once. When the wait times out, the run warns, records `CheckArchiving`, and goes on. Writes are back by then, and the operator fixes the archive. |
+| after a site loss | records, on the old primary's `Rebuild` follow-up, where it archived. The rebuilt Cluster gets a new destination, and the old one is kept ([rebuild-old-primary.md](runbooks/rebuild-old-primary.md)). |
 
 ## When the file is checked
 
 | When | What |
 |---|---|
 | Every command that reads the file | Unknown fields, `apiVersion` and `kind`, required fields, unique site names, and that each `site` in `git.fields`, `git.find.paths` and `routing.strait` names a site. With `routing.strait`, every site needs a member. |
-| `tack plan` and `tack run`, before reading the sites | `driver` is built in; each site has `cnpg.cluster`; Cluster names differ; each pooler has a namespace and a name. |
-| `tack plan` and `tack run`, when reading Git | Each mapped file and the parent of its path exist; `find` finds exactly one manifest per object. |
-| `tack run`, when it creates the ledger | The API server checks the `SiteFailover` schema, which holds a copy of the Workload: the site name pattern and length, `pooler.instances` of at least 1, and at least one Strait service. A run that fails here has changed nothing. |
+| `tack plan` and `tack run`, before reading the sites | `driver` is built in. Each site has `cnpg.cluster`. Cluster names differ. Each pooler has a namespace and a name. |
+| `tack plan` and `tack run`, when reading Git | Each mapped file and the parent of its path exist. `find` finds exactly one manifest per object. |
+| `tack run`, when it creates the ledger | The API server checks the `SiteFailover` schema, which holds a copy of the Workload. It checks the site name pattern and length, `pooler.instances` of at least 1, and at least one Strait service. A run that fails here has changed nothing. |

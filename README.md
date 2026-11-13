@@ -1,6 +1,6 @@
 # Tack
 
-Tack moves the primary of a CloudNativePG database from one Kubernetes site to another, when Flux deploys both sites from Git. It handles a planned switchover, and a failover after a site is lost. It changes the database only through CloudNativePG's own API, keeps Git in step, and records every step in a ledger, the `SiteFailover` resource.
+Tack moves the primary of a CloudNativePG database from one Kubernetes site to another. It is for setups where Flux deploys both sites from Git. It handles two cases: a planned switchover, and a failover after a site is lost. It changes the database only through CloudNativePG's own API. It keeps Git in step, and it records every step in a ledger, the `SiteFailover` resource.
 
 The operator starts every run. Tack never decides to fail over by itself.
 
@@ -10,8 +10,8 @@ Moving the primary by hand fails in two ways:
 
 | What goes wrong | What Tack does |
 |---|---|
-| Flux applies the old values from Git and reverts the switch. | Stops Flux from applying only the objects it changes, commits the new values to Git, and lets Flux apply them again once Git equals live. |
-| The demotion token must travel from the old primary's cluster to the new one between two steps. Promoting without it can fork the data. | Waits for the old primary to publish the token, records it in the ledger, and promotes the new primary with it. |
+| Flux applies the old values from Git and undoes the switch. | Stops Flux from applying the objects the run changes, and only those. Commits the new values to Git. Lets Flux apply those objects again once Git matches live. |
+| The old primary's demotion token must be carried to the new primary's cluster, between two steps. Promoting without the token can fork the data: the two sites then hold different histories. | Waits for the old primary to publish the token. Records the token in the ledger. Promotes the new primary with it. |
 
 [RFC#0001](rfcs/RFC0001.md) gives the full scope.
 
@@ -55,12 +55,12 @@ sequenceDiagram
 
 | Phase | Tack does |
 |---|---|
-| Hold | Annotates only the live objects the run changes with `kustomize.toolkit.fluxcd.io/reconcile: disabled`, then waits for a fresh Flux reconcile. Flux stops applying them. |
-| Failover | Changes those objects through CloudNativePG's API, in order, and waits for each result. In a planned run: stop the old Pooler, demote the old primary, capture its demotion token, promote the new primary with it, start the new Pooler. |
-| Promote to GitOps | Writes one commit that makes Git equal live, on top of the revision live matched at Hold, and waits until Flux at each site has applied it. |
-| Release | Renders the commit as Flux does and diffs it against live. Removes the annotations only if they match, then checks that Flux changed nothing. With Strait configured, waits until Strait routes to the new primary. |
+| Hold | Adds the annotation `kustomize.toolkit.fluxcd.io/reconcile: disabled` to the live objects the run changes, and to no others. Then waits for a fresh Flux reconcile. From then on, Flux stops applying those objects. |
+| Failover | Changes those objects through CloudNativePG's API, in order, and waits for each result. A planned run does this: stop the old Pooler, demote the old primary, capture its demotion token, promote the new primary with it, start the new Pooler. |
+| Promote to GitOps | Writes one commit that makes Git match live. The commit goes on top of the revision that live matched at Hold. Then waits until Flux at each site has applied it. |
+| Release | Renders the commit the way Flux does, and compares it with live. Removes the annotations only if the two match. Then checks that Flux changed nothing. If Strait is configured, waits until Strait routes to the new primary. |
 
-The ledger is a `SiteFailover` object at the new primary's site, in the namespace `tack-system` by default. Its `spec` holds the whole plan and never changes; its `status` holds every step's result, the demotion token, the held objects and the Git commit. `tack status` reads it, and so does `kubectl --context site-b -n tack-system get sitefailovers` (short name `sfo`).
+The ledger is a `SiteFailover` object at the new primary's site. Its namespace is `tack-system` by default. Its `spec` holds the whole plan and never changes. Its `status` holds every step's result, the demotion token, the held objects and the Git commit. Read it with `tack status`, or with `kubectl --context site-b -n tack-system get sitefailovers` (short name `sfo`).
 
 A run is in one of four states, recorded in the ledger:
 
@@ -78,20 +78,20 @@ stateDiagram-v2
 | Mode | When | What happens |
 |---|---|---|
 | `--mode planned` (default) | Both sites answer. | The old primary demotes and hands its token to the new one. No write is lost. |
-| `--mode site-loss` | The old site is lost. Confirm it first: [runbook](docs/runbooks/site-loss.md). | The new site promotes without a token. The old primary needs a rebuild before it can follow again: [runbook](docs/runbooks/rebuild-old-primary.md). |
+| `--mode site-loss` | The old site is lost. Confirm the loss first: [runbook](docs/runbooks/site-loss.md). | The new site promotes without a token. The old primary must be rebuilt before it can follow the new one again: [runbook](docs/runbooks/rebuild-old-primary.md). |
 
 ## Safety
 
 | Property | How |
 |---|---|
 | The operator starts every run | Only `tack run` starts a run. Tack has no timer, watch or health check that starts one. |
-| Plan first | `tack plan` reads every site and Git, prints every step, patch, wait, Git edit and check, and changes nothing. |
-| Typed confirmation | `tack run` and `tack resume` print the plan or the ledger, then ask the operator to type the workload's name. Without a terminal they refuse, unless `--yes` is given for a run a human approved. |
-| Narrow hold | Only the objects the run changes are held, on the live objects. No Kustomization is suspended, and nothing is annotated in Git. |
+| Plan first | `tack plan` reads every site and Git. It prints every step, patch, wait, Git edit and check. It changes nothing. |
+| Typed confirmation | `tack run` and `tack resume` print the plan or the ledger. Then they ask the operator to type the workload's name. Without a terminal they refuse, unless `--yes` is passed for a run that a human approved. |
+| Narrow hold | Tack holds only the objects the run changes. The hold is an annotation on the live objects: nothing is annotated in Git. No Kustomization is suspended. |
 | Resume from the ledger | The plan is stored in the ledger when the run starts. `tack resume` continues that plan and never plans again. Every step is safe to repeat. |
-| Git equals live before release | Tack releases an object only after the run's commit, rendered as Flux renders it, matches live. After release it checks that Flux changed nothing. |
-| Stop and ask | Anything unexpected stops the run with a reason in the ledger and exit code 3: Git changed during the run, a token is missing, a lost site came back as primary, an object is held by someone else. |
-| Break-glass | In a site loss with Git down, Tack still switches live, then waits at the Git step with exit code 4. `tack resume` commits once Git is back. Nothing is released before that. |
+| Git equals live before release | Tack renders the run's commit the way Flux does. It releases an object only once that render matches live. After release, it checks that Flux changed nothing. |
+| Stop and ask | Anything unexpected stops the run, with exit code 3 and a reason in the ledger. For example: Git changed during the run, a token is missing, a lost site came back as primary, or an object is held by someone else. |
+| Break-glass | If a site is lost and Git is down too, Tack still switches live. Then it waits at the Git step, with exit code 4. Once Git is back, `tack resume` commits. Nothing is released before that. |
 | Explicit contexts | Each site uses the kube context named in the Workload file. Tack never falls back to the current context. |
 | AI agents | `tack --help` and `tack --skill` tell agents never to start `tack run` or `tack resume` without a human's explicit instruction for that run, and to run `tack plan` first. |
 | No secrets | Git access comes from the operator's own `git` configuration. The ledger holds no secret, and `tack status` prints captured values by name only. |
@@ -100,19 +100,19 @@ stateDiagram-v2
 
 | Area | Support |
 |---|---|
-| Workload | CloudNativePG in the distributed topology: one `Cluster` per site, the primary named by `.spec.replica.primary`, and an optional read-write `Pooler` per site. Driver `cnpg`. |
-| GitOps | Flux kustomize-controller with a `GitRepository` source, one Git repository for all sites. |
-| Routing check | Optional. Reads the `SiteService` status of [Strait](https://github.com/takodotid/strait) v1.0.0 or later, which routes clients to the primary. |
+| Workload | CloudNativePG in the distributed topology: one `Cluster` per site, the primary named by `.spec.replica.primary`, and an optional read-write `Pooler` per site. The driver is `cnpg`. |
+| GitOps | Flux kustomize-controller with a `GitRepository` source. One Git repository serves all sites. |
+| Routing check | Optional. Reads the `SiteService` status of [Strait](https://github.com/takodotid/strait) v1.0.0 or later. Strait routes clients to the primary. |
 | Platforms | Linux, macOS and Windows, amd64 and arm64. |
 | Tested with | CloudNativePG v1.30.1, Flux v2.10.0 and Kubernetes v1.37, in the end-to-end test. |
 
 ## Status
 
-The latest release is v1.4.0. The API is `failover.tako.id/v1`, for both the `SiteFailover` ledger and the Workload file. A change that would break a user comes as a new API version. `failover.tako.id/v1alpha1`, the API of v0.1.x, is deprecated and still served: see [Upgrading from v0.1.x](#upgrading-from-v01x).
+The latest release is v1.4.0. The API is `failover.tako.id/v1`, for both the `SiteFailover` ledger and the Workload file. A change that would break a user comes as a new API version. `failover.tako.id/v1alpha1` was the API of v0.1.x. It is deprecated but still served: see [Upgrading from v0.1.x](#upgrading-from-v01x).
 
 ## Install
 
-Each release on the [releases page](https://github.com/takodotid/tack/releases) has an archive per platform, `SHA256SUMS`, the CRD, and a Helm chart of the CRD and of optional roles. Each archive holds `tack`, its man pages and the CRD. The chart is also published at `oci://ghcr.io/takodotid/charts/tack`. From v1.3.0, a release also has an SBOM per archive, and signatures and attestations for every asset: see [Verify a release](#verify-a-release).
+Each release on the [releases page](https://github.com/takodotid/tack/releases) has an archive per platform, `SHA256SUMS`, the CRD, and a Helm chart. The chart installs the CRD and, if asked, roles. Each archive holds `tack`, its man pages and the CRD. The chart is also published at `oci://ghcr.io/takodotid/charts/tack`. From v1.3.0, each release also has an SBOM per archive, and signatures and attestations for every asset: see [Verify a release](#verify-a-release).
 
 ```sh
 VERSION=v1.4.0
@@ -149,13 +149,13 @@ Add that folder to `Path` once, then open a new terminal.
 
 | Difference on Windows | Detail |
 |---|---|
-| `KUBECONFIG` | Separates files with `;`, not `:`: see [docs/workload.md](docs/workload.md#every-sites-context-in-one-kubeconfig). |
+| `KUBECONFIG` | Separates files with `;`, not `:`. See [docs/workload.md](docs/workload.md#every-sites-context-in-one-kubeconfig). |
 | Man pages | Windows has no `man`. `tack --help` and `tack <command> --help` hold the same text. |
 | Skill document | In Windows PowerShell 5.1, `tack --skill > SKILL.md` writes UTF-16LE, not the UTF-8 that `tack` prints. PowerShell 7 and `cmd.exe` keep UTF-8. |
 
 To build from source instead: `make build` writes `bin/tack`.
 
-At every site, install the CRD with the chart. The chart can also create the operators' roles, off by default: see [The chart's roles](docs/operations.md#the-charts-roles). Name the release's namespace after the ledger namespace, `spec.ledger.namespace` in the Workload file, so that `--create-namespace` creates it. Tack never creates the ledger namespace: without it, `tack run` fails at the ledger's create, before any step.
+At every site, install the CRD with the chart. The chart can also create the operators' roles. That is off by default: see [The chart's roles](docs/operations.md#the-charts-roles). Install the release in the ledger namespace, `spec.ledger.namespace` in the Workload file, so that `--create-namespace` creates that namespace. Tack never creates the ledger namespace. Without it, `tack run` fails when it creates the ledger, before any step.
 
 ```sh
 for ctx in site-a site-b; do
@@ -168,24 +168,24 @@ done
 |---|---|
 | One release per cluster. | The CRD is cluster-scoped. A second release, under another name or in another namespace, fails with `invalid ownership metadata` and changes nothing. |
 | One way per cluster: the chart, or `kubectl apply --server-side` of the CRD. | The chart refuses a CRD that kubectl applied, with `invalid ownership metadata`. To hand such a CRD to the chart, label it `app.kubernetes.io/managed-by=Helm`, annotate it `meta.helm.sh/release-name=tack` and `meta.helm.sh/release-namespace=tack-system`, then install. |
-| Upgrade with the same command. | `helm upgrade` without values reuses the release's last values, `crds.keep` and `crds.install` included: `helm --kube-context "$ctx" -n tack-system get values tack` shows them. With `--set` or `-f`, and without `--reset-then-reuse-values`, each value not given goes back to the chart's default; `--reuse-values` also drops the defaults that a newer chart adds. The chart's notes print `crds.install` and `crds.keep` after each install and upgrade. |
-| Before the first run, check at every site who may write ledgers: [docs/operations.md](docs/operations.md#who-may-write-ledgers). The chart prints the link after each install and upgrade. | Writing a ledger is privileged: `tack resume` acts on what a ledger holds. The chart's roles only grant access; they take none from a GitOps controller or another subject. |
-| Never set `crds.keep=false` while the site holds a ledger that matters: a run that is not `Succeeded`, or a `Rebuild` follow-up not yet done. | With `crds.keep=false`, `helm uninstall` deletes the CRD, and every ledger with it. So does an upgrade with `crds.install=false`. A lost `Rebuild` follow-up lets a planned run onto a member that diverged ([RFC#0003](rfcs/RFC0003.md#requirements), Requirement 14). The upgrade that sets `crds.keep=false` takes the keep policy off the CRD at once, and the value stays across upgrades without values; the notes warn while it is `false`. Set it back with `helm upgrade --reset-then-reuse-values --set crds.keep=true`. |
+| Upgrade with the same command. | `helm upgrade` without values reuses the release's last values, including `crds.keep` and `crds.install`. `helm --kube-context "$ctx" -n tack-system get values tack` shows them. With `--set` or `-f`, and without `--reset-then-reuse-values`, each value not given goes back to the chart's default. `--reuse-values` also drops the defaults that a newer chart adds. After each install and upgrade, the chart's notes print `crds.install` and `crds.keep`. |
+| Before the first run, check at every site who may write ledgers: [docs/operations.md](docs/operations.md#who-may-write-ledgers). The chart prints the link after each install and upgrade. | Writing a ledger is privileged, because `tack resume` acts on what a ledger holds. The chart's roles only grant access. They take no access away from a GitOps controller or any other subject. |
+| Never set `crds.keep=false` while the site holds a ledger that matters: a run that is not `Succeeded`, or a `Rebuild` follow-up not yet done. | With `crds.keep=false`, `helm uninstall` deletes the CRD, and every ledger with it. So does an upgrade with `crds.install=false`. If a `Rebuild` follow-up is lost, a planned run can go to a member that diverged ([RFC#0003](rfcs/RFC0003.md#requirements), Requirement 14). The upgrade that sets `crds.keep=false` removes the keep policy from the CRD at once. The value then stays across upgrades without values, and the notes warn while it is `false`. Set it back with `helm upgrade --reset-then-reuse-values --set crds.keep=true`. |
 
-`helm uninstall` with `crds.keep=true`, the default, leaves the CRD, every ledger and the namespace; installing again under the same release name and namespace takes the CRD back. Without Helm, apply the CRD instead: `kubectl --context "$ctx" apply --server-side -f $NAME/failover.tako.id_sitefailovers.yaml`, then create the ledger namespace.
+`helm uninstall` with `crds.keep=true`, the default, leaves the CRD, every ledger and the namespace in place. Installing again under the same release name and namespace takes the CRD back into the release. Without Helm, apply the CRD instead with `kubectl --context "$ctx" apply --server-side -f $NAME/failover.tako.id_sitefailovers.yaml`, then create the ledger namespace.
 
 Tack also needs:
 
 | Need | Detail |
 |---|---|
-| A kube context per site | All in one kubeconfig (`--kubeconfig`, or the standard loading rules). To combine one file per cluster, see [docs/workload.md](docs/workload.md#every-sites-context-in-one-kubeconfig). The permissions are listed in [docs/operations.md](docs/operations.md#permissions). |
+| A kube context per site | All in one kubeconfig: the file `--kubeconfig` names, or else the standard loading rules. To combine one file per cluster, see [docs/workload.md](docs/workload.md#every-sites-context-in-one-kubeconfig). [docs/operations.md](docs/operations.md#permissions) lists the permissions. |
 | Git access | Through the operator's `git` configuration, such as an SSH agent or a credential helper. Tack runs `git` with `GIT_TERMINAL_PROMPT=0` and stores no credential. The branch must accept a push from those credentials. |
-| A Workload file | The sites, their contexts, the Git repository and where each field lives in it: [docs/workload.md](docs/workload.md). |
-| Clocks kept by NTP | Every site's API server, and every host that runs `tack`, within a few seconds of each other. Tack orders the runs of different sites by each ledger's creation time, from its site's API server, with a margin of 10 s ([RFC#0003](rfcs/RFC0003.md#requirements), Requirement 18), and a run's Lease, timed by the host that renews it, holds 10 s past its duration (Requirement 28). Clocks further apart can let an older run resume after a newer one, or let `tack abandon` mark a run that a process still runs. |
+| A Workload file | The sites, their contexts, the Git repository, and where each field lives in it: [docs/workload.md](docs/workload.md). |
+| Clocks kept by NTP | Every site's API server and every host that runs `tack` stay within a few seconds of each other. Tack orders the runs of different sites by each ledger's creation time, which its site's API server sets. It allows a margin of 10 s ([RFC#0003](rfcs/RFC0003.md#requirements), Requirement 18). A run's Lease is timed by the host that renews it, and holds for 10 s past its duration (Requirement 28). With clocks further apart, an older run can resume after a newer one, or `tack abandon` can mark a run that a process still runs. |
 
 ### Shell completion
 
-`tack completion` prints a completion script for bash, zsh, fish or PowerShell. It completes commands, flags, the values of `--mode` and `--output`, Workload files, and the site names of the file given with `-f`. It reads only that file, and never contacts a cluster.
+`tack completion` prints a completion script for bash, zsh, fish or PowerShell. The script completes commands, flags, the values of `--mode` and `--output`, Workload files, and the site names of the file given with `-f`. It reads only that file, and never contacts a cluster.
 
 | Shell | Load it in this shell | Load it in every new shell |
 |---|---|---|
@@ -196,7 +196,7 @@ Tack also needs:
 
 ### Verify a release
 
-From v1.3.0, each release signs `SHA256SUMS` and the chart with Sigstore, keyless, under the identity of its release workflow, and attests every asset with GitHub artifact attestations. No signing key exists. `make dist` at a release's tag, in a clean checkout with the Go version of `go.mod`, gives the same archives. Releases v1.2.1 and older carry no signature.
+From v1.3.0, each release signs `SHA256SUMS` and the chart with Sigstore. The signing is keyless, under the identity of the release workflow: no signing key exists. Each release also attests every asset with GitHub artifact attestations. `make dist` at a release's tag, in a clean checkout with the Go version of `go.mod`, builds the same archives. Releases v1.2.1 and older carry no signature.
 
 | Asset | Verify with |
 |---|---|
@@ -216,40 +216,40 @@ gh attestation verify $NAME.tar.gz --repo takodotid/tack --cert-identity "$id"
 cosign verify ghcr.io/takodotid/charts/tack:${VERSION#v} --certificate-identity "$id" --certificate-oidc-issuer "$issuer"
 ```
 
-`cosign verify-blob` proves that the release workflow of the tag wrote `SHA256SUMS`; the `sha256sum -c` above then ties the archive to it.
+`cosign verify-blob` proves that the tag's release workflow wrote `SHA256SUMS`. The `sha256sum -c` above then ties the archive to that file.
 
 ## Upgrading within v1
 
 Upgrade in this order:
 
-1. **Finish or stop every run.** `tack status -f workload.yaml`, for each workload, lists every run `Succeeded`, or `Stopped` or `Waiting` with no `tack` process running it. A run that resumes after the upgrade runs its remaining steps by the new CLI's rules.
-2. **The CRD at every site,** the way it was installed: the `helm upgrade --install` above, or `kubectl apply --server-side` of the new CRD. Do this before any operator runs the new CLI against the site. A CRD older than the CLI drops the fields it does not know, without an error: `tack run` refuses to create a ledger at such a site, and status writes there lose those fields.
-3. **Every operator's CLI together,** and every script that runs `tack`. A CLI drops the status fields it does not know when it writes a ledger. From v1.3.0, each write records its CLI's version in `status.writtenBy`, and a CLI of an older release refuses to resume or abandon that run, and names the version to use ([RFC#0003](rfcs/RFC0003.md#requirements), Requirement 24). So does a build whose version names no release, such as `dev` from `go build -buildvcs=false`, or from `go install` of v1.4.0 or older; `go install` of a later release's tag takes that tag's version. A CLI older than v1.3.0 does not check.
+1. **Finish or stop every run.** For each workload, `tack status -f workload.yaml` lists every run as `Succeeded`, or as `Stopped` or `Waiting` with no `tack` process running it. A run that resumes after the upgrade runs its remaining steps by the new CLI's rules.
+2. **The CRD at every site,** the way it was installed: the `helm upgrade --install` above, or `kubectl apply --server-side` of the new CRD. Do this before any operator runs the new CLI against the site. A CRD older than the CLI drops the fields it does not know, without an error. At such a site, `tack run` refuses to create a ledger, and status writes lose those fields.
+3. **Every operator's CLI together,** and every script that runs `tack`. When a CLI writes a ledger, it drops the status fields it does not know. From v1.3.0, each write records the CLI's version in `status.writtenBy`. A CLI of an older release then refuses to resume or abandon that run, and names the version to use ([RFC#0003](rfcs/RFC0003.md#requirements), Requirement 24). A build whose version names no release refuses too. An example is the version `dev`, from `go build -buildvcs=false` or from `go install` of v1.4.0 or older. `go install` of a later release's tag takes that tag's version. A CLI older than v1.3.0 does not check.
 
 Each release also needs:
 
 | From | To | CRD | Also before the new CLI runs |
 |---|---|---|---|
-| v1.6.x | the next release (its version is set when it is tagged) | new optional fields: `spec.acceptBehind`, `status.fork`, `status.writes`, `status.steps[].earlier`, `wait.stall` of a step, `status.followUps[].snapshot` and `.archive`; in the Workload snapshot, `cnpg.snapshot`, `timeouts.snapshot` and `timeouts.archiving`; step types `Create` and `Record` | Apply the CRD first: a CRD of v1.6.x drops `spec.acceptBehind`, and `tack run --accept-behind` refuses to create a ledger there. Grant `get` on `pods` and `pods/proxy` in each member's namespace (row 18 of [docs/operations.md](docs/operations.md#permissions); the chart's objects Role has it where `rbac.objects` names `clusters`): the plan reads each site's WAL position with it, and only warns without it. A site-loss plan refuses a target behind another replica that answers, unless `--accept-behind` ([RFC#0004](rfcs/RFC0004.md#requirements), Requirement 14). A site-loss run records the fork point and the old primary's WAL archive; with `cnpg.snapshot`, it takes a snapshot of the old primary, and needs `get` and `create` on `backups` (row 19). A ledger that v1.6.x wrote resumes with the steps it planned. A planned switchover is refused when two sites archive WAL to the same destination, and a site-loss plan warns ([docs/workload.md](docs/workload.md#wal-archives)); grant `get` on the barman-cloud `objectstores` the Clusters name (row 20) for the plan to check them. After each promotion, the run waits up to `timeouts.archiving` for the new primary to archive WAL, then warns and records the follow-up `CheckArchiving`. Each run records when writes stopped and came back (`status.writes`), and each step keeps its earlier attempts (`status.steps[].earlier`). A planned run's wait for the promotion stops after 2 minutes of replay standing still short of the token. |
-| v1.5.x | v1.6.0 | no new field; the column TakenOverBy in `kubectl get sfo`, last | With a CRD of v1.5.x, everything works but that column. Each site's credentials are obtained before its checks and before each step of a run, one credential plugin at a time, with no time limit; Ctrl-C or SIGTERM ends the wait. A site whose credentials cannot be obtained stops the command, or the run before that site's step, and is never counted as lost ([RFC#0007](rfcs/RFC0007.md#requirements), Requirement 12). A planned switchover is refused when a site's Cluster does not name the new primary in `spec.externalClusters`; a site-loss plan warns, and the run stops at that site's step ([RFC#0004](rfcs/RFC0004.md#requirements), Requirement 12). `tack prune` deletes a run whose follow-up `Rebuild` is done, and needs `get` on the workload's objects for it (row 7 of [docs/operations.md](docs/operations.md#permissions)): without it, prune keeps that run. Prune keeps more than `--keep` runs when the clocks of two sites cannot order them. |
-| v1.4.x | v1.5.0 | unchanged | Grant `get`, `create` and `update` on `leases` in the ledger namespace (row 17 of [docs/operations.md](docs/operations.md#permissions); the chart's ledger Role has it with `rbac.create`): without it, a run holds no Lease and says so once. `tack abandon` and `tack run --take-over` now refuse a run that a process may still run; `--force` goes on. A build whose version names no release, such as `dev`, refuses ledgers that a release wrote. Quote a `kubeContext` that YAML reads as other text, such as `on`: v1.5.0 refuses it unquoted. |
-| v1.3.x | v1.4.0 | no new field; the column Abandoned in `kubectl get sfo`, after Reason: Phase and Age move one place right | With a CRD of v1.3.x, everything works but that column. `tack prune` needs `delete` on `sitefailovers` in the ledger namespace (row 16 of [docs/operations.md](docs/operations.md#permissions)): the chart grants it only with `rbac.prune`, so grant it only to the operators who prune. Once v1.4.0 writes a ledger, `tack resume` and `tack abandon` of v1.3.x refuse that run and name v1.4.0. |
-| v1.3.0 | v1.3.1 | unchanged | A script that runs `tack status -f` gets exit code 1 when a site gives no answer, with the runs it read: the list is incomplete ([docs/operations.md](docs/operations.md#reading-a-run)). |
-| v1.2.x | v1.3.0 | new optional fields: `spec.takeOvers`, `status.abandoned`, `status.git.changedRevision`, `status.history`, `status.historyDropped`, `status.writtenBy`; the column Reason in `kubectl get sfo` | Grant `create` on `events` in the ledger namespace, for the ledger's Events; without it, a run goes on without them ([docs/operations.md](docs/operations.md#permissions)). Quote every site name that YAML reads as a boolean or a number, such as `n`, `on` or `010`, in each Workload file: v1.3.0 refuses it unquoted ([docs/workload.md](docs/workload.md#specsites)). A run planned before recorded the decoded name, such as `false`, and its flags, such as `--fence`, take that name. |
+| v1.6.x | the next release (its version is set when it is tagged) | new optional fields: `spec.acceptBehind`, `status.fork`, `status.writes`, `status.steps[].earlier`, `wait.stall` of a step, `status.followUps[].snapshot` and `.archive`; in the Workload snapshot, `cnpg.snapshot`, `timeouts.snapshot` and `timeouts.archiving`; step types `Create` and `Record` | Apply the CRD first. A CRD of v1.6.x drops `spec.acceptBehind`, and `tack run --accept-behind` refuses to create a ledger there. Grant `get` on `pods` and `pods/proxy` in each member's namespace (row 18 of [docs/operations.md](docs/operations.md#permissions); the chart's objects Role has it where `rbac.objects` names `clusters`). The plan uses it to read each site's WAL position. Without it, the plan only warns. A site-loss plan refuses a target that is behind another replica that answers, unless `--accept-behind` is passed ([RFC#0004](rfcs/RFC0004.md#requirements), Requirement 14). A site-loss run records the fork point and the old primary's WAL archive. With `cnpg.snapshot`, it also takes a snapshot of the old primary, and needs `get` and `create` on `backups` (row 19). A ledger that v1.6.x wrote resumes with the steps it planned. A planned switchover is refused when two sites archive WAL to the same destination; a site-loss plan warns instead ([docs/workload.md](docs/workload.md#wal-archives)). For the plan to check this, grant `get` on the barman-cloud `objectstores` that the Clusters name (row 20). After each promotion, the run waits up to `timeouts.archiving` for the new primary to archive WAL. If that time runs out, the run warns and records the follow-up `CheckArchiving`. Each run records when writes stopped and came back (`status.writes`). Each step keeps its earlier attempts (`status.steps[].earlier`). In a planned run, the wait for the promotion stops once replay has stood still for 2 minutes short of the token. |
+| v1.5.x | v1.6.0 | no new field; the column TakenOverBy in `kubectl get sfo`, last | With a CRD of v1.5.x, everything works except that column. Tack obtains each site's credentials before its checks and before each step of a run. It runs one credential plugin at a time, with no time limit; Ctrl-C or SIGTERM ends the wait. If a site's credentials cannot be obtained, the command stops, or the run stops before that site's step. Such a site is never counted as lost ([RFC#0007](rfcs/RFC0007.md#requirements), Requirement 12). A planned switchover is refused when a site's Cluster does not name the new primary in `spec.externalClusters`. In that case a site-loss plan warns, and the run stops at that site's step ([RFC#0004](rfcs/RFC0004.md#requirements), Requirement 12). `tack prune` deletes a run whose follow-up `Rebuild` is done. For that, it needs `get` on the workload's objects (row 7 of [docs/operations.md](docs/operations.md#permissions)). Without it, prune keeps that run. Prune keeps more than `--keep` runs when the clocks of two sites cannot order them. |
+| v1.4.x | v1.5.0 | unchanged | Grant `get`, `create` and `update` on `leases` in the ledger namespace (row 17 of [docs/operations.md](docs/operations.md#permissions); the chart's ledger Role has it with `rbac.create`). Without it, a run holds no Lease and says so once. `tack abandon` and `tack run --take-over` now refuse a run that a process may still run. With `--force`, they go on. A build whose version names no release, such as `dev`, refuses ledgers that a release wrote. Quote a `kubeContext` that YAML reads as other text, such as `on`: v1.5.0 refuses it unquoted. |
+| v1.3.x | v1.4.0 | no new field; the column Abandoned in `kubectl get sfo`, after Reason: Phase and Age move one place right | With a CRD of v1.3.x, everything works except that column. `tack prune` needs `delete` on `sitefailovers` in the ledger namespace (row 16 of [docs/operations.md](docs/operations.md#permissions)). The chart grants it only with `rbac.prune`, so grant it only to the operators who prune. Once v1.4.0 writes a ledger, `tack resume` and `tack abandon` of v1.3.x refuse that run and name v1.4.0. |
+| v1.3.0 | v1.3.1 | unchanged | When a site gives no answer, a script that runs `tack status -f` gets exit code 1, along with the runs that were read. The list is then incomplete ([docs/operations.md](docs/operations.md#reading-a-run)). |
+| v1.2.x | v1.3.0 | new optional fields: `spec.takeOvers`, `status.abandoned`, `status.git.changedRevision`, `status.history`, `status.historyDropped`, `status.writtenBy`; the column Reason in `kubectl get sfo` | Grant `create` on `events` in the ledger namespace, for the ledger's Events. Without it, a run goes on without them ([docs/operations.md](docs/operations.md#permissions)). In each Workload file, quote every site name that YAML reads as a boolean or a number, such as `n`, `on` or `010`. v1.3.0 refuses it unquoted ([docs/workload.md](docs/workload.md#specsites)). A run planned before the upgrade recorded the decoded name, such as `false`. Its flags, such as `--fence`, take that name. |
 | v1.2.0 | v1.2.1 | unchanged | nothing |
-| v1.0.x or v1.1.x | v1.2.x | new optional fields: `spec.takeOver`, `spec.fingerprints`, `status.fingerprints`, `status.supersededBy`, `status.git.releaseRevision` | Grant `get` on the namespace `kube-system` at every site: the plan reads its UID to identify the site's cluster, and fails with `forbidden` without it. Move a user out of an `http` or `https` Git URL, such as `https://user@git.example.com/gitops.git`, into git's configuration (`credential.<url>.username`): Tack refuses such a URL. `ssh://git@git.example.com/gitops.git` and `git@git.example.com:gitops.git` still work. |
+| v1.0.x or v1.1.x | v1.2.x | new optional fields: `spec.takeOver`, `spec.fingerprints`, `status.fingerprints`, `status.supersededBy`, `status.git.releaseRevision` | Grant `get` on the namespace `kube-system` at every site. The plan reads its UID to identify the site's cluster, and fails with `forbidden` without it. Tack refuses an `http` or `https` Git URL that holds a user, such as `https://user@git.example.com/gitops.git`. Move the user into git's configuration (`credential.<url>.username`). `ssh://git@git.example.com/gitops.git` and `git@git.example.com:gitops.git` still work. |
 
 | A ledger written by | Under v1.6.0 |
 |---|---|
-| v1.5.x | As below for v1.3.x. `tack prune` deletes a run with a follow-up `Rebuild` once that site's member was created again 10 s or more after the run's ledger; v1.5.x kept it until deleted by hand. |
-| v1.4.x | As below for v1.3.x. It has no Lease: `tack abandon` and `tack run --take-over` judge it by the ledger, and refuse a `Running` run written within its `Running` step's timeout and 5 minutes, unless `--force`. |
+| v1.5.x | As for v1.3.x, below. Also, `tack prune` deletes a run with a follow-up `Rebuild` once that site's member was created again, 10 s or more after the run's ledger. v1.5.x kept such a run until someone deleted it by hand. |
+| v1.4.x | As for v1.3.x, below. Such a run has no Lease, so `tack abandon` and `tack run --take-over` judge it by the ledger. They refuse a `Running` run whose ledger was written within its `Running` step's timeout plus 5 minutes, unless `--force` is passed. |
 | v1.3.x | `tack status` lists and shows it, with its history. `tack resume` continues it and keeps that history. `tack abandon` sees its mark. `tack prune` deletes it when its rules allow. |
 | v1.2.x | `tack resume` continues it. |
 | v1.0.x or v1.1.x | `tack resume` continues it. Each site's cluster is recorded in `status.fingerprints` on its first read, and checked after. |
 
 ## Upgrading from v0.1.x
 
-1. At every site, upgrade the CRD the way it was installed: the `helm upgrade --install` above, or `kubectl apply --server-side` of the new CRD. Do this before running tack v1.0.0 against the site: tack v1.0.0 reads ledgers as `v1`, and against a site still on the v0.1.x CRD it stops and says to upgrade the CRD.
+1. At every site, upgrade the CRD the way it was installed: the `helm upgrade --install` above, or `kubectl apply --server-side` of the new CRD. Do this before running tack v1.0.0 against the site. tack v1.0.0 reads ledgers as `v1`. Against a site still on the v0.1.x CRD, it stops and says to upgrade the CRD.
 2. Install tack v1.0.0 or later.
 3. In each Workload file, set `apiVersion: failover.tako.id/v1`. Nothing else changes. Tack still reads `failover.tako.id/v1alpha1`, with a warning.
 
@@ -343,7 +343,7 @@ The end-to-end test builds two kind clusters with Flux, CloudNativePG, Strait an
 | git, openssl, curl, sha256sum | any |
 | Internet access | to pull images, and to fetch CloudNativePG's release manifest and Strait's source at the commit pinned in `test/e2e/env/lib.sh` |
 
-`hack/tools/install.sh [DIR]` installs kind, kubectl, flux and helm at these versions into `DIR` (default `bin/tools`), and fails unless each download matches the SHA-256 pinned in the script; add `DIR` to `PATH`. It runs on Linux, amd64 or arm64. `TACK_TOOLS_ARCH=arm64` checks the downloads of the other architecture, as CI's `lint` job does.
+`hack/tools/install.sh [DIR]` installs kind, kubectl, flux and helm at these versions into `DIR` (default `bin/tools`). It fails unless each download matches the SHA-256 pinned in the script. Add `DIR` to `PATH`. The script runs on Linux, amd64 or arm64. `TACK_TOOLS_ARCH=arm64` checks the downloads of the other architecture, as CI's `lint` job does.
 
 ```sh
 make e2e
@@ -362,8 +362,8 @@ make e2e
 
 | Command | Effect |
 |---|---|
-| `TACK_E2E_KEEP=1 make e2e` | keeps the environment after the tests. Their Workload file is `.e2e/workload.yaml`: after `make build`, `bin/tack --kubeconfig .e2e/kubeconfig status -f .e2e/workload.yaml` lists their runs |
-| `TACK_E2E_CRD_FROM=vX.Y.Z make e2e` | installs the chart and CRD of release `vX.Y.Z` in place of this tree's, and runs the scenarios with this tree's `tack`: the CLI against the CRD of a site not upgraded yet. Checks of printer columns added after that release are skipped |
+| `TACK_E2E_KEEP=1 make e2e` | keeps the environment after the tests. Their Workload file is `.e2e/workload.yaml`. After `make build`, `bin/tack --kubeconfig .e2e/kubeconfig status -f .e2e/workload.yaml` lists their runs |
+| `TACK_E2E_CRD_FROM=vX.Y.Z make e2e` | installs the chart and CRD of release `vX.Y.Z` instead of this tree's, and runs the scenarios with this tree's `tack`. This tests the CLI against the CRD of a site not upgraded yet. Checks of printer columns added after that release are skipped |
 | `TACK_E2E_SITES="a b c" test/e2e/run.sh -run TestThreeSites` | builds three sites, the third with a Cluster only, and runs the three-site scenarios: a planned switchover with c following, a planned switchover with c down then resumed, and a run taken over at a lost site (#27) |
 | `make e2e-up` | builds the environment and leaves it running |
 | `make e2e-down` | removes it |
@@ -390,10 +390,31 @@ Everything the test creates is named `tack-e2e*`. [test/e2e/env/README.md](test/
 | `tack --help`, `tack <command> --help`, `man tack` | every command, flag and exit code |
 | `tack --skill` | the guide for AI agents |
 
+## How this project is built
+
+Tack is built with AI coding agents (Claude Code), and a person directs and approves the work.
+
+**What the agents do:** write code, tests and docs, review each other's changes, and look for bugs and gaps.
+
+**What a person decides:**
+- **Design.** Every change starts as an RFC, and a maintainer approves each RFC and each change to one.
+- **Scope.** A maintainer decides what goes into each round of work and what waits.
+- **Merges and releases.** Only a maintainer merges a pull request. Releases come from tags signed by a maintainer, and a maintainer approves each release run.
+
+**How the work is checked:**
+- Each fix comes with a test that fails without the fix.
+- CI runs the unit tests, the race detector, and end-to-end tests on kind for every pull request.
+- Before a release, the change is tested on real clusters, not only in CI.
+- Releases are signed, and you can verify every release asset (see [Verify a release](#verify-a-release)).
+
+**Why we trust it in production:** we run Tack ourselves, for our own databases. A failover tool that loses data or leaves two primaries would hurt us first.
+
+If you find a problem, open an issue. Saying that it looks AI-written is fine, as long as you say what's wrong.
+
 ## Contributing
 
 - [AGENTS.md](AGENTS.md) holds the rules for every change, by a human or an agent.
-- The design lives in [rfcs/](rfcs/). A design change starts as an RFC, `Draft` while under discussion, and becomes `Active` once the maintainers approve it. The code conforms to the Active RFCs; if they disagree, the RFC is amended first.
+- The design lives in [rfcs/](rfcs/). A design change starts as an RFC. The RFC is `Draft` while under discussion, and becomes `Active` once the maintainers approve it. The code conforms to the Active RFCs. If the code and an RFC disagree, the RFC is amended first.
 - Before a pull request: `make verify test lint`. For a change to how a run behaves, also `make e2e`.
 - Commits follow conventional commits: `type(scope): subject`.
 
