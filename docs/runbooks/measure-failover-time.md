@@ -6,7 +6,7 @@ Two numbers come out of each measurement:
 
 | Number | Where |
 |---|---|
-| What Tack recorded | `tack status RUN -f workload.yaml`, line `Writes down:`; `status.writes` in `-o yaml` |
+| What Tack recorded | `tack status RUN -f workload.yaml`, line `Writes down:`; `status.writes` in `-o yaml` or `-o json` |
 | What a client saw | the longest time between two acknowledged writes, from the writer below |
 
 The difference is the time outside Tack's window: mostly Strait's route change, and the client's own reconnect.

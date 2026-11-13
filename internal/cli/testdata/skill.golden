@@ -122,7 +122,7 @@ Usage: `tack plan -f WORKLOAD --to SITE [--mode planned|site-loss] [flags]`
 | `-f`, `--file` | the Workload file (required) |
 | `--from` | the site of the current primary (default: the primary the target site declares) |
 | `--mode` | planned: the old primary demotes and hands over its token; site-loss: promote without a token after the old site is lost (default `planned`) |
-| `-o`, `--output` | text, or yaml for the SiteFailover the run would create (default `text`) |
+| `-o`, `--output` | text, or yaml or json for the SiteFailover the run would create (default `text`) |
 | `--to` | the site that becomes primary (required) |
 
 Examples:
@@ -327,7 +327,7 @@ Usage: `tack status [RUN] (-f WORKLOAD | --context CONTEXT) [flags]`
 | `--context` | a kube context to read runs from, instead of --file |
 | `-f`, `--file` | the Workload file: search every site of the workload for its runs |
 | `--namespace` | the ledger namespace, with --context (default `tack-system`) |
-| `-o`, `--output` | text or yaml (default `text`) |
+| `-o`, `--output` | text, yaml or json (default `text`) |
 
 Examples:
 
