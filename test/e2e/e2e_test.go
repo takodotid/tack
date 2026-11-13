@@ -15,7 +15,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -449,10 +451,33 @@ func TestPlannedSwitchover(t *testing.T) {
 			t.Errorf("plan lacks %q", want)
 		}
 	}
+	// #75 row 2: a client writes all through the switchover, to whichever site takes writes. Every write that a
+	// site acknowledged must be at the new primary after it.
+	psql(t, "a", "create table if not exists writes (n int primary key, at timestamptz default clock_timestamp())")
+	stop, acked := writeAll(t)
 	out = tackOK(t, "run", "-f", workload, "--to", "b", "--yes")
+	acks := stop()
 	run := createdRun(t, out)
 	assertPrimary(t, "b", "a")
 	assertGitMatches(t, "b", "a", "b")
+	if len(acks) == 0 {
+		t.Errorf("no write was acknowledged during the switchover")
+	}
+	present := map[string]bool{}
+	for _, n := range strings.Fields(psql(t, "b", "select n from writes")) {
+		present[n] = true
+	}
+	for _, n := range acks {
+		if !present[n] {
+			t.Errorf("write %s was acknowledged during the switchover and is not at the new primary", n)
+		}
+	}
+	t.Logf("%d writes acknowledged during the switchover; %s", len(acks), acked())
+	// [RFC#0003] Requirement 29: the run records when writes stopped and came back. Kind measures no budget.
+	window := strings.TrimSpace(kubectl(t, "b", "-n", ledgerNS, "get", "sitefailover", run, "-o", "jsonpath={.status.writes.stoppedAt} {.status.writes.resumedAt} {.status.writes.stoppedEstimated}"))
+	if f := strings.Fields(window); len(f) != 2 || f[0] > f[1] {
+		t.Errorf("writes window %q, want stoppedAt then resumedAt, not estimated", window)
+	}
 	if got := psql(t, "b", "select id from marks where id = 'before-switchover'"); got != "before-switchover" {
 		t.Errorf("site b lacks a write made at site a before the switch: %q", got)
 	}
@@ -1273,4 +1298,56 @@ func TestPrune(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "Nothing to delete.") {
 		t.Errorf("second prune: exit %d, want 0 with nothing to delete", code)
 	}
+}
+
+// writeAll writes numbered rows, one after another, to the site that takes them, until stop is called, which
+// returns the numbers some site acknowledged. acked describes the longest time without an acknowledged write.
+func writeAll(t *testing.T) (stop func() []string, acked func() string) {
+	t.Helper()
+	var mu sync.Mutex
+	var acks []string
+	var longest time.Duration
+	done := make(chan struct{})
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		last := time.Now()
+		for n := 1; ; n++ {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			for _, site := range []string{"a", "b"} {
+				pod, err := kubectlE(site, "-n", ns, "get", "cluster", clusterName(site), "-o", "jsonpath={.status.currentPrimary}")
+				if err != nil || pod == "" {
+					continue
+				}
+				if _, err := kubectlE(site, "-n", ns, "exec", pod, "-c", "postgres", "--", "psql", "-U", "postgres", "-d", "app", "-tAc",
+					fmt.Sprintf("insert into writes (n) values (%d)", n)); err == nil {
+					mu.Lock()
+					acks = append(acks, strconv.Itoa(n))
+					if gap := time.Since(last); gap > longest {
+						longest = gap
+					}
+					last = time.Now()
+					mu.Unlock()
+					break
+				}
+			}
+		}
+	}()
+	stop = func() []string {
+		close(done)
+		<-finished
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), acks...)
+	}
+	acked = func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return fmt.Sprintf("the longest time between two acknowledged writes, as kubectl exec saw it: %s", longest.Round(time.Second))
+	}
+	return stop, acked
 }

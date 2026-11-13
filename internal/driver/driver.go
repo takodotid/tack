@@ -178,6 +178,25 @@ type Recorder interface {
 	Record(ctx context.Context, w *failoverv1.WorkloadSpec, c kube.Clients, run string, s *failoverv1.Step) (*Recorded, error)
 }
 
+// Writer is a Driver that names the steps around which its workload takes
+// no writes ([RFC#0003] Requirement 29).
+type Writer interface {
+	// Writes returns the ID of the step whose start stops writes, "" when
+	// the mode cannot tell, such as a site loss, and the ID of the step
+	// after whose end the new primary takes writes.
+	Writes(w *failoverv1.WorkloadSpec, r Request) (stops, resumes string)
+}
+
+// Progresser is a Driver that tells, during a Wait with a stall check,
+// how far the workload got and whether it is still behind what the wait
+// needs. It only reads.
+type Progresser interface {
+	// Progress returns the workload's progress, as text that changes when
+	// it moves, and true while it is behind. "" and false when it cannot
+	// tell: the wait then never stops early.
+	Progress(ctx context.Context, w *failoverv1.WorkloadSpec, c kube.Clients, s *failoverv1.Step, captured map[string]string) (string, bool)
+}
+
 // Noter is a Driver whose plan says what the operator should know about a
 // request that Plan accepts.
 type Noter interface {

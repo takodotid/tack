@@ -74,6 +74,12 @@ func (e *Env) Start(ctx context.Context, sf *failoverv1.SiteFailover, opts Optio
 	now := metav1.NewTime(e.now())
 	sf.Status.State = failoverv1.RunRunning
 	sf.Status.StartedAt = &now
+	if sf.Spec.Mode == failoverv1.ModeSiteLoss {
+		// Writes stopped when the site was lost, which Tack cannot see: at
+		// the latest when the operator started the run ([RFC#0003]
+		// Requirement 29).
+		sf.Status.Writes = &failoverv1.WriteWindow{StoppedAt: &now, StoppedEstimated: true}
+	}
 	sf.Status.Steps = nil
 	for _, s := range sf.Spec.Steps {
 		sf.Status.Steps = append(sf.Status.Steps, failoverv1.StepStatus{ID: s.ID, State: failoverv1.StepPending})
@@ -991,11 +997,18 @@ func (r *runner) runStep(ctx context.Context, step *failoverv1.Step) error {
 	now := metav1.NewTime(r.now())
 	r.startPhase(step.Phase, now)
 	st := r.stepStatus(step.ID)
+	keepAttempt(st)
 	st.State = failoverv1.StepRunning
 	st.StartedAt = &now
 	st.FinishedAt = nil
 	st.Attempts++
 	st.Message = ""
+	if stops, _ := r.writes(); step.ID == stops {
+		w := r.window()
+		if w.StoppedAt == nil {
+			w.StoppedAt = &now
+		}
+	}
 	var entry *failoverv1.HistoryEntry
 	if r.sf.Status.State == failoverv1.RunSucceeded {
 		r.sf.Status.State, r.sf.Status.Reason, r.sf.Status.Message = failoverv1.RunRunning, "", ""
@@ -1027,6 +1040,11 @@ func (r *runner) runStep(ctx context.Context, step *failoverv1.Step) error {
 	done := metav1.NewTime(r.now())
 	st = r.stepStatus(step.ID)
 	st.State, st.FinishedAt, st.Message = failoverv1.StepSucceeded, &done, msg
+	if _, resumes := r.writes(); step.ID == resumes {
+		if w := r.window(); w.ResumedAt == nil {
+			w.ResumedAt = &done
+		}
+	}
 	r.endPhase(step.Phase, done)
 	if err := r.write(ctx, r.sf); err != nil {
 		return err
@@ -1362,6 +1380,40 @@ func hasRunnableDeferred(sf *failoverv1.SiteFailover) bool {
 		}
 	}
 	return false
+}
+
+// writes returns the driver's steps around which the workload takes no
+// writes, or none.
+func (r *runner) writes() (stops, resumes string) {
+	if d, ok := r.Driver.(driver.Writer); ok {
+		return d.Writes(&r.sf.Spec.Workload.Spec, r.request())
+	}
+	return "", ""
+}
+
+// window returns the run's write window, made when absent.
+func (r *runner) window() *failoverv1.WriteWindow {
+	if r.sf.Status.Writes == nil {
+		r.sf.Status.Writes = &failoverv1.WriteWindow{}
+	}
+	return r.sf.Status.Writes
+}
+
+// keepAttempt moves a step's last attempt, if any, to its earlier attempts
+// before the step starts again, keeping the newest MaxEarlierAttempts
+// ([RFC#0003] Requirement 30).
+func keepAttempt(st *failoverv1.StepStatus) {
+	if st.Attempts == 0 && st.StartedAt == nil {
+		return
+	}
+	msg := st.Message
+	if len(msg) > failoverv1.MaxHistoryMessage {
+		msg = cut(msg, failoverv1.MaxHistoryMessage)
+	}
+	st.Earlier = append(st.Earlier, failoverv1.StepAttempt{StartedAt: st.StartedAt, FinishedAt: st.FinishedAt, State: st.State, Message: msg})
+	if n := len(st.Earlier); n > failoverv1.MaxEarlierAttempts {
+		st.Earlier = st.Earlier[n-failoverv1.MaxEarlierAttempts:]
+	}
 }
 
 // withPositions are runChecks that also read a pod through the API
