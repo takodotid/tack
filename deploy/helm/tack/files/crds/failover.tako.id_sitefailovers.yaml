@@ -484,6 +484,8 @@ spec:
                       - Release
                       - VerifyNoop
                       - Routing
+                      - Create
+                      - Record
                       type: string
                     verifyGit:
                       description: VerifyStep checks the held objects at the step's
@@ -1905,6 +1907,8 @@ spec:
                       - Release
                       - VerifyNoop
                       - Routing
+                      - Create
+                      - Record
                       type: string
                     verifyGit:
                       description: VerifyStep checks the held objects at the step's
