@@ -29,6 +29,9 @@ type Request struct {
 	// AcceptBehind lets a site loss promote to while another site that
 	// answers holds WAL past it ([RFC#0004] Requirement 14).
 	AcceptBehind bool
+	// Legacy asks for the steps that v1.6.0 and earlier planned, so that a
+	// ledger they wrote still resumes ([RFC#0003] Requirement 21).
+	Legacy bool
 }
 
 // Topology is the workload's state at every site, as read at plan time.
@@ -152,6 +155,27 @@ type Driver interface {
 	// primary there. It returns "" for to. The IDs are the same in the
 	// ledgers of every earlier Tack release.
 	Demotion(r Request, site string) string
+}
+
+// Recorded is what a Record step read.
+type Recorded struct {
+	// Fork fills the ledger's fork point; set fields replace its own.
+	Fork *failoverv1.ForkPoint
+	// Snapshot and Archive go on the step site's follow-up Rebuild.
+	Snapshot *failoverv1.SnapshotRecord
+	Archive  string
+	// Message is the step's message.
+	Message string
+	// Done is false while the record waits for the workload, such as a
+	// snapshot not yet complete: the engine asks again until the step's
+	// timeout.
+	Done bool
+}
+
+// Recorder is a Driver that runs Record steps: it reads the workload
+// through its own API, and changes nothing ([RFC#0002] Requirement 3).
+type Recorder interface {
+	Record(ctx context.Context, w *failoverv1.WorkloadSpec, c kube.Clients, run string, s *failoverv1.Step) (*Recorded, error)
 }
 
 // Noter is a Driver whose plan says what the operator should know about a

@@ -6,13 +6,15 @@ The rebuild deletes the old Cluster's data. Do it only once the new primary is h
 
 ## Before
 
+**First check: Tack recorded a snapshot of the old primary.** `tack status RUN -f workload.yaml` shows `snapshot: Backup NS/NAME` on the old site's `Rebuild`. **Without it, stop:** the old primary's writes after the fork point exist nowhere else. Follow [recover-old-primary-writes.md](recover-old-primary-writes.md) first; it says how to take the snapshot by hand, or how to decide with the data's owners that the writes can go.
+
 | Check | Command |
 |---|---|
 | The run succeeded and lists the follow-up | `tack status RUN -f workload.yaml` |
 | The new primary is healthy | `kubectl --context NEW -n NS get cluster NEW_CLUSTER` shows `Cluster in healthy state` |
 | The old site declares the new primary | `kubectl --context OLD -n NS get cluster OLD_CLUSTER -o jsonpath='{.spec.replica.primary}'` |
 
-If the old data holds writes that must be kept, export them from the old Cluster first. Tack does not do this.
+The snapshot keeps the old data after the rebuild. Keep its VolumeSnapshots until the data's owners are done.
 
 ## Steps
 
@@ -25,7 +27,7 @@ If the old data holds writes that must be kept, export them from the old Cluster
          source: NEW_CLUSTER
    ```
 
-   `bootstrap` is read only when a Cluster is created, so this changes nothing live. If the Cluster archives WAL to an object store, give the rebuilt Cluster a new archive path, or CloudNativePG refuses to archive into the old one.
+   `bootstrap` is read only when a Cluster is created, so this changes nothing live. If the Cluster archives WAL to an object store, give the rebuilt Cluster a new destination, such as a new `serverName`, or CloudNativePG refuses to archive into the old one. Keep the old archive, which the `Rebuild` names: never delete it, and never point a Cluster's archiving at it again.
 
 2. **Delete the old Cluster.** Its PVCs go with it.
 

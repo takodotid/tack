@@ -245,7 +245,7 @@ func TestNoExec(t *testing.T) {
 		}
 	}
 	sort.Strings(steps)
-	want := []string{"Capture", "Git", "Hold", "Patch", "Reconcile", "Release", "Routing", "VerifyGit", "VerifyNoop", "Wait"}
+	want := []string{"Capture", "Create", "Git", "Hold", "Patch", "Reconcile", "Record", "Release", "Routing", "VerifyGit", "VerifyNoop", "Wait"}
 	if !slices.Equal(steps, want) {
 		t.Errorf("step types %v, want those of RFC0002 Requirement 3: %v", steps, want)
 	}

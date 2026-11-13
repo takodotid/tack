@@ -62,6 +62,13 @@ type CNPGSite struct {
 	// Cluster is primary.
 	// +optional
 	Pooler *CNPGPooler `json:"pooler,omitempty"`
+
+	// Snapshot asks for a CloudNativePG Backup with the volumeSnapshot
+	// method of this site's Cluster, once it answers again after a site
+	// loss that left it the old primary, before anyone rebuilds it. The
+	// Cluster needs spec.backup.volumeSnapshot ([RFC#0004] Requirement 15).
+	// +optional
+	Snapshot bool `json:"snapshot,omitempty"`
 }
 
 // CNPGPooler is a read-write Pooler of one Cluster.
@@ -196,4 +203,8 @@ type Timeouts struct {
 	// Routing bounds the wait for routing to follow.
 	// +optional
 	Routing *metav1.Duration `json:"routing,omitempty"`
+	// Snapshot bounds the wait for the old primary's snapshot, 30m when
+	// unset ([RFC#0004] Requirement 15).
+	// +optional
+	Snapshot *metav1.Duration `json:"snapshot,omitempty"`
 }

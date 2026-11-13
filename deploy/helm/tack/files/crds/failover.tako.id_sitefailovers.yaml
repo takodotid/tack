@@ -152,6 +152,37 @@ spec:
                       - jsonPath
                       - object
                       type: object
+                    create:
+                      description: |-
+                        CreateStep creates one object. A step that runs again adopts the object
+                        when it carries the label failover.tako.id/run of this run.
+                      properties:
+                        manifest:
+                          description: |-
+                            Manifest is the object as JSON. $(run) stands for the run's name, in
+                            it and in Object's name.
+                          type: string
+                        object:
+                          description: ObjectRef names a live object.
+                          properties:
+                            apiVersion:
+                              type: string
+                            kind:
+                              type: string
+                            name:
+                              type: string
+                            namespace:
+                              type: string
+                          required:
+                          - apiVersion
+                          - kind
+                          - name
+                          - namespace
+                          type: object
+                      required:
+                      - manifest
+                      - object
+                      type: object
                     deferrable:
                       description: |-
                         Deferrable lets the run go on while the step's site is unreachable.
@@ -334,6 +365,38 @@ spec:
                           type: string
                       required:
                       - timeout
+                      type: object
+                    record:
+                      description: |-
+                        RecordStep has the driver read the workload through its own API, only
+                        read, and record what it read in the ledger, until Timeout when set.
+                      properties:
+                        object:
+                          description: ObjectRef names a live object.
+                          properties:
+                            apiVersion:
+                              type: string
+                            kind:
+                              type: string
+                            name:
+                              type: string
+                            namespace:
+                              type: string
+                          required:
+                          - apiVersion
+                          - kind
+                          - name
+                          - namespace
+                          type: object
+                        timeout:
+                          type: string
+                        what:
+                          description: 'What names the record: Position, Fork, Snapshot
+                            or Archive.'
+                          type: string
+                      required:
+                      - object
+                      - what
                       type: object
                     release:
                       description: ObjectStep acts on one object that Flux applies.
@@ -830,6 +893,13 @@ spec:
                                   - name
                                   - namespace
                                   type: object
+                                snapshot:
+                                  description: |-
+                                    Snapshot asks for a CloudNativePG Backup with the volumeSnapshot
+                                    method of this site's Cluster, once it answers again after a site
+                                    loss that left it the old primary, before anyone rebuilds it. The
+                                    Cluster needs spec.backup.volumeSnapshot ([RFC#0004] Requirement 15).
+                                  type: boolean
                               required:
                               - cluster
                               type: object
@@ -868,6 +938,11 @@ spec:
                             type: string
                           routing:
                             description: Routing bounds the wait for routing to follow.
+                            type: string
+                          snapshot:
+                            description: |-
+                              Snapshot bounds the wait for the old primary's snapshot, 30m when
+                              unset ([RFC#0004] Requirement 15).
                             type: string
                         type: object
                     required:
@@ -951,17 +1026,91 @@ spec:
                     action:
                       description: Action is what to do, such as Rebuild.
                       type: string
+                    archive:
+                      description: |-
+                        Archive is where the site's member archived its WAL, as its spec
+                        named it when the run read it. The rebuild keeps it.
+                      type: string
                     reason:
                       description: Reason says why.
                       type: string
                     site:
                       type: string
+                    snapshot:
+                      description: |-
+                        Snapshot is the snapshot of the site's member that the run took
+                        before the rebuild ([RFC#0004] Requirement 15).
+                      properties:
+                        at:
+                          description: At is when the run recorded it.
+                          format: date-time
+                          type: string
+                        backup:
+                          description: |-
+                            Backup is the workload's object that took the snapshot, such as a
+                            CloudNativePG Backup.
+                          properties:
+                            apiVersion:
+                              type: string
+                            kind:
+                              type: string
+                            name:
+                              type: string
+                            namespace:
+                              type: string
+                          required:
+                          - apiVersion
+                          - kind
+                          - name
+                          - namespace
+                          type: object
+                        volumeSnapshots:
+                          description: VolumeSnapshots are the VolumeSnapshots it
+                            made, in its namespace.
+                          items:
+                            type: string
+                          type: array
+                      required:
+                      - backup
+                      type: object
                   required:
                   - action
                   - reason
                   - site
                   type: object
                 type: array
+              fork:
+                description: |-
+                  Fork is where the new primary's history leaves the old one's, in a
+                  site loss ([RFC#0004] Requirement 15).
+                properties:
+                  at:
+                    description: At is when the promotion was seen done.
+                    format: date-time
+                    type: string
+                  message:
+                    description: Message says what could not be read, if anything.
+                    type: string
+                  parentTimeline:
+                    description: ParentTimeline is the timeline that position is on.
+                    format: int32
+                    type: integer
+                  position:
+                    description: |-
+                      Position is the new primary's WAL position read right before its
+                      promotion: its history leaves the old one's there or just after.
+                    type: string
+                  site:
+                    description: Site is the new primary's site.
+                    type: string
+                  timeline:
+                    description: Timeline is the new primary's timeline after its
+                      promotion.
+                    format: int32
+                    type: integer
+                required:
+                - site
+                type: object
               git:
                 description: Git records the run's view of the repository.
                 properties:
@@ -1356,6 +1505,37 @@ spec:
                       - jsonPath
                       - object
                       type: object
+                    create:
+                      description: |-
+                        CreateStep creates one object. A step that runs again adopts the object
+                        when it carries the label failover.tako.id/run of this run.
+                      properties:
+                        manifest:
+                          description: |-
+                            Manifest is the object as JSON. $(run) stands for the run's name, in
+                            it and in Object's name.
+                          type: string
+                        object:
+                          description: ObjectRef names a live object.
+                          properties:
+                            apiVersion:
+                              type: string
+                            kind:
+                              type: string
+                            name:
+                              type: string
+                            namespace:
+                              type: string
+                          required:
+                          - apiVersion
+                          - kind
+                          - name
+                          - namespace
+                          type: object
+                      required:
+                      - manifest
+                      - object
+                      type: object
                     deferrable:
                       description: |-
                         Deferrable lets the run go on while the step's site is unreachable.
@@ -1538,6 +1718,38 @@ spec:
                           type: string
                       required:
                       - timeout
+                      type: object
+                    record:
+                      description: |-
+                        RecordStep has the driver read the workload through its own API, only
+                        read, and record what it read in the ledger, until Timeout when set.
+                      properties:
+                        object:
+                          description: ObjectRef names a live object.
+                          properties:
+                            apiVersion:
+                              type: string
+                            kind:
+                              type: string
+                            name:
+                              type: string
+                            namespace:
+                              type: string
+                          required:
+                          - apiVersion
+                          - kind
+                          - name
+                          - namespace
+                          type: object
+                        timeout:
+                          type: string
+                        what:
+                          description: 'What names the record: Position, Fork, Snapshot
+                            or Archive.'
+                          type: string
+                      required:
+                      - object
+                      - what
                       type: object
                     release:
                       description: ObjectStep acts on one object that Flux applies.
@@ -2034,6 +2246,13 @@ spec:
                                   - name
                                   - namespace
                                   type: object
+                                snapshot:
+                                  description: |-
+                                    Snapshot asks for a CloudNativePG Backup with the volumeSnapshot
+                                    method of this site's Cluster, once it answers again after a site
+                                    loss that left it the old primary, before anyone rebuilds it. The
+                                    Cluster needs spec.backup.volumeSnapshot ([RFC#0004] Requirement 15).
+                                  type: boolean
                               required:
                               - cluster
                               type: object
@@ -2072,6 +2291,11 @@ spec:
                             type: string
                           routing:
                             description: Routing bounds the wait for routing to follow.
+                            type: string
+                          snapshot:
+                            description: |-
+                              Snapshot bounds the wait for the old primary's snapshot, 30m when
+                              unset ([RFC#0004] Requirement 15).
                             type: string
                         type: object
                     required:
@@ -2155,17 +2379,91 @@ spec:
                     action:
                       description: Action is what to do, such as Rebuild.
                       type: string
+                    archive:
+                      description: |-
+                        Archive is where the site's member archived its WAL, as its spec
+                        named it when the run read it. The rebuild keeps it.
+                      type: string
                     reason:
                       description: Reason says why.
                       type: string
                     site:
                       type: string
+                    snapshot:
+                      description: |-
+                        Snapshot is the snapshot of the site's member that the run took
+                        before the rebuild ([RFC#0004] Requirement 15).
+                      properties:
+                        at:
+                          description: At is when the run recorded it.
+                          format: date-time
+                          type: string
+                        backup:
+                          description: |-
+                            Backup is the workload's object that took the snapshot, such as a
+                            CloudNativePG Backup.
+                          properties:
+                            apiVersion:
+                              type: string
+                            kind:
+                              type: string
+                            name:
+                              type: string
+                            namespace:
+                              type: string
+                          required:
+                          - apiVersion
+                          - kind
+                          - name
+                          - namespace
+                          type: object
+                        volumeSnapshots:
+                          description: VolumeSnapshots are the VolumeSnapshots it
+                            made, in its namespace.
+                          items:
+                            type: string
+                          type: array
+                      required:
+                      - backup
+                      type: object
                   required:
                   - action
                   - reason
                   - site
                   type: object
                 type: array
+              fork:
+                description: |-
+                  Fork is where the new primary's history leaves the old one's, in a
+                  site loss ([RFC#0004] Requirement 15).
+                properties:
+                  at:
+                    description: At is when the promotion was seen done.
+                    format: date-time
+                    type: string
+                  message:
+                    description: Message says what could not be read, if anything.
+                    type: string
+                  parentTimeline:
+                    description: ParentTimeline is the timeline that position is on.
+                    format: int32
+                    type: integer
+                  position:
+                    description: |-
+                      Position is the new primary's WAL position read right before its
+                      promotion: its history leaves the old one's there or just after.
+                    type: string
+                  site:
+                    description: Site is the new primary's site.
+                    type: string
+                  timeline:
+                    description: Timeline is the new primary's timeline after its
+                      promotion.
+                    format: int32
+                    type: integer
+                required:
+                - site
+                type: object
               git:
                 description: Git records the run's view of the repository.
                 properties:

@@ -408,21 +408,32 @@ func (d Driver) Steps(w *failoverv1.WorkloadSpec, r driver.Request) ([]failoverv
 		if from.CNPG.Pooler != nil {
 			b.scale(from, 0)
 		}
+		if !r.Legacy {
+			b.record("record-position-"+to.Name, to, ClusterRef(to), RecordPosition, nil,
+				"record in the ledger how far Cluster "+toName+" reaches right before its promotion: the old primary's writes after it are not in the new history")
+		}
 		b.patch("promote-"+to.Name, to, ClusterRef(to), "promote Cluster "+toName+" without a token",
 			replicaPatch(toName, nil))
 		b.wait("wait-promoted-"+to.Name, to, ClusterRef(to), "wait until Cluster "+toName+" runs a healthy primary",
 			w.Timeouts.Promotion.Duration,
 			cond("{.status.instancesReportedState.*.isPrimary}", failoverv1.OpContains, "true"),
 			cond("{.status.phase}", failoverv1.OpEquals, PhaseHealthy))
+		if !r.Legacy {
+			b.record("record-fork-"+to.Name, to, ClusterRef(to), RecordFork, nil,
+				"record in the ledger the timeline on which Cluster "+toName+"'s new history starts")
+		}
 		b.declareOthers(r)
 		if to.CNPG.Pooler != nil {
 			b.scale(to, to.CNPG.Pooler.Instances)
 		}
+		if !r.Legacy {
+			b.keepOld(from)
+		}
 		follow = append(follow, failoverv1.FollowUp{
 			Site:   from.Name,
 			Action: engine.FollowUpRebuild,
-			Reason: fmt.Sprintf("Cluster %s was promoted without a token, so Cluster %s may hold writes that %s lacks and cannot follow it: recreate %s from %s (%s)",
-				toName, from.CNPG.Cluster.Name, toName, from.CNPG.Cluster.Name, toName, version.DocLink("docs/runbooks/rebuild-old-primary.md")),
+			Reason: fmt.Sprintf("Cluster %s was promoted without a token, so Cluster %s may hold writes that %s lacks and cannot follow it: keep them for their owners (%s), then recreate %s from %s (%s)",
+				toName, from.CNPG.Cluster.Name, toName, version.DocLink("docs/runbooks/recover-old-primary-writes.md"), from.CNPG.Cluster.Name, toName, version.DocLink("docs/runbooks/rebuild-old-primary.md")),
 		})
 	default:
 		return nil, nil, fmt.Errorf("unknown mode %q", r.Mode)
@@ -525,6 +536,48 @@ type builder struct {
 func (b *builder) add(s failoverv1.Step) {
 	s.Phase = failoverv1.PhaseFailover
 	b.steps = append(b.steps, s)
+}
+
+// record adds a Record step.
+func (b *builder) record(id string, s *failoverv1.Site, obj failoverv1.ObjectRef, what string, timeout *time.Duration, desc string) {
+	rs := &failoverv1.RecordStep{Object: obj, What: what}
+	if timeout != nil {
+		rs.Timeout = &metav1.Duration{Duration: *timeout}
+	}
+	b.add(failoverv1.Step{ID: id, Type: failoverv1.StepRecord, Site: s.Name, Description: desc, Record: rs})
+}
+
+// keepOld keeps the old primary's data for the operator, once its site
+// answers: a snapshot of its volumes, when the Workload asks for one, and
+// its WAL archive, both recorded on its follow-up Rebuild ([RFC#0004]
+// Requirement 15). The snapshot is cold: CloudNativePG shuts the instance
+// down for it, so it needs no WAL archive to start from, and recommends a
+// cold snapshot for a recovery (v1.30.1,
+// docs/src/appendixes/backup_volumesnapshot.md:130-150). The instance no
+// longer takes writes: it was fenced first.
+func (b *builder) keepOld(from *failoverv1.Site) {
+	cluster := from.CNPG.Cluster
+	if !from.CNPG.Snapshot {
+		b.record("record-archive-"+from.Name, from, ClusterRef(from), RecordArchive, nil,
+			"record on the follow-up Rebuild where Cluster "+cluster.Name+" archives its WAL, so the rebuild keeps it")
+		return
+	}
+	ref := failoverv1.ObjectRef{APIVersion: APIVersion, Kind: "Backup", Namespace: cluster.Namespace, Name: "$(run)-" + from.Name}
+	manifest := map[string]any{
+		"apiVersion": APIVersion, "kind": "Backup",
+		"metadata": map[string]any{"namespace": cluster.Namespace, "name": ref.Name},
+		"spec":     map[string]any{"cluster": map[string]any{"name": cluster.Name}, "method": "volumeSnapshot", "target": "primary", "online": false},
+	}
+	body, _ := json.Marshal(manifest)
+	b.add(failoverv1.Step{ID: "snapshot-" + from.Name, Type: failoverv1.StepCreate, Site: from.Name,
+		Description: "take a snapshot of the volumes of Cluster " + cluster.Name + " with a CloudNativePG Backup, before anyone rebuilds it",
+		Create:      &failoverv1.CreateStep{Object: ref, Manifest: string(body)}})
+	timeout := DefaultSnapshotTimeout
+	if t := b.w.Timeouts.Snapshot; t != nil {
+		timeout = t.Duration
+	}
+	b.record("record-snapshot-"+from.Name, from, ref, RecordSnapshot, &timeout,
+		"wait until the Backup completes, then record its VolumeSnapshots and the WAL archive of Cluster "+cluster.Name+" on the follow-up Rebuild")
 }
 
 func (b *builder) patch(id string, s *failoverv1.Site, obj failoverv1.ObjectRef, desc, merge string) {

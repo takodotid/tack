@@ -60,6 +60,9 @@ func (o *Operator) reconcile(ctx context.Context, site string) {
 		if token != "" {
 			set(u, token, "status", "lastPromotionToken")
 		}
+		// A promotion starts a timeline.
+		tl, _, _ := unstructured.NestedInt64(u.Object, "status", "timelineID")
+		set(u, tl+1, "status", "timelineID")
 		set(u, true, "status", "instancesReportedState", self+"-1", "isPrimary")
 		set(u, "", "status", "demotionToken")
 	case primary == self && token == "" && last != "":
@@ -70,6 +73,8 @@ func (o *Operator) reconcile(ctx context.Context, site string) {
 	if fmt.Sprint(before.Object) != fmt.Sprint(u.Object) {
 		_ = c.Update(ctx, u)
 	}
+
+	o.backups(ctx, c)
 
 	p := Object("postgresql.cnpg.io/v1", "Pooler", "db", "pg-"+site+"-pooler-rw", nil)
 	if c.Get(ctx, client.ObjectKeyFromObject(p), p) != nil {
@@ -98,4 +103,34 @@ func set(u *unstructured.Unstructured, v any, path ...string) {
 		return
 	}
 	_ = unstructured.SetNestedField(u.Object, v, path...)
+}
+
+// BackupFails makes every Backup of the fake fail with this error.
+var BackupFails string
+
+// backups completes each volumeSnapshot Backup with one VolumeSnapshot of
+// its data, as CloudNativePG does once the snapshot is ready.
+func (o *Operator) backups(ctx context.Context, c client.Client) {
+	list := &unstructured.UnstructuredList{}
+	list.SetAPIVersion("postgresql.cnpg.io/v1")
+	list.SetKind("BackupList")
+	if c.List(ctx, list) != nil {
+		return
+	}
+	for i := range list.Items {
+		b := &list.Items[i]
+		if phase, _, _ := unstructured.NestedString(b.Object, "status", "phase"); phase != "" {
+			continue
+		}
+		if BackupFails != "" {
+			set(b, "failed", "status", "phase")
+			set(b, BackupFails, "status", "error")
+		} else {
+			set(b, "completed", "status", "phase")
+			b.Object["status"].(map[string]any)["snapshotBackupStatus"] = map[string]any{"elements": []any{
+				map[string]any{"name": b.GetName(), "type": "PG_DATA"},
+			}}
+		}
+		_ = c.Update(ctx, b)
+	}
 }

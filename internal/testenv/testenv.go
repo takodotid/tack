@@ -35,6 +35,7 @@ import (
 var GVKs = []schema.GroupVersionKind{
 	{Group: "postgresql.cnpg.io", Version: "v1", Kind: "Cluster"},
 	{Group: "postgresql.cnpg.io", Version: "v1", Kind: "Pooler"},
+	{Group: "postgresql.cnpg.io", Version: "v1", Kind: "Backup"},
 	{Group: "kustomize.toolkit.fluxcd.io", Version: "v1", Kind: "Kustomization"},
 	{Group: "source.toolkit.fluxcd.io", Version: "v1", Kind: "GitRepository"},
 	{Group: "strait.tako.id", Version: "v1", Kind: "SiteService"},
@@ -680,9 +681,14 @@ func (c *Clients) ProxyGet(ctx context.Context, site, namespace, pod, scheme str
 			return nil, err
 		}
 		primary, _, _ := unstructured.NestedBool(u.Object, "status", "instancesReportedState", pod, "isPrimary")
-		status = map[string]any{"systemID": "7300000000000000001", "timeLineID": 1, "isPrimary": primary}
+		tl, _, _ := unstructured.NestedInt64(u.Object, "status", "timelineID")
+		if tl == 0 {
+			tl = 1
+		}
+		status = map[string]any{"systemID": "7300000000000000001", "timeLineID": tl, "isPrimary": primary}
 		if primary {
 			status["currentLsn"] = "0/3000060"
+			status["currentWAL"] = fmt.Sprintf("%08X0000000000000003", tl)
 		} else {
 			status["receivedLsn"], status["replayLsn"], status["isWalReceiverActive"] = "0/3000060", "0/3000060", true
 		}
