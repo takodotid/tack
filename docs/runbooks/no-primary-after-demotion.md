@@ -22,7 +22,7 @@ A planned run from site F to site T stopped, or its process ended, after it demo
 
 | Check | How | If not |
 |---|---|---|
-| No `tack` process runs `RUN`. | Ask every operator and every script that runs `tack`. The ledger cannot tell a live process from a dead one ([RFC#0003](../../rfcs/RFC0003.md#limitations), Limitations). | Let it end. |
+| No `tack` process runs `RUN`. | Ask every operator and every script that runs `tack`. The ledger cannot tell a live process from a dead one ([RFC#0003](../../rfcs/RFC0003.md#requirements), Requirement 28). | Let it end. |
 | F is demoted. | `kubectl --context F_CTX -n NS get cluster F_CLUSTER -o jsonpath='{.spec.replica.primary} {.status.instancesReportedState.*.isPrimary}{"\n"}'` prints `T_CLUSTER` and `false` for each instance. | F is still primary, and this runbook does not apply: resume. |
 | T has not promoted. | `kubectl --context T_CTX -n NS get cluster T_CLUSTER -o jsonpath='{.spec.replica.primary} {.status.lastPromotionToken} {.status.instancesReportedState.*.isPrimary}{"\n"}'` prints `F_CLUSTER`, nothing, `false`. | T has promoted, or is promoting: take option 1. Never promote F by hand then: two primaries. |
 | The run's reason. | `tack status RUN -f workload.yaml`. Fix its cause first: [stop-reasons.md](stop-reasons.md). | |

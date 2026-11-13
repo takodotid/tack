@@ -34,3 +34,13 @@ Only the job `publish` pushes, in this order: the chart, then the GitHub release
 | Before its step `Push and sign the chart` | Re-run the failed jobs. Nothing of the version is visible. Attestations and the signature of `SHA256SUMS` from the failed attempt stay in the transparency log, and name assets that were never published. |
 | In that step or later, before the GitHub release exists | Release the next patch version. A re-run stops with `published already`. |
 | In its step `Verify the release` | The release is published, and one of its checks failed. Find out which before anyone installs it. If an asset or a signature is wrong, say so in the GitHub release's notes, and release the next patch version. |
+
+## What the release does not check
+
+| Limit | When to look again |
+|---|---|
+| `gate` runs from the workflow of the tag's commit. A tag on a commit whose `release.yaml` lacks it publishes anyway. Only the right to push `v*` tags limits that: a tag ruleset, a repository setting. | A release that must hold against a person who can push tags. |
+| GitHub verifies a tag's signature against the keys of the tagger's GitHub account. Any account that may push tags passes the tag check ([RFC0009](../../rfcs/RFC0009.md#releases), Requirement 19) with its own key. | More than one person who may push tags, with only some trusted to release. |
+| Some tools come pinned by others, or with the runner. `actions/setup-go` downloads Go. docker, gh, jq, curl and sha256sum come with the runner image. The e2e's Git server installs git with `apk add`, which checks the packages' signatures against the keys of its base image, pinned by digest, but not their versions. | A tool that a job with write access runs, and that these leave unpinned. |
+| `renovate.json` asks Renovate to update the SHA-256 of kind, flux and cosign with their version, through `github-release-attachments`; whether that datasource does so was not observed: only Renovate's reading of the pins was run, not its lookups. kubectl and helm are downloaded from elsewhere: Renovate is configured to update their version once the operator approves it on the Dependency Dashboard, and their SHA-256 is copied by hand. CI's `lint` job installs every pin, for amd64 and arm64, so a pull request with a SHA-256 that does not match fails. | The first Renovate pull request of the tools, a SHA-256 that it leaves wrong, or a datasource that reads the checksums of kubectl or helm. |
+| The SBOM lists the modules that the binary's build information names, with the Go version as a property, not the standard library as a component. `govulncheck` in CI covers the standard library. | A consumer of the SBOM that must see the standard library. |
