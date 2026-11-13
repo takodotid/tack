@@ -2,6 +2,7 @@ package v1
 
 import (
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -117,6 +118,25 @@ func TestCRDPrintsTakenOverLast(t *testing.T) {
 		}
 		if cols[7].Name != "Phase" || cols[8].Name != "Age" {
 			t.Errorf("version %s: Phase and Age moved: %s, %s", v.Name, cols[7].Name, cols[8].Name)
+		}
+	}
+}
+
+// Every step type of the Go types is in the CRD's enum: the API server
+// refuses a ledger with any other, as CI's e2e found for Record.
+func TestCRDKnowsEveryStepType(t *testing.T) {
+	want := []string{string(StepHold), string(StepReconcile), string(StepPatch), string(StepWait), string(StepCapture), string(StepGit),
+		string(StepVerifyGit), string(StepRelease), string(StepVerifyNoop), string(StepRouting), string(StepCreate), string(StepRecord)}
+	for _, v := range readCRD(t).Spec.Versions {
+		typ := v.Schema.OpenAPIV3Schema.Properties["spec"].Properties["steps"].Items.Schema.Properties["type"]
+		var got []string
+		for _, e := range typ.Enum {
+			got = append(got, strings.Trim(string(e.Raw), `"`))
+		}
+		for _, w := range want {
+			if !slices.Contains(got, w) {
+				t.Errorf("version %s: the step type enum %v lacks %s", v.Name, got, w)
+			}
 		}
 	}
 }

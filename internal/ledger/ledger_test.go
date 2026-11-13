@@ -3,6 +3,7 @@ package ledger
 import (
 	"context"
 	"fmt"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	"strings"
 	"testing"
 	"time"
@@ -240,5 +241,23 @@ func TestDeleteNeedsTheLedgerRead(t *testing.T) {
 	}
 	if _, err := s.Get(ctx, "run-1"); !apierrors.IsNotFound(err) {
 		t.Errorf("the ledger is still there: %v", err)
+	}
+}
+
+// A CRD older than this Tack refuses a step type it does not know: the
+// error says to apply this version's CRD, and nothing is created.
+func TestCreateOnACRDWithoutTheStepType(t *testing.T) {
+	base := fake.NewClientBuilder().WithScheme(kube.NewScheme()).Build()
+	c := interceptor.NewClient(base, interceptor.Funcs{
+		Create: func(ctx context.Context, cl client.WithWatch, o client.Object, opts ...client.CreateOption) error {
+			return apierrors.NewInvalid(failoverv1.GroupVersion.WithKind("SiteFailover").GroupKind(), o.GetName(), field.ErrorList{
+				field.NotSupported(field.NewPath("spec", "steps").Index(17).Child("type"), "Record", []string{"Hold", "Routing"}),
+			})
+		},
+	})
+	s := &Store{Client: c, Namespace: "tack-system"}
+	err := s.Create(context.Background(), &failoverv1.SiteFailover{ObjectMeta: metav1.ObjectMeta{Name: "run-1"}})
+	if err == nil || !strings.Contains(err.Error(), "does not know a step type of this Tack version") || !strings.Contains(err.Error(), "apply the CRD of this Tack version") {
+		t.Fatalf("Create: %v", err)
 	}
 }
