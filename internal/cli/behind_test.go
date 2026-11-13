@@ -103,3 +103,27 @@ func TestAcceptBehindNeedsSiteLoss(t *testing.T) {
 		}
 	}
 }
+
+// A run that stopped before its Failover steps, whose target is then
+// behind another replica, is refused on resume by the read before the
+// first Failover step. tack resume has no --accept-behind: the message
+// names the commands that take it, and the way on.
+func TestResumeRefusesTargetNowBehind(t *testing.T) {
+	f := behindSites()
+	f.clients.SetStatus("c", map[string]any{"systemID": "7300000000000000001", "timeLineID": 1, "receivedLsn": "0/3000060", "replayLsn": "0/3000060"}, nil)
+	f.flux.Fail["Hold"] = errors.New("stop at the first hold")
+	if out, code := run(t, f, "run", "-f", "testdata/workload-3.yaml", "--to", "b", "--mode", "site-loss", "--yes"); code != ExitStopped {
+		t.Fatalf("run: exit %d:\n%s", code, out)
+	}
+	delete(f.flux.Fail, "Hold")
+	f.clients.SetStatus("c", map[string]any{"systemID": "7300000000000000001", "timeLineID": 1, "receivedLsn": "0/5A01C2F0", "replayLsn": "0/5A01C2F0"}, nil)
+	out, code := run(t, f, "resume", "pg-main-20261027-101500", "-f", "testdata/workload-3.yaml", "--yes")
+	for _, want := range []string{"site c holds WAL past site b", "pass --accept-behind to tack plan and tack run", "No Failover step of this run ran", "abandon the run"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("resume (exit %d) does not say %q:\n%s", code, want, out)
+		}
+	}
+	if code != ExitStopped {
+		t.Errorf("resume: exit %d, want %d", code, ExitStopped)
+	}
+}
