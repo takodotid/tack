@@ -140,7 +140,7 @@ func Execute(ctx context.Context, f Factory, args []string, stdout, stderr io.Wr
 	if err == nil {
 		return ExitOK
 	}
-	fmt.Fprintf(stderr, "tack: %s\n", redact.Text(err.Error()))
+	fmt.Fprintf(stderr, "%s\n", lookOf(stderr).red("tack: "+redact.Text(err.Error())))
 	var u usageError
 	switch {
 	case errors.As(err, &u):

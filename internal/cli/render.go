@@ -28,23 +28,40 @@ const (
 // gives the API server of each site's context.
 func printPlan(w io.Writer, p *engine.Plan, c kube.Clients) {
 	sf := p.SiteFailover
-	fmt.Fprintf(w, "Plan for workload %s: %s, site %s to site %s\n", sf.Spec.Workload.Name, sf.Spec.Mode, sf.Spec.From, sf.Spec.To)
+	l := lookOf(w)
+	fmt.Fprintln(w, l.bold(fmt.Sprintf("Plan for workload %s: %s, site %s to site %s", sf.Spec.Workload.Name, sf.Spec.Mode, sf.Spec.From, sf.Spec.To)))
 	fmt.Fprintf(w, "Ledger: SiteFailover %s/%s at site %s\n\n", sf.Namespace, sf.Name, sf.Spec.To)
 
-	fmt.Fprintln(w, "Sites:")
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	for _, s := range p.Topology.Sites {
-		if !s.Reachable {
-			fmt.Fprintf(tw, "  %s\tunreachable\t%s\n", s.Name, redact.Text(s.Error))
-			continue
+	fmt.Fprintln(w, l.bold("Sites:"))
+	if l.term {
+		var rows [][]string
+		for _, s := range p.Topology.Sites {
+			if !s.Reachable {
+				rows = append(rows, []string{s.Name, l.red("unreachable"), "", "", redact.Text(s.Error)})
+				continue
+			}
+			health := l.red("unhealthy")
+			if s.Healthy {
+				health = l.green("healthy")
+			}
+			rows = append(rows, []string{s.Name, string(s.Role), orNone(s.DeclaredPrimary), health, l.dim(redact.Text(s.Summary))})
 		}
-		health := "unhealthy"
-		if s.Healthy {
-			health = "healthy"
+		l.box(w, "  ", []string{"Site", "Role", "Declares", "Health", "Summary"}, nil, rows)
+	} else {
+		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+		for _, s := range p.Topology.Sites {
+			if !s.Reachable {
+				fmt.Fprintf(tw, "  %s\tunreachable\t%s\n", s.Name, redact.Text(s.Error))
+				continue
+			}
+			health := "unhealthy"
+			if s.Healthy {
+				health = "healthy"
+			}
+			fmt.Fprintf(tw, "  %s\t%s\tdeclares %s\t%s\t%s\n", s.Name, s.Role, orNone(s.DeclaredPrimary), health, redact.Text(s.Summary))
 		}
-		fmt.Fprintf(tw, "  %s\t%s\tdeclares %s\t%s\t%s\n", s.Name, s.Role, orNone(s.DeclaredPrimary), health, redact.Text(s.Summary))
+		tw.Flush()
 	}
-	tw.Flush()
 	printPositions(w, p.Topology)
 	fmt.Fprintln(w)
 	printClusters(w, sf, c)
@@ -53,15 +70,15 @@ func printPlan(w io.Writer, p *engine.Plan, c kube.Clients) {
 	printSteps(w, sf, false)
 
 	if len(sf.Status.FollowUps) > 0 {
-		fmt.Fprintln(w, "\nFollow-ups for the operator:")
+		fmt.Fprintln(w, "\n"+l.bold("Follow-ups for the operator:"))
 		for _, f := range sf.Status.FollowUps {
-			fmt.Fprintf(w, "  site %s: %s: %s\n", f.Site, f.Action, f.Reason)
+			fmt.Fprintf(w, "  site %s: %s: %s\n", f.Site, l.yellow(f.Action), f.Reason)
 		}
 	}
 	if len(p.Notes) > 0 {
-		fmt.Fprintln(w, "\nNotes:")
+		fmt.Fprintln(w, "\n"+l.paint(ansiBold+ansiYellow, "Notes:"))
 		for _, n := range p.Notes {
-			fmt.Fprintf(w, "  %s\n", redact.Text(n))
+			fmt.Fprintf(w, "  %s\n", l.note(redact.Text(n)))
 		}
 	}
 }
@@ -110,6 +127,7 @@ func printSteps(w io.Writer, sf *failoverv1.SiteFailover, withState bool) {
 		phases[p.Name] = p
 	}
 	n := 0
+	l := lookOf(w)
 	for _, phase := range failoverv1.Phases {
 		header := false
 		for _, s := range sf.Spec.Steps {
@@ -117,7 +135,7 @@ func printSteps(w io.Writer, sf *failoverv1.SiteFailover, withState bool) {
 				continue
 			}
 			if !header {
-				fmt.Fprintf(w, "%s", phase)
+				fmt.Fprintf(w, "%s", l.bold(string(phase)))
 				if p, ok := phases[phase]; withState && ok {
 					if t := times(p.StartedAt, p.FinishedAt); t != "" {
 						fmt.Fprintf(w, "  (%s)", t)
@@ -137,13 +155,13 @@ func printSteps(w io.Writer, sf *failoverv1.SiteFailover, withState bool) {
 			}
 			if withState {
 				st := state[s.ID]
-				fmt.Fprintf(w, "  %2d. [%s] %s  %s%s\n", n, orPending(st.State), s.ID, site, mark)
+				fmt.Fprintf(w, "  %2d. [%s] %s  %s%s\n", n, l.state(string(orPending(st.State))), s.ID, site, mark)
 			} else {
 				fmt.Fprintf(w, "  %2d. %s  %s%s\n", n, s.ID, site, mark)
 			}
 			fmt.Fprintf(w, "      %s\n", s.Description)
 			for _, line := range stepDetail(&s, sf.Name, sf.Spec.Mode) {
-				fmt.Fprintf(w, "        %s\n", line)
+				fmt.Fprintf(w, "        %s\n", l.dim(line))
 			}
 			if withState {
 				st := state[s.ID]
@@ -154,7 +172,7 @@ func printSteps(w io.Writer, sf *failoverv1.SiteFailover, withState bool) {
 					fmt.Fprintf(w, "        result: %s\n", engine.Clean(sf.Status.Captured, st.Message))
 				}
 				for i, a := range st.Earlier {
-					fmt.Fprintf(w, "        earlier attempt %d: %s, %s", i+1, a.State, times(a.StartedAt, a.FinishedAt))
+					fmt.Fprintf(w, "        earlier attempt %d: %s, %s", i+1, l.state(string(a.State)), times(a.StartedAt, a.FinishedAt))
 					if a.Message != "" {
 						fmt.Fprintf(w, ": %s", engine.Clean(sf.Status.Captured, a.Message))
 					}
@@ -267,8 +285,9 @@ func stepDetail(s *failoverv1.Step, run string, mode failoverv1.Mode) []string {
 // printStatus writes a ledger.
 func printStatus(w io.Writer, sf *failoverv1.SiteFailover) {
 	st := sf.Status
-	fmt.Fprintf(w, "Run %s/%s: workload %s, %s, site %s to site %s\n", sf.Namespace, sf.Name, sf.Spec.Workload.Name, sf.Spec.Mode, sf.Spec.From, sf.Spec.To)
-	fmt.Fprintf(w, "State: %s", orPendingRun(st.State))
+	l := lookOf(w)
+	fmt.Fprintln(w, l.bold(fmt.Sprintf("Run %s/%s: workload %s, %s, site %s to site %s", sf.Namespace, sf.Name, sf.Spec.Workload.Name, sf.Spec.Mode, sf.Spec.From, sf.Spec.To)))
+	fmt.Fprintf(w, "State: %s", l.state(orPendingRun(st.State)))
 	if st.Reason != "" {
 		fmt.Fprintf(w, " (%s)", st.Reason)
 	}
@@ -364,9 +383,9 @@ func printStatus(w io.Writer, sf *failoverv1.SiteFailover) {
 	fmt.Fprintln(w)
 	printSteps(w, sf, true)
 	if len(st.FollowUps) > 0 {
-		fmt.Fprintln(w, "\nFollow-ups for the operator:")
+		fmt.Fprintln(w, "\n"+l.bold("Follow-ups for the operator:"))
 		for _, f := range st.FollowUps {
-			fmt.Fprintf(w, "  site %s: %s: %s\n", f.Site, f.Action, f.Reason)
+			fmt.Fprintf(w, "  site %s: %s: %s\n", f.Site, l.yellow(f.Action), f.Reason)
 			if sn := f.Snapshot; sn != nil {
 				fmt.Fprintf(w, "    snapshot: Backup %s/%s, VolumeSnapshots %s", sn.Backup.Namespace, sn.Backup.Name, orNone(strings.Join(sn.VolumeSnapshots, ", ")))
 				if sn.At != nil {
@@ -430,6 +449,27 @@ func times(started, finished *metav1.Time) string {
 }
 
 func printRuns(w io.Writer, runs []foundRun) {
+	if l := lookOf(w); l.term {
+		takers := takers(runs)
+		var rows [][]string
+		for _, r := range runs {
+			sf := r.sf
+			started := ""
+			if sf.Status.StartedAt != nil {
+				started = sf.Status.StartedAt.UTC().Format("2006-01-02 15:04:05Z")
+			}
+			state := orPendingRun(sf.Status.State)
+			switch {
+			case sf.Status.Abandoned != nil:
+				state = "Abandoned"
+			case takenOver(sf, takers):
+				state = "TakenOver"
+			}
+			rows = append(rows, []string{r.site, sf.Name, string(sf.Spec.Mode), sf.Spec.From, sf.Spec.To, l.state(state), sf.Status.Reason, started})
+		}
+		l.box(w, "", []string{"Site", "Run", "Mode", "From", "To", "State", "Reason", "Started"}, nil, rows)
+		return
+	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "SITE\tRUN\tMODE\tFROM\tTO\tSTATE\tREASON\tSTARTED")
 	takers := takers(runs)
@@ -541,7 +581,42 @@ func printPositions(w io.Writer, t *driver.Topology) {
 	if !read {
 		return
 	}
-	fmt.Fprintln(w, "\nWAL positions:")
+	l := lookOf(w)
+	fmt.Fprintln(w, "\n"+l.bold("WAL positions:"))
+	if l.term {
+		var rows [][]string
+		for _, s := range t.Sites {
+			p := s.Position
+			switch {
+			case !s.Reachable:
+				rows = append(rows, []string{s.Name, "", "", "", "", l.dim("not read: the site is unreachable")})
+			case p == nil:
+				rows = append(rows, []string{s.Name, "", "", "", "", l.dim("not read")})
+			case p.Error != "":
+				rows = append(rows, []string{s.Name, "", "", "", "", l.yellow("not read: " + redact.Text(p.Error))})
+			case p.Current != "":
+				rows = append(rows, []string{s.Name, "writes at " + p.Current, "", fmt.Sprint(p.Timeline), "", p.Standing})
+			default:
+				stream := "no"
+				if p.ReceiverActive {
+					stream = "yes"
+				}
+				if p.ReplayPaused {
+					stream += l.yellow(", replay paused")
+				}
+				standing := p.Standing
+				switch {
+				case standing == "most caught up":
+					standing = l.green(standing)
+				case strings.HasPrefix(standing, "behind "):
+					standing = l.yellow(standing)
+				}
+				rows = append(rows, []string{s.Name, orNone(p.Received), orNone(p.Replayed), fmt.Sprint(p.Timeline), stream, standing})
+			}
+		}
+		l.box(w, "  ", []string{"Site", "Received", "Replayed", "Timeline", "Streaming", "Standing"}, map[int]bool{3: true}, rows)
+		return
+	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	for _, s := range t.Sites {
 		p := s.Position
