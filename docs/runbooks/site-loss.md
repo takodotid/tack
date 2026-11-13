@@ -11,12 +11,15 @@ If the old site still runs, its Cluster stays primary and takes writes until one
 
 Until then there are two primaries. Confirm the loss, and fence the old primary, before the run. Tack does neither.
 
+**A cut-off site's own applications keep writing.** During a partition, the applications at the cut-off site still reach their local primary. Strait at that site still routes them to it: it is the only writable member that site can see. Their writes are lost to the new primary. So fence those applications too, or their Pooler, not only the database. What Tack's fence does, and does not do, is in [operations.md](../operations.md#what-fencing-does).
+
 ## Before
 
 | Check | How |
 |---|---|
 | The old site is down, not only cut off from this host | Check it from a second vantage point that does not share this host's network path: another site, an out-of-band console, the provider's status page, monitoring. |
 | The old primary cannot take writes | Fence it out of band: stop its database nodes, cut its network at the edge, or power it off. Its Kubernetes API is not there to do it. |
+| The old site's applications cannot write | Stop them, or their Pooler, at that site, out of band: scale them to 0 from a console that still reaches the site, cut the site's network at the edge, or power it off. Cutting the whole site covers the database and its applications at once. |
 | Clients no longer reach the old primary | With Strait, at each site that answers, the route names no member of the old site: `kubectl --context SITE -n NS get siteservice NAME -o jsonpath='{.status.route.members}'`. |
 | The new site is a healthy replica | `tack plan -f workload.yaml --to NEW --mode site-loss` shows it as a healthy `Replica`. |
 
@@ -27,6 +30,7 @@ Until then there are two primaries. Confirm the loss, and fence the old primary,
    - **To promote a site that is behind anyway,** for example because the most caught-up one cannot serve, add `--accept-behind` to the plan and the run. The run then records a `Rebuild` for each replica that was ahead: it holds writes that `NEW` lacks, so it cannot follow `NEW`.
    - A position that could not be read is a warning, not a refusal. The plan says why, such as a missing permission (row 18 of [the permissions table](../operations.md#permissions)).
 2. **Run.** `tack run -f workload.yaml --to NEW --mode site-loss`, with `--accept-behind` if the plan needed it. The steps at the lost site are `Deferred`. With Git down too, the run waits with exit code 4: [break-glass](../operations.md#break-glass).
+   - What the run will lose, and how long writes stay down: [wal-rpo-rto.md](../wal-rpo-rto.md).
 3. **When the old site answers again,** `tack resume RUN -f workload.yaml`. If it answers as primary, or its Cluster still declares itself primary, the run stops with `FencedSiteIsPrimary`; check it, then `tack resume RUN -f workload.yaml --fence OLD`. A run whose old site answers its API at the start, with its instances down, stops the same way before its first step there; the plan says so.
 4. **Rebuild the old primary:** [rebuild-old-primary.md](rebuild-old-primary.md).
 

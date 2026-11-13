@@ -105,6 +105,21 @@ The window ends when the new primary takes writes at its site. Clients that reac
 
 Keep `timeouts.demotion` shorter than `switchoverDelay`, so Tack reports a slow shutdown before CloudNativePG gives up on it. While the new primary replays up to the token, Tack stops the wait early when its replay stands still for 2 minutes short of the token ([RFC#0004](../rfcs/RFC0004.md#requirements), Requirement 18). The patch that promotes it stays: it promotes once it catches up, and a resume waits again.
 
+## What fencing does
+
+To fence a member is to make it declare another member primary, so it stops being primary ([RFC0001](../rfcs/RFC0001.md#glossary)). For CloudNativePG, Tack's fence is one patch of the old Cluster: `spec.replica.primary` set to the new primary's Cluster, and `spec.replica.promotionToken` removed (`fence-<from>`, [RFC0004](../rfcs/RFC0004.md#requirements), Requirement 7).
+
+| Tack's fence | Does |
+|---|---|
+| Changes the old Cluster's spec | yes, once its site's Kubernetes API answers. CloudNativePG then restarts the old primary as a replica |
+| Runs while the site is lost | no. The step waits for the site (`Deferred`), and runs on a `tack resume` once the site answers |
+| Stops the old primary while its API is unreachable | no |
+| Stops clients at the old site from writing to it | no. Applications at that site, and its Pooler until `pooler-<from>` runs, still reach it |
+| Cuts the site's network, or stops its nodes | no |
+| Rewinds or rebuilds the old primary | no: [rebuild-old-primary.md](runbooks/rebuild-old-primary.md) |
+
+Flux at the old site fences it too, once that site reaches Git and applies the run's commit, which declares the new primary. Until one of these happens, the old primary takes the writes that reach it. Before a site-loss run, the operator fences out of band: the database, and the site's applications or their Pooler ([site-loss.md](runbooks/site-loss.md)).
+
 ## Interrupting a run
 
 The first Ctrl-C, SIGTERM or SIGHUP stops the run: the step in flight ends, and the ledger records the stop, which can take up to 30 s when the ledger's site is slow, then its Event, up to 5 s more. A second signal ends `tack` at once, without that record; once the ledger holds the stop, it loses only the Event: the ledger then shows the step `Running`, and `tack resume` runs it again. SIGHUP comes when the terminal or SSH session ends; run `tack` in `tmux` or `screen` on a remote host, so a dropped connection does not stop the run. A process that ends this way releases the run's Lease; one ended by a second signal, or killed, leaves the Lease to expire 30 s after its last renewal, and until 10 s after that, `tack abandon` and `tack run --take-over` refuse the run.

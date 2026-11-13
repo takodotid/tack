@@ -49,4 +49,4 @@ The difference is the time outside Tack's window: mostly Strait's route change, 
 
 6. **Clean up:** `drop table tack_measure;` at the new primary.
 
-What Tack records, and the demotion's time, are in [operations.md](../operations.md#how-long-writes-stay-down).
+Put the largest numbers in the budget: [wal-rpo-rto.md](../wal-rpo-rto.md#the-failover-time-budget). What Tack records, and the demotion's time, are in [operations.md](../operations.md#how-long-writes-stay-down).
