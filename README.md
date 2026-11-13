@@ -183,6 +183,17 @@ Tack also needs:
 | A Workload file | The sites, their contexts, the Git repository and where each field lives in it: [docs/workload.md](docs/workload.md). |
 | Clocks kept by NTP | Every site's API server, and every host that runs `tack`, within a few seconds of each other. Tack orders the runs of different sites by each ledger's creation time, from its site's API server, with a margin of 10 s ([RFC#0003](rfcs/RFC0003.md#requirements), Requirement 18), and a run's Lease, timed by the host that renews it, holds 10 s past its duration (Requirement 28). Clocks further apart can let an older run resume after a newer one, or let `tack abandon` mark a run that a process still runs. |
 
+### Shell completion
+
+`tack completion` prints a completion script for bash, zsh, fish or PowerShell. It completes commands, flags, the values of `--mode` and `--output`, Workload files, and the site names of the file given with `-f`. It reads only that file, and never contacts a cluster.
+
+| Shell | Load it in this shell | Load it in every new shell |
+|---|---|---|
+| bash | `source <(tack completion bash)` | `tack completion bash \| sudo tee /etc/bash_completion.d/tack >/dev/null` |
+| zsh | `source <(tack completion zsh)` | `tack completion zsh > "${fpath[1]}/_tack"`, with `compinit` in `~/.zshrc` |
+| fish | `tack completion fish \| source` | `tack completion fish > ~/.config/fish/completions/tack.fish` |
+| PowerShell | `tack completion powershell \| Out-String \| Invoke-Expression` | add that line to `$PROFILE` |
+
 ### Verify a release
 
 From v1.3.0, each release signs `SHA256SUMS` and the chart with Sigstore, keyless, under the identity of its release workflow, and attests every asset with GitHub artifact attestations. No signing key exists. `make dist` at a release's tag, in a clean checkout with the Go version of `go.mod`, gives the same archives. Releases v1.2.1 and older carry no signature.

@@ -97,6 +97,27 @@ Examples:
   tack abandon pg-main-20261027-101500 -f workload.yaml --reason "a promoted again by hand"
 ```
 
+### tack completion
+
+Print a shell completion script, and contact nothing.
+
+```text
+Completion prints a script that completes tack's commands, flags and
+values in a shell: the values of --mode and --output, Workload files for
+--file, and the site names of the Workload file given with --file for
+--to, --from and --fence. Completion reads that file only: it never
+contacts a cluster or Git.
+
+Load it in the current shell, or install it as each shell's docs say:
+
+  bash:        source <(tack completion bash)
+  zsh:         source <(tack completion zsh)
+  fish:        tack completion fish | source
+  PowerShell:  tack completion powershell | Out-String | Invoke-Expression
+```
+
+Usage: `tack completion bash|zsh|fish|powershell`
+
 ### tack plan
 
 Print every step and change of a run, and change nothing.
