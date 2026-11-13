@@ -606,7 +606,10 @@ func (r *runner) switchStarted() bool {
 // before its steps and the read of the other sites decide on it, with or
 // without --fence ([RFC#0007] Requirements 6 and 9).
 func (r *runner) recheck(ctx context.Context) error {
-	topo, err := r.discover(ctx, &r.sf.Spec.Workload.Spec, runChecks{r: r})
+	// This read sees positions too, so the driver's refusals that use them
+	// hold before any Failover step ([RFC#0004] Requirement 14). The reads
+	// before each later step do not read them.
+	topo, err := r.discover(ctx, &r.sf.Spec.Workload.Spec, withPositions{runChecks{r: r}})
 	if err != nil {
 		return fmt.Errorf("the read before the first Failover step: %w", err)
 	}
@@ -1359,4 +1362,13 @@ func hasRunnableDeferred(sf *failoverv1.SiteFailover) bool {
 		}
 	}
 	return false
+}
+
+// withPositions are runChecks that also read a pod through the API
+// server, for the members' positions.
+type withPositions struct{ runChecks }
+
+// ProxyGet implements kube.Proxier.
+func (c withPositions) ProxyGet(ctx context.Context, site, namespace, pod, scheme string, port int, path string) ([]byte, error) {
+	return c.r.checks.ProxyGet(ctx, site, namespace, pod, scheme, port, path)
 }
