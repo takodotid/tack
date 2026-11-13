@@ -149,7 +149,7 @@ type WorkloadSnapshot struct {
 }
 
 // StepType is the action of a step.
-// +kubebuilder:validation:Enum=Hold;Reconcile;Patch;Wait;Capture;Git;VerifyGit;Release;VerifyNoop;Routing
+// +kubebuilder:validation:Enum=Hold;Reconcile;Patch;Wait;Capture;Git;VerifyGit;Release;VerifyNoop;Routing;Create;Record
 type StepType string
 
 const (
@@ -173,6 +173,11 @@ const (
 	StepVerifyNoop StepType = "VerifyNoop"
 	// StepRouting checks that routing followed the switch.
 	StepRouting StepType = "Routing"
+	// StepCreate creates one object, or adopts the one this run created.
+	StepCreate StepType = "Create"
+	// StepRecord has the driver read the workload and record what it read
+	// in the ledger.
+	StepRecord StepType = "Record"
 )
 
 // Step is one action of a run, as data. The field named by Type is set.
@@ -218,6 +223,10 @@ type Step struct {
 	VerifyNoop *VerifyStep `json:"verifyNoop,omitempty"`
 	// +optional
 	Routing *RoutingStep `json:"routing,omitempty"`
+	// +optional
+	Create *CreateStep `json:"create,omitempty"`
+	// +optional
+	Record *RecordStep `json:"record,omitempty"`
 }
 
 // ObjectRef names a live object.
@@ -362,6 +371,25 @@ type VerifyStep struct {
 type ObjectField struct {
 	Object ObjectRef `json:"object"`
 	Field  string    `json:"field"`
+}
+
+// CreateStep creates one object. A step that runs again adopts the object
+// when it carries the label failover.tako.id/run of this run.
+type CreateStep struct {
+	Object ObjectRef `json:"object"`
+	// Manifest is the object as JSON. $(run) stands for the run's name, in
+	// it and in Object's name.
+	Manifest string `json:"manifest"`
+}
+
+// RecordStep has the driver read the workload through its own API, only
+// read, and record what it read in the ledger, until Timeout when set.
+type RecordStep struct {
+	Object ObjectRef `json:"object"`
+	// What names the record: Position, Fork, Snapshot or Archive.
+	What string `json:"what"`
+	// +optional
+	Timeout *metav1.Duration `json:"timeout,omitempty"`
 }
 
 // RoutingStep waits until Strait routes the workload to the new primary.
@@ -511,6 +539,11 @@ type SiteFailoverStatus struct {
 	// within MaxHistory. They came after the first entry.
 	// +optional
 	HistoryDropped int32 `json:"historyDropped,omitempty"`
+
+	// Fork is where the new primary's history leaves the old one's, in a
+	// site loss ([RFC#0004] Requirement 15).
+	// +optional
+	Fork *ForkPoint `json:"fork,omitempty"`
 }
 
 // MaxHistory is the most entries status.history holds. The CRD's
@@ -643,4 +676,48 @@ type FollowUp struct {
 	Action string `json:"action"`
 	// Reason says why.
 	Reason string `json:"reason"`
+	// Snapshot is the snapshot of the site's member that the run took
+	// before the rebuild ([RFC#0004] Requirement 15).
+	// +optional
+	Snapshot *SnapshotRecord `json:"snapshot,omitempty"`
+	// Archive is where the site's member archived its WAL, as its spec
+	// named it when the run read it. The rebuild keeps it.
+	// +optional
+	Archive string `json:"archive,omitempty"`
+}
+
+// SnapshotRecord is a snapshot of a member's volumes.
+type SnapshotRecord struct {
+	// Backup is the workload's object that took the snapshot, such as a
+	// CloudNativePG Backup.
+	Backup ObjectRef `json:"backup"`
+	// VolumeSnapshots are the VolumeSnapshots it made, in its namespace.
+	// +optional
+	VolumeSnapshots []string `json:"volumeSnapshots,omitempty"`
+	// At is when the run recorded it.
+	// +optional
+	At *metav1.Time `json:"at,omitempty"`
+}
+
+// ForkPoint is where the new primary's history leaves the old one's in a
+// site loss ([RFC#0004] Requirement 15).
+type ForkPoint struct {
+	// Site is the new primary's site.
+	Site string `json:"site"`
+	// Position is the new primary's WAL position read right before its
+	// promotion: its history leaves the old one's there or just after.
+	// +optional
+	Position string `json:"position,omitempty"`
+	// ParentTimeline is the timeline that position is on.
+	// +optional
+	ParentTimeline int32 `json:"parentTimeline,omitempty"`
+	// Timeline is the new primary's timeline after its promotion.
+	// +optional
+	Timeline int32 `json:"timeline,omitempty"`
+	// At is when the promotion was seen done.
+	// +optional
+	At *metav1.Time `json:"at,omitempty"`
+	// Message says what could not be read, if anything.
+	// +optional
+	Message string `json:"message,omitempty"`
 }

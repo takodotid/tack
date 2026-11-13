@@ -104,6 +104,7 @@ Required fields have no default. Durations are Go durations, such as `90s`, `15m
 | `cnpg.cluster.namespace`, `cnpg.cluster.name` | yes | | The site's CloudNativePG `Cluster`. Each site's Cluster needs its own name. |
 | `cnpg.pooler.namespace`, `cnpg.pooler.name` | no | | The site's read-write `Pooler`. Tack also waits on the Deployment of the same name, which CloudNativePG runs for it. Without a pooler, Tack moves no Pooler at this site. Never name a Pooler `<cluster>-rw`, `<cluster>-ro` or `<cluster>-r`: its Service takes its name, the Cluster already owns Services with those names, and CloudNativePG then never reconciles the Pooler. |
 | `cnpg.pooler.instances` | with a pooler | | The Pooler's instances while this site is primary, at least 1. At every other site Tack sets it to 0. |
+| `cnpg.snapshot` | no | `false` | After a site loss that leaves this site's Cluster the old primary, take a cold snapshot of its volumes once the site answers again, before anyone rebuilds it: a CloudNativePG `Backup` with `method: volumeSnapshot`. The Cluster needs `spec.backup.volumeSnapshot`, and the site VolumeSnapshot support; a Backup that fails stops the run. Set it on every site: any site can be the old primary. See [recover-old-primary-writes.md](runbooks/recover-old-primary-writes.md). |
 
 `tack plan` checks the live objects too: each `Cluster` sets `.spec.replica.primary` and not `.spec.replica.enabled`, and a Flux Kustomization applies each `Cluster` and `Pooler`. [RFC#0004](../rfcs/RFC0004.md) and [RFC#0005](../rfcs/RFC0005.md) give every check.
 
@@ -190,6 +191,7 @@ With this block, a run ends with one `Routing` step per service: it waits until 
 | `promotion` | `10m` | the wait for the new primary to promote, every Pooler wait, and the final check that the new primary is healthy |
 | `flux` | `5m` | each Flux reconcile |
 | `routing` | `2m` | each Strait routing check |
+| `snapshot` | `30m` | the wait for the old primary's snapshot (`cnpg.snapshot`) |
 
 A wait that times out stops the run with reason `StepFailed`.
 

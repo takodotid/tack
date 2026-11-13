@@ -791,6 +791,15 @@ func TestSiteLossBreakGlassAndReturn(t *testing.T) {
 	if !strings.Contains(out, "Rebuild") {
 		t.Errorf("status lacks the Rebuild follow-up")
 	}
+	// [RFC#0004] Requirement 15 on CloudNativePG: the fork point, read from a's instance around its promotion,
+	// and b's archive, recorded once b answered.
+	fork := regexp.MustCompile(`(?m)^Fork: site a's new history leaves the old one at [0-9A-F]+/[0-9A-F]+ on timeline ([0-9]+) or just after; new timeline ([0-9]+); promoted by `).FindStringSubmatch(out)
+	if fork == nil || fork[1] == fork[2] {
+		t.Errorf("status lacks the fork point, or its timelines do not differ:\n%s", out)
+	}
+	if !strings.Contains(out, "WAL archive, to keep: ") {
+		t.Errorf("status lacks site b's WAL archive:\n%s", out)
+	}
 }
 
 func TestRebuildAndSwitchBack(t *testing.T) {

@@ -165,7 +165,8 @@ Tack acts with the operator's credentials for each site's kube context. Every si
 | 15 | `selfsubjectreviews` (`authentication.k8s.io`) | create | | `run`, `resume`, `abandon` | the user in the ledger's history. Without it, the history names no user, and the run says so once |
 | 16 | `sitefailovers` | delete | the ledger's | `prune` | deleting the ledgers of old runs ([Old ledgers](#old-ledgers)) |
 | 17 | `leases` (`coordination.k8s.io`) | get, create, update | the ledger's | `run`, `resume`; `get` also `abandon` | the run's Lease, which the process that runs it holds; `tack abandon` and `tack run --take-over` refuse while it is fresh ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 28). Optional: without it, a run holds no Lease and says so once, and those commands judge by the ledger |
-| 18 | `pods`, `pods/proxy` | get | the member's | `plan`, `run` | the WAL position of each site: the Cluster's current primary Pod, then a GET of its instance manager's status, port 8000, path `/pg/status`, through the API server ([RFC#0004](../rfcs/RFC0004.md#requirements), Requirement 13). Optional: without it, the plan says it could not read the position, and goes on |
+| 18 | `pods`, `pods/proxy` | get | the member's | `plan`, `run`, `resume` | the WAL position of each site: the Cluster's current primary Pod, then a GET of its instance manager's status, port 8000, path `/pg/status`, through the API server ([RFC#0004](../rfcs/RFC0004.md#requirements), Requirement 13). Optional: without it, the plan says it could not read the position, and goes on; a site-loss run records that it could not read the fork point, and goes on |
+| 19 | `backups` (`postgresql.cnpg.io`) | get, create | the member's | `run`, `resume` | the old primary's snapshot after a site loss, when the Workload sets `cnpg.snapshot` ([RFC#0004](../rfcs/RFC0004.md#requirements), Requirement 15). Only then |
 
 | Fact | Detail |
 |---|---|
@@ -173,6 +174,7 @@ Tack acts with the operator's credentials for each site's kube context. Every si
 | Row 16 | Only `tack prune` needs it. The chart grants it only with `rbac.prune`. |
 | Rows 1, 2 and 15 | Kubernetes grants them to every authenticated user through the default ClusterRoleBindings `system:public-info-viewer`, `system:discovery` and `system:basic-user`. A cluster without those bindings must grant them. |
 | `resourceNames` | Rows 3 and 7 to 13 can name their objects. Rows 4 to 6 cannot: run names are generated, and `list` and `create` take no name. |
+| Row 19 | Only for a Workload with `cnpg.snapshot`. It cannot name its Backups: their names hold the run's name. |
 | Row 18 | Optional. It cannot name its Pods: CloudNativePG generates their names. `get` on `pods/proxy` lets a GET reach any port of any Pod in the namespace through the API server, such as an endpoint that a Pod serves without authentication: grant it only in the members' namespaces. |
 | Row 17 | Optional. Without it, a run holds no Lease, says so once, and goes on; `tack abandon` and `tack run --take-over` then judge the run by its ledger, which keeps refusing them longer after a process was killed. |
 | Checked | On the e2e's kind clusters, a ServiceAccount with exactly these rows, each named where the table allows, ran `tack plan`, `tack status`, a planned run with the routing check and a Kustomization with `postBuild`, a resume, a run with `--take-over`, and a site-loss run. Without row 3, `tack plan` fails with `namespaces "kube-system" is forbidden`; without the ConfigMap of row 12, the check before release stops with `StepFailed`. Rows 14 and 15 came after that check, with v1.3.0, row 16 with v1.4.0, and row 17 after v1.4.0. The e2e's `TestRoutingFromStrait` now runs `tack plan`, a planned run with the routing check and `tack status` as a ServiceAccount bound to [the chart's roles](#the-charts-roles) and Kubernetes' default bindings only: the run records its Events (row 14) and the ServiceAccount as its history's user (row 15). The e2e has no `postBuild`, so it does not use row 12. Its `TestPrune` runs `tack prune` as that ServiceAccount, with `rbac.prune`, and deletes ledgers through row 16. |
@@ -187,7 +189,7 @@ The chart creates roles that grant exactly the rows above when `rbac.create` is 
 |---|---|---|
 | `<release>-cluster` | ClusterRole | 1, 2, 3 and 15 |
 | `<release>-ledger` | Role, the release's namespace: install the chart in the ledger namespace | 4, 5, 6, 14 and 17; 16 with `rbac.prune` |
-| `<release>-objects` | Role, each namespace of `rbac.objects` | 7 to 13, for the objects that entry names; 18 where the entry names `clusters` |
+| `<release>-objects` | Role, each namespace of `rbac.objects` | 7 to 13, for the objects that entry names; 18 and 19 where the entry names `clusters` |
 
 | Value | Default | Meaning |
 |---|---|---|

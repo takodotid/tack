@@ -231,6 +231,21 @@ func stepDetail(s *failoverv1.Step, run string, mode failoverv1.Mode) []string {
 		}
 	case failoverv1.StepVerifyNoop:
 		return []string{fmt.Sprintf("check that the generation of %d released objects did not change", len(s.VerifyNoop.Objects))}
+	case failoverv1.StepCreate:
+		return []string{
+			fmt.Sprintf("create %s, labelled %s=%s: %s", ref(named(s.Create.Object, run)), engine.LabelRun, run, strings.ReplaceAll(s.Create.Manifest, "$(run)", run)),
+			"a step that runs again keeps the object this run created, and stops on any other of that name",
+		}
+	case failoverv1.StepRecord:
+		read := ref(named(s.Record.Object, run))
+		if s.Record.What == "Position" || s.Record.What == "Fork" {
+			read += " and its current primary's status, through the API server"
+		}
+		line := fmt.Sprintf("read %s, change nothing, and record %s", read, recordWhat(s.Record.What))
+		if s.Record.Timeout != nil {
+			line += fmt.Sprintf("; wait up to %s", s.Record.Timeout.Duration)
+		}
+		return []string{line}
 	case failoverv1.StepRouting:
 		return []string{fmt.Sprintf("read SiteService %s/%s until status.route.members is [%s] with reason Active; wait up to %s",
 			s.Routing.Service.Namespace, s.Routing.Service.Name, s.Routing.Expected, s.Routing.Timeout.Duration)}
@@ -295,6 +310,25 @@ func printStatus(w io.Writer, sf *failoverv1.SiteFailover) {
 		}
 		fmt.Fprintln(w)
 	}
+	if f := st.Fork; f != nil {
+		fmt.Fprintf(w, "Fork: site %s's new history leaves the old one at %s", f.Site, orNone(f.Position))
+		if f.ParentTimeline != 0 {
+			fmt.Fprintf(w, " on timeline %d", f.ParentTimeline)
+		}
+		if f.Position != "" {
+			fmt.Fprint(w, " or just after")
+		}
+		if f.Timeline != 0 {
+			fmt.Fprintf(w, "; new timeline %d", f.Timeline)
+		}
+		if f.At != nil {
+			fmt.Fprintf(w, "; promoted by %s", at(*f.At))
+		}
+		if f.Message != "" {
+			fmt.Fprintf(w, "; %s", engine.Clean(st.Captured, f.Message))
+		}
+		fmt.Fprintln(w)
+	}
 	if len(st.Captured) > 0 {
 		var keys []string
 		for k := range st.Captured {
@@ -319,6 +353,16 @@ func printStatus(w io.Writer, sf *failoverv1.SiteFailover) {
 		fmt.Fprintln(w, "\nFollow-ups for the operator:")
 		for _, f := range st.FollowUps {
 			fmt.Fprintf(w, "  site %s: %s: %s\n", f.Site, f.Action, f.Reason)
+			if sn := f.Snapshot; sn != nil {
+				fmt.Fprintf(w, "    snapshot: Backup %s/%s, VolumeSnapshots %s", sn.Backup.Namespace, sn.Backup.Name, orNone(strings.Join(sn.VolumeSnapshots, ", ")))
+				if sn.At != nil {
+					fmt.Fprintf(w, ", recorded %s", at(*sn.At))
+				}
+				fmt.Fprintln(w)
+			}
+			if f.Archive != "" {
+				fmt.Fprintf(w, "    WAL archive, to keep: %s\n", f.Archive)
+			}
 		}
 	}
 	printHistory(w, sf)
@@ -508,4 +552,25 @@ func printPositions(w io.Writer, t *driver.Topology) {
 		}
 	}
 	tw.Flush()
+}
+
+// named is ref with $(run) in its name replaced by the run's name.
+func named(ref failoverv1.ObjectRef, run string) failoverv1.ObjectRef {
+	ref.Name = strings.ReplaceAll(ref.Name, "$(run)", run)
+	return ref
+}
+
+// recordWhat says what a Record step records.
+func recordWhat(what string) string {
+	switch what {
+	case "Position":
+		return "its WAL position in status.fork: where the new history leaves the old one, or just before"
+	case "Fork":
+		return "its new timeline in status.fork; a position or timeline that cannot be read is recorded as such, and the run goes on"
+	case "Snapshot":
+		return "the Backup's VolumeSnapshots and the Cluster's WAL archive on the follow-up Rebuild, once the Backup completes; a failed Backup stops the run"
+	case "Archive":
+		return "the Cluster's WAL archive on the follow-up Rebuild"
+	}
+	return what
 }

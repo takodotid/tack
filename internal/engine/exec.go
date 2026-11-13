@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -20,6 +21,7 @@ import (
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/config"
+	"github.com/takodotid/tack/internal/driver"
 	"github.com/takodotid/tack/internal/kube"
 	"github.com/takodotid/tack/internal/redact"
 	"github.com/takodotid/tack/internal/stop"
@@ -49,6 +51,10 @@ func (r *runner) exec(ctx context.Context, s *failoverv1.Step) (string, error) {
 		return r.release(ctx, s)
 	case failoverv1.StepVerifyNoop:
 		return r.Flux.VerifyNoop(ctx, s.Site, r.siteHeld(s.Site), s.VerifyNoop.Fields, r.strict(), r.fluxTimeout())
+	case failoverv1.StepCreate:
+		return r.create(ctx, s)
+	case failoverv1.StepRecord:
+		return r.recordStep(ctx, s)
 	case failoverv1.StepRouting:
 		if r.Routing == nil {
 			return "", fmt.Errorf("routing is not available in this build")
@@ -421,10 +427,11 @@ func (r *runner) wait(ctx context.Context, s *failoverv1.Step) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	obj := r.named(s.Wait.Object)
 	deadline := r.now().Add(s.Wait.Timeout.Duration)
 	var last string
 	for {
-		u := newObject(s.Wait.Object)
+		u := newObject(obj)
 		err := c.Get(ctx, client.ObjectKeyFromObject(u), u)
 		if err == nil {
 			ok, why, cerr := r.conditionsHold(u, s.Wait.Conditions)
@@ -439,7 +446,7 @@ func (r *runner) wait(ctx context.Context, s *failoverv1.Step) (string, error) {
 			last = err.Error()
 		}
 		if r.now().After(deadline) {
-			return "", fmt.Errorf("timed out after %s waiting for %s: %s", s.Wait.Timeout.Duration, refString(s.Wait.Object), last)
+			return "", fmt.Errorf("timed out after %s waiting for %s: %s", s.Wait.Timeout.Duration, refString(obj), last)
 		}
 		select {
 		case <-ctx.Done():
@@ -507,6 +514,142 @@ func (r *runner) capture(ctx context.Context, s *failoverv1.Step) (string, error
 	}
 	r.sf.Status.Captured[s.Capture.Into] = v
 	return fmt.Sprintf("captured %s (%d bytes)", s.Capture.Into, len(v)), nil
+}
+
+// LabelRun names the run that created an object ([RFC#0002] Requirement 3).
+const LabelRun = "failover.tako.id/run"
+
+// named is ref with $(run) in its name replaced by the run's name.
+func (r *runner) named(ref failoverv1.ObjectRef) failoverv1.ObjectRef {
+	ref.Name = strings.ReplaceAll(ref.Name, "$(run)", r.sf.Name)
+	return ref
+}
+
+// create creates the step's object, labelled with the run's name. An
+// object of that name that this run created is adopted: the step ran
+// before, and its end was not recorded. Any other stops the run.
+func (r *runner) create(ctx context.Context, s *failoverv1.Step) (string, error) {
+	body := strings.ReplaceAll(s.Create.Manifest, "$(run)", r.sf.Name)
+	u := &unstructured.Unstructured{}
+	if err := u.UnmarshalJSON([]byte(body)); err != nil {
+		return "", fmt.Errorf("the manifest is not an object: %w", err)
+	}
+	ref := r.named(s.Create.Object)
+	if u.GetAPIVersion() != ref.APIVersion || u.GetKind() != ref.Kind || u.GetNamespace() != ref.Namespace || u.GetName() != ref.Name {
+		return "", fmt.Errorf("the manifest is not %s", refString(ref))
+	}
+	labels := u.GetLabels()
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	labels[LabelRun] = r.sf.Name
+	u.SetLabels(labels)
+	c, err := r.Clients.Client(s.Site)
+	if err != nil {
+		return "", err
+	}
+	err = c.Create(ctx, u, client.FieldOwner(FieldManager))
+	if err == nil {
+		return "created " + refString(ref), nil
+	}
+	if !apierrors.IsAlreadyExists(err) {
+		return "", fmt.Errorf("create %s: %w", refString(ref), err)
+	}
+	got := newObject(ref)
+	if err := c.Get(ctx, client.ObjectKeyFromObject(got), got); err != nil {
+		return "", fmt.Errorf("read %s, which exists: %w", refString(ref), err)
+	}
+	if by := got.GetLabels()[LabelRun]; by != r.sf.Name {
+		return "", stop.Ask(failoverv1.ReasonStepFailed, "%s exists, and this run did not create it (%s=%q): find out what it is before anything deletes it, then resume", refString(ref), LabelRun, by)
+	}
+	return "this run created " + refString(ref) + " before; kept", nil
+}
+
+// recordStep has the driver read the workload and records what it read: the
+// fork point in the ledger, a snapshot or an archive on the step site's
+// follow-up Rebuild. It asks again until the step's timeout while the
+// driver is not done.
+func (r *runner) recordStep(ctx context.Context, s *failoverv1.Step) (string, error) {
+	rec, ok := r.Driver.(driver.Recorder)
+	if !ok {
+		return "", fmt.Errorf("driver %s records nothing", r.Driver.Name())
+	}
+	step := *s
+	rs := *s.Record
+	rs.Object = r.named(rs.Object)
+	step.Record = &rs
+	var deadline time.Time
+	if rs.Timeout != nil {
+		deadline = r.now().Add(rs.Timeout.Duration)
+	}
+	for {
+		got, err := rec.Record(ctx, &r.sf.Spec.Workload.Spec, r.checks, r.sf.Name, &step)
+		if err != nil {
+			return "", err
+		}
+		if got.Done {
+			r.keep(s.Site, got)
+			return got.Message, nil
+		}
+		if deadline.IsZero() || r.now().After(deadline) {
+			return "", fmt.Errorf("timed out after %s: %s", durationOf(rs.Timeout), got.Message)
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(r.poll()):
+		}
+	}
+}
+
+func durationOf(d *metav1.Duration) time.Duration {
+	if d == nil {
+		return 0
+	}
+	return d.Duration
+}
+
+// keep writes what a Record step read into the status.
+func (r *runner) keep(site string, got *driver.Recorded) {
+	st := &r.sf.Status
+	if f := got.Fork; f != nil {
+		if st.Fork == nil {
+			st.Fork = &failoverv1.ForkPoint{}
+		}
+		if f.Site != "" {
+			st.Fork.Site = f.Site
+		}
+		if f.Position != "" {
+			st.Fork.Position = f.Position
+		}
+		if f.ParentTimeline != 0 {
+			st.Fork.ParentTimeline = f.ParentTimeline
+		}
+		if f.Timeline != 0 {
+			st.Fork.Timeline = f.Timeline
+		}
+		if f.At != nil {
+			st.Fork.At = f.At
+		}
+		if f.Message != "" {
+			st.Fork.Message = strings.TrimPrefix(st.Fork.Message+"; "+f.Message, "; ")
+		}
+	}
+	if got.Snapshot == nil && got.Archive == "" {
+		return
+	}
+	for i := range st.FollowUps {
+		f := &st.FollowUps[i]
+		if f.Site != site || f.Action != FollowUpRebuild {
+			continue
+		}
+		if got.Snapshot != nil {
+			f.Snapshot = got.Snapshot
+		}
+		if got.Archive != "" {
+			f.Archive = got.Archive
+		}
+	}
 }
 
 // size describes a value without printing it.

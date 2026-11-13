@@ -24,12 +24,26 @@ import (
 // change. Gitops checks those at the commit ([RFC#0006] Requirement 15).
 // Descriptions are not compared: they do not act.
 func (e *Env) checkPlan(sf *failoverv1.SiteFailover) error {
-	want, err := e.replan(sf)
+	want, err := e.replan(sf, false)
 	if err != nil {
 		return fmt.Errorf("%w: the steps of run %s are not what driver %s plans from the run's Workload: %v. %s",
 			ErrCannotResume, sf.Name, sf.Spec.Workload.Spec.Driver, err, planWayOn())
 	}
-	got := sf.Spec.Steps
+	diff := planDiff(sf.Spec.Steps, want)
+	if diff == "" {
+		return nil
+	}
+	// A ledger that v1.6.0 or earlier wrote holds the steps they planned.
+	if old, err := e.replan(sf, true); err == nil && planDiff(sf.Spec.Steps, old) == "" {
+		return nil
+	}
+	return fmt.Errorf("%w: the steps of run %s are not what driver %s plans from the run's Workload: %s. %s",
+		ErrCannotResume, sf.Name, sf.Spec.Workload.Spec.Driver, diff, planWayOn())
+}
+
+// planDiff names the first difference between a ledger's steps and a plan's,
+// or returns "".
+func planDiff(got, want []failoverv1.Step) string {
 	for i := 0; i < len(got) || i < len(want); i++ {
 		var diff string
 		switch {
@@ -43,11 +57,10 @@ func (e *Env) checkPlan(sf *failoverv1.SiteFailover) error {
 			diff = stepDiff(got[i], want[i])
 		}
 		if diff != "" {
-			return fmt.Errorf("%w: the steps of run %s are not what driver %s plans from the run's Workload: %s. %s",
-				ErrCannotResume, sf.Name, sf.Spec.Workload.Spec.Driver, diff, planWayOn())
+			return diff
 		}
 	}
-	return nil
+	return ""
 }
 
 // planWayOn returns the way on of a run whose steps checkPlan refuses.
@@ -57,12 +70,13 @@ func planWayOn() string {
 }
 
 // replan composes the run's plan from its ledger, as MakePlan composed it.
-func (e *Env) replan(sf *failoverv1.SiteFailover) ([]failoverv1.Step, error) {
+func (e *Env) replan(sf *failoverv1.SiteFailover, legacy bool) ([]failoverv1.Step, error) {
 	w := sf.Spec.Workload.Spec.DeepCopy()
 	if err := e.Driver.Validate(w); err != nil {
 		return nil, err
 	}
 	req := RequestOf(sf)
+	req.Legacy = legacy
 	if err := checkRequest(Request{Workload: sf.Spec.Workload.Name, Spec: w, Request: req}); err != nil {
 		return nil, err
 	}

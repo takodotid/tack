@@ -95,6 +95,10 @@ rules:
   - apiGroups: [""]
     resources: ["pods", "pods/proxy"]
     verbs: ["get"]
+  # Row 19: the old primary's snapshot, a Backup named after the run.
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["backups"]
+    verbs: ["get", "create"]
   {{- end }}
   {{- if $o.poolers }}
   # Rows 7 and 8
