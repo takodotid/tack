@@ -149,7 +149,7 @@ type WorkloadSnapshot struct {
 }
 
 // StepType is the action of a step.
-// +kubebuilder:validation:Enum=Hold;Reconcile;Patch;Wait;Capture;Git;VerifyGit;Release;VerifyNoop;Routing
+// +kubebuilder:validation:Enum=Hold;Reconcile;Patch;Wait;Capture;Git;VerifyGit;Release;VerifyNoop;Routing;Create;Record
 type StepType string
 
 const (
