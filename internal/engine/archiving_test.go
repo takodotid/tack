@@ -57,8 +57,7 @@ func TestPromotionWaitsForArchiving(t *testing.T) {
 func TestArchivingThatFailsWarns(t *testing.T) {
 	f := newFixture(t)
 	f.archives()
-	testenv.ArchiveFails = "unexpected failure invoking barman-cloud-wal-archive: exit status 4"
-	t.Cleanup(func() { testenv.ArchiveFails = "" })
+	f.clients.SetFault(testenv.FaultArchive, "unexpected failure invoking barman-cloud-wal-archive: exit status 4")
 	sf, err := f.start("b", failoverv1.ModePlanned, engine.Options{})
 	if err != nil {
 		t.Fatalf("run: %v", err)

@@ -62,6 +62,33 @@ type Clients struct {
 	status    map[string]map[string]any
 	statusErr map[string]error
 	proxied   []Proxied
+	// faults are the failures the fake CloudNativePG reports (SetFault).
+	faults map[string]string
+}
+
+// Faults of the fake CloudNativePG: every Backup fails, every WAL archive
+// attempt fails.
+const (
+	FaultBackup  = "backup"
+	FaultArchive = "archive"
+)
+
+// SetFault makes the fake CloudNativePG fail what kind names with msg, or
+// work again with "". The Operator's goroutine reads it under the lock.
+func (c *Clients) SetFault(kind, msg string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.faults == nil {
+		c.faults = map[string]string{}
+	}
+	c.faults[kind] = msg
+}
+
+// Fault returns the failure SetFault set for kind.
+func (c *Clients) Fault(kind string) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.faults[kind]
 }
 
 // NewClients returns fake clients for the sites, seeded with objects. Each
@@ -692,9 +719,9 @@ func (c *Clients) ProxyGet(ctx context.Context, site, namespace, pod, scheme str
 			status["currentWAL"] = fmt.Sprintf("%08X0000000000000003", tl)
 		}
 		// An instance whose Cluster archives WAL has archived the history
-		// file of its timeline, unless ArchiveFails.
+		// file of its timeline, unless FaultArchive.
 		_, store, _ := unstructured.NestedMap(u.Object, "spec", "backup", "barmanObjectStore")
-		if store && ArchiveFails == "" {
+		if store && c.Fault(FaultArchive) == "" {
 			status["lastArchivedWAL"], status["isArchivingWAL"] = fmt.Sprintf("%08X.history", tl), true
 		} else {
 			status["receivedLsn"], status["replayLsn"], status["isWalReceiverActive"] = "0/3000060", "0/3000060", true
