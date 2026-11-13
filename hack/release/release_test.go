@@ -371,7 +371,7 @@ func TestInstallChecksSHA256(t *testing.T) {
 		want  string
 	}{
 		{nil, "kind-linux-"},
-		{[]string{"helm"}, "helm-v4.3.1-linux-"},
+		{[]string{"helm"}, "helm-v4.3.2-linux-"},
 		{[]string{"cosign"}, "cosign-linux-"},
 		{[]string{"kubectl"}, "/kubectl does not match its pinned SHA-256"},
 		{[]string{"flux"}, "flux_2.10.0_linux_"},
