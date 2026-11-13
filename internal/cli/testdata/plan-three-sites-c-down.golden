@@ -10,8 +10,8 @@ Sites:
   c  unreachable  no answer to 3 checks over 0s: site c is unreachable: connection refused
 
 WAL positions:
-  a  writes at 0/3000060                      timeline 1             primary
-  b  received 0/3000060   replayed 0/3000060  timeline 1, streaming  most caught up
+  a  writes at 0/3000060                      timeline 1                                       primary
+  b  received 0/3000060   replayed 0/3000060  timeline 1, streaming  replayed all it received  most caught up
   c  not read: the site is unreachable
 
 Clusters:

@@ -57,7 +57,7 @@ func (d Driver) Record(ctx context.Context, w *failoverv1.WorkloadSpec, c kube.C
 		var err error
 		for i := 0; i < readTries; i++ {
 			if err = cl.Get(ctx, key, u); err == nil {
-				if st, err = readStatus(ctx, c, s.Site, u); err == nil {
+				if st, _, err = readStatus(ctx, c, s.Site, u); err == nil {
 					break
 				}
 			}
@@ -260,7 +260,7 @@ func archiving(ctx context.Context, c kube.Clients, site string, u *unstructured
 	if status != "True" {
 		return false, fmt.Sprintf("condition ContinuousArchiving is %s (%s)", orNone(status), orNone(msg))
 	}
-	st, err := readStatus(ctx, c, site, u)
+	st, _, err := readStatus(ctx, c, site, u)
 	if err != nil {
 		return false, err.Error()
 	}
@@ -416,7 +416,7 @@ func (Driver) Progress(ctx context.Context, _ *failoverv1.WorkloadSpec, c kube.C
 	if cl.Get(ctx, client.ObjectKey{Namespace: s.Wait.Object.Namespace, Name: s.Wait.Object.Name}, u) != nil {
 		return "", false
 	}
-	st, err := readStatus(ctx, c, s.Site, u)
+	st, _, err := readStatus(ctx, c, s.Site, u)
 	if err != nil || st.IsPrimary {
 		return "", false
 	}

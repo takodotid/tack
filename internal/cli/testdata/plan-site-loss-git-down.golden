@@ -8,7 +8,7 @@ Sites:
 
 WAL positions:
   a  not read: the site is unreachable
-  b  received 0/3000060  replayed 0/3000060  timeline 1, streaming  most caught up
+  b  received 0/3000060  replayed 0/3000060  timeline 1, streaming  replayed all it received  most caught up
 
 Clusters:
   site a  context site-a  server https://a.example.invalid:6443  kube-system UID not read yet

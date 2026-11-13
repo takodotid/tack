@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -28,7 +29,22 @@ const (
 	StatusPath = "/pg/status"
 )
 
-// PositionTimeout bounds the read of one site's position.
+// The instance manager's metrics endpoint: CloudNativePG v1.30.1,
+// pkg/management/url/url.go (PostgresMetricsPort, PathMetrics). It serves
+// it without authentication, over TLS when the postgres container runs
+// with --metrics-port-tls (pkg/specs/pods.go).
+const (
+	MetricsPort = 9187
+	MetricsPath = "/metrics"
+	// LagMetric is the lag of CloudNativePG's default monitoring query
+	// pg_replication (config/manager/default-monitoring.yaml): 0 when the
+	// instance is a primary or replayed all the WAL it received, else the
+	// seconds since the last transaction it replayed committed.
+	LagMetric = "cnpg_pg_replication_lag"
+)
+
+// PositionTimeout bounds each read of one site's position: its status,
+// then its replay lag.
 const PositionTimeout = 5 * time.Second
 
 // instanceStatus holds the fields of CloudNativePG's PostgresqlStatus
@@ -50,45 +66,88 @@ type instanceStatus struct {
 
 // readStatus reads the instance status of the Cluster's current primary
 // pod, the designated primary in a replica Cluster. It only reads: a GET
-// of the Pod, and a GET of its status through the API server.
-func readStatus(ctx context.Context, c kube.Clients, site string, u *unstructured.Unstructured) (*instanceStatus, error) {
+// of the Pod, and a GET of its status through the API server. It returns
+// the Pod too.
+func readStatus(ctx context.Context, c kube.Clients, site string, u *unstructured.Unstructured) (*instanceStatus, *corev1.Pod, error) {
 	p, ok := c.(kube.Proxier)
 	if !ok {
-		return nil, fmt.Errorf("these clients cannot read a pod through the API server")
+		return nil, nil, fmt.Errorf("these clients cannot read a pod through the API server")
 	}
 	pod, _, _ := unstructured.NestedString(u.Object, "status", "currentPrimary")
 	if pod == "" {
-		return nil, fmt.Errorf("the Cluster %s/%s names no current primary pod", u.GetNamespace(), u.GetName())
+		return nil, nil, fmt.Errorf("the Cluster %s/%s names no current primary pod", u.GetNamespace(), u.GetName())
 	}
 	cl, err := c.Client(site)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	po := &corev1.Pod{}
 	if err := cl.Get(ctx, client.ObjectKey{Namespace: u.GetNamespace(), Name: pod}, po); err != nil {
-		return nil, fmt.Errorf("read Pod %s/%s: %w", u.GetNamespace(), pod, err)
+		return nil, nil, fmt.Errorf("read Pod %s/%s: %w", u.GetNamespace(), pod, err)
 	}
 	body, err := p.ProxyGet(ctx, site, u.GetNamespace(), pod, scheme(po), StatusPort, StatusPath)
 	if err != nil {
-		return nil, fmt.Errorf("read the status of Pod %s/%s through the API server: %w", u.GetNamespace(), pod, err)
+		return nil, nil, fmt.Errorf("read the status of Pod %s/%s through the API server: %w", u.GetNamespace(), pod, err)
 	}
 	st := &instanceStatus{}
 	if err := json.Unmarshal(body, st); err != nil {
-		return nil, fmt.Errorf("the status of Pod %s/%s is not what CloudNativePG v1.30 writes: %w", u.GetNamespace(), pod, err)
+		return nil, nil, fmt.Errorf("the status of Pod %s/%s is not what CloudNativePG v1.30 writes: %w", u.GetNamespace(), pod, err)
 	}
-	return st, nil
+	return st, po, nil
+}
+
+// readLag reads a replica's replay lag from its instance manager's
+// metrics, through the API server: a GET only.
+func readLag(ctx context.Context, c kube.Clients, site string, po *corev1.Pod) (time.Duration, error) {
+	p, ok := c.(kube.Proxier)
+	if !ok {
+		return 0, fmt.Errorf("these clients cannot read a pod through the API server")
+	}
+	body, err := p.ProxyGet(ctx, site, po.Namespace, po.Name, metricsScheme(po), MetricsPort, MetricsPath)
+	if err != nil {
+		return 0, fmt.Errorf("read the metrics of Pod %s/%s through the API server: %w", po.Namespace, po.Name, err)
+	}
+	return parseLag(body)
+}
+
+// parseLag finds LagMetric in metrics of the Prometheus text format.
+func parseLag(body []byte) (time.Duration, error) {
+	for line := range strings.Lines(string(body)) {
+		name, rest, ok := strings.Cut(strings.TrimSpace(line), " ")
+		if !ok || strings.HasPrefix(name, "#") {
+			continue
+		}
+		if n, _, _ := strings.Cut(name, "{"); n != LagMetric {
+			continue
+		}
+		value, _, _ := strings.Cut(strings.TrimSpace(rest), " ")
+		f, err := strconv.ParseFloat(value, 64)
+		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) || f < 0 {
+			return 0, fmt.Errorf("%s is %q, not a number of seconds", LagMetric, value)
+		}
+		return time.Duration(f * float64(time.Second)).Round(time.Second), nil
+	}
+	return 0, fmt.Errorf("the metrics hold no %s: CloudNativePG exports it with its default monitoring queries, which spec.monitoring.disableDefaultQueries turns off", LagMetric)
 }
 
 // scheme is the status endpoint's scheme, as CloudNativePG finds it:
 // https when the postgres container runs with --status-port-tls
 // (pkg/management/postgres/webserver/client/remote/instance.go,
 // GetStatusSchemeFromPod).
-func scheme(p *corev1.Pod) string {
+func scheme(p *corev1.Pod) string { return tlsScheme(p, "--status-port-tls") }
+
+// metricsScheme is the metrics endpoint's scheme: https when the postgres
+// container runs with --metrics-port-tls, which CloudNativePG adds when
+// the Cluster sets spec.monitoring.tls.enabled (pkg/specs/pods.go).
+func metricsScheme(p *corev1.Pod) string { return tlsScheme(p, "--metrics-port-tls") }
+
+// tlsScheme is https when the pod's postgres container runs with flag.
+func tlsScheme(p *corev1.Pod, flag string) string {
 	for _, c := range p.Spec.Containers {
 		if c.Name != "postgres" {
 			continue
 		}
-		if slices.Contains(c.Command, "--status-port-tls") {
+		if slices.Contains(c.Command, flag) {
 			return "https"
 		}
 		break
@@ -100,17 +159,24 @@ func scheme(p *corev1.Pod) string {
 // fails for a position it cannot read.
 func position(ctx context.Context, c kube.Clients, site string, u *unstructured.Unstructured) *driver.Position {
 	// A pod that the API server cannot reach must not hold a plan.
-	ctx, cancel := context.WithTimeout(ctx, PositionTimeout)
+	sctx, cancel := context.WithTimeout(ctx, PositionTimeout)
 	defer cancel()
-	st, err := readStatus(ctx, c, site, u)
+	st, po, err := readStatus(sctx, c, site, u)
 	if err != nil {
 		return &driver.Position{Error: err.Error()}
 	}
 	pos := &driver.Position{System: st.SystemID, Timeline: st.TimeLineID, ReplayPaused: st.ReplayPaused, ReceiverActive: st.IsWalReceiverActive}
 	if st.IsPrimary {
 		pos.Current = st.CurrentLsn
+		return pos
+	}
+	pos.Received, pos.Replayed = st.ReceivedLsn, st.ReplayLsn
+	lctx, lcancel := context.WithTimeout(ctx, PositionTimeout)
+	defer lcancel()
+	if lag, err := readLag(lctx, c, site, po); err != nil {
+		pos.LagError = err.Error()
 	} else {
-		pos.Received, pos.Replayed = st.ReceivedLsn, st.ReplayLsn
+		pos.ReplayLag = &lag
 	}
 	return pos
 }
@@ -259,6 +325,19 @@ func positionNotes(w *failoverv1.WorkloadSpec, t *driver.Topology, r driver.Requ
 	tp := toSt.Position
 	if tp != nil && tp.Error == "" && tp.ReplayPaused {
 		notes = append(notes, fmt.Sprintf("warning: site %s: WAL replay is paused, so its data stops at what it replayed before the pause", r.To))
+	}
+	if tp != nil && tp.Error == "" && tp.LagError != "" {
+		notes = append(notes, fmt.Sprintf("site %s: the replay lag could not be read (%s). Tack reads it from the instance manager's metrics, port %d, through the API server, with the same permissions as the position",
+			r.To, tp.LagError, MetricsPort))
+	}
+	if r.Mode == failoverv1.ModeSiteLoss && tp != nil && tp.Error == "" && tp.ReplayLag != nil && *tp.ReplayLag > 0 {
+		note := fmt.Sprintf("warning: site %s: the last transaction it replayed committed %s ago, by its clock", r.To, *tp.ReplayLag)
+		rcv, okr := ParseLSN(tp.Received)
+		rep, okl := ParseLSN(tp.Replayed)
+		if okr && okl && rcv > rep {
+			note += fmt.Sprintf(". It holds %s of WAL it has not replayed: the promotion replays it before it takes writes, so writes stay down longer", Bytes(uint64(rcv-rep)))
+		}
+		notes = append(notes, note)
 	}
 	if r.Mode == failoverv1.ModePlanned {
 		if tp != nil && tp.Error == "" && !tp.ReceiverActive {
