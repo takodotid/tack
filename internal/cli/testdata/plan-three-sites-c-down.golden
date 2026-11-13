@@ -9,6 +9,11 @@ Sites:
   b  Replica      declares a  healthy  Cluster db/pg-b: phase "Cluster in healthy state", declares pg-a primary, pod pg-b-1
   c  unreachable  no answer to 3 checks over 0s: site c is unreachable: connection refused
 
+WAL positions:
+  a  writes at 0/3000060                      timeline 1             primary
+  b  received 0/3000060   replayed 0/3000060  timeline 1, streaming  most caught up
+  c  not read: the site is unreachable
+
 Clusters:
   site a  context site-a  server https://a.example.invalid:6443  kube-system UID uid-a
   site b  context site-b  server https://b.example.invalid:6443  kube-system UID uid-b

@@ -5,6 +5,10 @@ Sites:
   a  Replica  declares b  healthy  Cluster db/pg-a: phase "Cluster in healthy state", declares pg-b primary, pod pg-a-1; Pooler pg-a-pooler-rw has 0 instances
   b  Primary  declares b  healthy  Cluster db/pg-b: phase "Cluster in healthy state", declares pg-b primary, pod pg-b-1; Pooler pg-b-pooler-rw has 2 instances
 
+WAL positions:
+  a  received 0/3000060   replayed 0/3000060  timeline 1, streaming  most caught up
+  b  writes at 0/3000060                      timeline 1             primary
+
 Clusters:
   site a  context site-a  server https://a.example.invalid:6443  kube-system UID uid-a
   site b  context site-b  server https://b.example.invalid:6443  kube-system UID uid-b

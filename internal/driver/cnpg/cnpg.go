@@ -150,6 +150,7 @@ func (Driver) Discover(ctx context.Context, w *failoverv1.WorkloadSpec, c kube.C
 		}
 		read(&st, u, byCluster)
 		st.Created = u.GetCreationTimestamp().Time
+		st.Position = position(ctx, c, s.Name, u)
 		if s.CNPG.Pooler != nil {
 			p := &unstructured.Unstructured{}
 			p.SetAPIVersion(APIVersion)
@@ -162,6 +163,7 @@ func (Driver) Discover(ctx context.Context, w *failoverv1.WorkloadSpec, c kube.C
 		}
 		t.Sites = append(t.Sites, st)
 	}
+	stand(t)
 	return t, nil
 }
 
@@ -238,7 +240,30 @@ func (d Driver) Plan(w *failoverv1.WorkloadSpec, t *driver.Topology, r driver.Re
 	if err := check(t, r); err != nil {
 		return nil, nil, err
 	}
-	return d.Steps(w, r)
+	steps, follow, err := d.Steps(w, r)
+	if err != nil {
+		return nil, nil, err
+	}
+	// A site that holds WAL past to cannot follow it ([RFC#0004]
+	// Requirement 14): check refuses it unless the operator accepted it.
+	if r.Mode == failoverv1.ModeSiteLoss {
+		toSt, _ := t.Site(r.To)
+		for _, s := range ahead(t, r) {
+			site := siteByName(w, s.Name)
+			follow = append(follow, failoverv1.FollowUp{
+				Site:   s.Name,
+				Action: engine.FollowUpRebuild,
+				Reason: fmt.Sprintf("%s when %s was promoted, so Cluster %s may hold writes that %s lacks and cannot follow it: recreate %s from %s (%s)",
+					aheadOf(&s, toSt), to(w, r), site.CNPG.Cluster.Name, to(w, r), site.CNPG.Cluster.Name, to(w, r), version.DocLink("docs/runbooks/rebuild-old-primary.md")),
+			})
+		}
+	}
+	return steps, follow, nil
+}
+
+// to is the name of the Cluster that becomes primary.
+func to(w *failoverv1.WorkloadSpec, r driver.Request) string {
+	return siteByName(w, r.To).CNPG.Cluster.Name
 }
 
 // check refuses a request that the topology does not allow.
@@ -284,6 +309,11 @@ func check(t *driver.Topology, r driver.Request) error {
 		if fromSt != nil && fromSt.Reachable && fromSt.Role == driver.RolePrimary {
 			return fmt.Errorf("site %s answers as primary (%s): use a planned switchover, or stop it first", r.From, fromSt.Summary)
 		}
+		if a := ahead(t, r); len(a) > 0 && !r.AcceptBehind {
+			s := a[0]
+			return fmt.Errorf("site %s holds WAL past site %s: %s. Promoting %s loses the writes that %s holds, and site %s must then be rebuilt. Promote the most caught-up site instead (--to %s), or pass --accept-behind to tack plan and tack run to promote %s anyway",
+				s.Name, r.To, aheadOf(&s, toSt), r.To, s.Name, s.Name, best(t, a), r.To)
+		}
 	default:
 		return fmt.Errorf("unknown mode %q", r.Mode)
 	}
@@ -311,16 +341,16 @@ func lacksTo(t *driver.Topology, r driver.Request) []driver.SiteState {
 // may have gone with the lost site. The step that makes such a site
 // declare to's primary fails, as CloudNativePG refuses it, and the run
 // stops there.
-func (d Driver) Notes(_ *failoverv1.WorkloadSpec, t *driver.Topology, r driver.Request) []string {
+func (d Driver) Notes(w *failoverv1.WorkloadSpec, t *driver.Topology, r driver.Request) []string {
+	notes := positionNotes(w, t, r)
 	if r.Mode != failoverv1.ModeSiteLoss {
-		return nil
+		return notes
 	}
 	toSt, ok := t.Site(r.To)
 	if !ok {
-		return nil
+		return notes
 	}
 	to := toSt.Facts[factCluster]
-	var notes []string
 	for _, s := range lacksTo(t, r) {
 		when := "after the promotion of " + to
 		if s.Name == r.From {

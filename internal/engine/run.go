@@ -40,6 +40,9 @@ type Options struct {
 	// Force is set when the operator took over a run that a tack process
 	// may still run, with --force ([RFC#0003] Requirement 28).
 	Force bool
+	// AcceptBehind is set when the operator passed --accept-behind
+	// ([RFC#0004] Requirement 14). The spec records it too.
+	AcceptBehind bool
 }
 
 // ErrStopped is returned when the run stops for the operator.
@@ -603,7 +606,10 @@ func (r *runner) switchStarted() bool {
 // before its steps and the read of the other sites decide on it, with or
 // without --fence ([RFC#0007] Requirements 6 and 9).
 func (r *runner) recheck(ctx context.Context) error {
-	topo, err := r.discover(ctx, &r.sf.Spec.Workload.Spec, runChecks{r: r})
+	// This read sees positions too, so the driver's refusals that use them
+	// hold before any Failover step ([RFC#0004] Requirement 14). The reads
+	// before each later step do not read them.
+	topo, err := r.discover(ctx, &r.sf.Spec.Workload.Spec, withPositions{runChecks{r: r}})
 	if err != nil {
 		return fmt.Errorf("the read before the first Failover step: %w", err)
 	}
@@ -719,8 +725,11 @@ func (r *runner) index(id string) int {
 }
 
 // request is the run's request, as its driver takes it.
-func (r *runner) request() driver.Request {
-	return driver.Request{From: r.sf.Spec.From, To: r.sf.Spec.To, Mode: r.sf.Spec.Mode}
+func (r *runner) request() driver.Request { return RequestOf(r.sf) }
+
+// RequestOf is a ledger's request, as its driver takes it.
+func RequestOf(sf *failoverv1.SiteFailover) driver.Request {
+	return driver.Request{From: sf.Spec.From, To: sf.Spec.To, Mode: sf.Spec.Mode, AcceptBehind: sf.Spec.AcceptBehind}
 }
 
 // fencesAfter tells whether the step that makes site declare another
@@ -1353,4 +1362,13 @@ func hasRunnableDeferred(sf *failoverv1.SiteFailover) bool {
 		}
 	}
 	return false
+}
+
+// withPositions are runChecks that also read a pod through the API
+// server, for the members' positions.
+type withPositions struct{ runChecks }
+
+// ProxyGet implements kube.Proxier.
+func (c withPositions) ProxyGet(ctx context.Context, site, namespace, pod, scheme string, port int, path string) ([]byte, error) {
+	return c.r.checks.ProxyGet(ctx, site, namespace, pod, scheme, port, path)
 }

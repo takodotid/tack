@@ -75,6 +75,12 @@ spec:
               SiteFailoverSpec is the run's request and its plan. It never changes
               after the run starts.
             properties:
+              acceptBehind:
+                description: |-
+                  AcceptBehind records --accept-behind: the operator let a site loss
+                  promote To while another site that answered held WAL past it
+                  ([RFC#0004] Requirement 14). Unset for most runs.
+                type: boolean
               fingerprints:
                 description: |-
                   Fingerprints identify the cluster of each site that answered the
@@ -1273,6 +1279,12 @@ spec:
               SiteFailoverSpec is the run's request and its plan. It never changes
               after the run starts.
             properties:
+              acceptBehind:
+                description: |-
+                  AcceptBehind records --accept-behind: the operator let a site loss
+                  promote To while another site that answered held WAL past it
+                  ([RFC#0004] Requirement 14). Unset for most runs.
+                type: boolean
               fingerprints:
                 description: |-
                   Fingerprints identify the cluster of each site that answered the

@@ -91,6 +91,10 @@ rules:
     resources: ["clusters"]
     resourceNames: {{ toJson $o.clusters }}
     verbs: ["get", "update", "patch"]
+  # Row 18: the Clusters' instance pods, whose names CloudNativePG generates.
+  - apiGroups: [""]
+    resources: ["pods", "pods/proxy"]
+    verbs: ["get"]
   {{- end }}
   {{- if $o.poolers }}
   # Rows 7 and 8

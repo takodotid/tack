@@ -374,3 +374,12 @@ type StampWriter interface {
 	io.Writer
 	WriteStamped(p []byte, at time.Time) (int, error)
 }
+
+// ProxyGet implements kube.Proxier, when the site's clients do.
+func (c *SiteChecks) ProxyGet(ctx context.Context, site, namespace, pod, scheme string, port int, path string) ([]byte, error) {
+	p, ok := c.Clients.(kube.Proxier)
+	if !ok {
+		return nil, fmt.Errorf("these clients cannot read a pod through the API server")
+	}
+	return p.ProxyGet(ctx, site, namespace, pod, scheme, port, path)
+}

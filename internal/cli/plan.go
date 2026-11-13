@@ -23,11 +23,12 @@ import (
 )
 
 type planFlags struct {
-	file   string
-	from   string
-	to     string
-	mode   string
-	output string
+	file         string
+	from         string
+	to           string
+	mode         string
+	output       string
+	acceptBehind bool
 }
 
 func (p *planFlags) add(cmd *cobra.Command, output bool) {
@@ -35,6 +36,7 @@ func (p *planFlags) add(cmd *cobra.Command, output bool) {
 	cmd.Flags().StringVar(&p.to, "to", "", "the site that becomes primary (required)")
 	cmd.Flags().StringVar(&p.from, "from", "", "the site of the current primary (default: the primary the target site declares)")
 	cmd.Flags().StringVar(&p.mode, "mode", "planned", "planned: the old primary demotes and hands over its token; site-loss: promote without a token after the old site is lost")
+	cmd.Flags().BoolVar(&p.acceptBehind, "accept-behind", false, "with --mode site-loss: promote the target although another site that answers holds WAL past it; that site then needs a rebuild")
 	if output {
 		cmd.Flags().StringVarP(&p.output, "output", "o", "text", "text, or yaml for the SiteFailover the run would create")
 	}
@@ -53,11 +55,14 @@ func (p *planFlags) request(w *config.Workload, now func() string) (engine.Reque
 	default:
 		return engine.Request{}, usagef("--mode must be planned or site-loss, not %q", p.mode)
 	}
+	if p.acceptBehind && mode != failoverv1.ModeSiteLoss {
+		return engine.Request{}, usagef("--accept-behind is for --mode site-loss: a planned switchover loses no write")
+	}
 	return engine.Request{
 		Run:      w.Name + "-" + now(),
 		Workload: w.Name,
 		Spec:     &w.Spec,
-		Request:  driver.Request{From: p.from, To: p.to, Mode: mode},
+		Request:  driver.Request{From: p.from, To: p.to, Mode: mode, AcceptBehind: p.acceptBehind},
 	}, nil
 }
 
@@ -108,8 +113,12 @@ func newPlan(o *options) *cobra.Command {
 				return err
 			}
 			printPlan(out, plan, env.Clients)
-			fmt.Fprintf(out, "\nNothing was changed. To run this plan: tack run -f %s --to %s --from %s --mode %s\n",
-				p.file, plan.SiteFailover.Spec.To, plan.SiteFailover.Spec.From, p.mode)
+			behind := ""
+			if p.acceptBehind {
+				behind = " --accept-behind"
+			}
+			fmt.Fprintf(out, "\nNothing was changed. To run this plan: tack run -f %s --to %s --from %s --mode %s%s\n",
+				p.file, plan.SiteFailover.Spec.To, plan.SiteFailover.Spec.From, p.mode, behind)
 			return nil
 		},
 	}
@@ -205,7 +214,7 @@ func newRun(o *options) *cobra.Command {
 			if len(old) > 0 {
 				env.Supersede = supersede(env, old)
 			}
-			return env.Start(cmd.Context(), plan.SiteFailover, engine.Options{TakeOver: takeOver, Yes: yes, Force: force})
+			return env.Start(cmd.Context(), plan.SiteFailover, engine.Options{TakeOver: takeOver, Yes: yes, Force: force, AcceptBehind: p.acceptBehind})
 		},
 	}
 	p.add(cmd, false)

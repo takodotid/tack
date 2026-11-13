@@ -23,7 +23,10 @@ Until then there are two primaries. Confirm the loss, and fence the old primary,
 ## Steps
 
 1. **Plan.** `tack plan -f workload.yaml --to NEW --mode site-loss`. Its notes name the sites it could not read.
-2. **Run.** `tack run -f workload.yaml --to NEW --mode site-loss`. The steps at the lost site are `Deferred`. With Git down too, the run waits with exit code 4: [break-glass](../operations.md#break-glass).
+   - **Pick the most caught-up site.** The plan's `WAL positions` show how far each replica got, and mark one `most caught up`. Promote that one: the writes that `NEW` never received are lost (the RPO). The plan refuses a `NEW` that is behind another replica that answers, and names the one to promote.
+   - **To promote a site that is behind anyway,** for example because the most caught-up one cannot serve, add `--accept-behind` to the plan and the run. The run then records a `Rebuild` for each replica that was ahead: it holds writes that `NEW` lacks, so it cannot follow `NEW`.
+   - A position that could not be read is a warning, not a refusal. The plan says why, such as a missing permission (row 18 of [the permissions table](../operations.md#permissions)).
+2. **Run.** `tack run -f workload.yaml --to NEW --mode site-loss`, with `--accept-behind` if the plan needed it. The steps at the lost site are `Deferred`. With Git down too, the run waits with exit code 4: [break-glass](../operations.md#break-glass).
 3. **When the old site answers again,** `tack resume RUN -f workload.yaml`. If it answers as primary, or its Cluster still declares itself primary, the run stops with `FencedSiteIsPrimary`; check it, then `tack resume RUN -f workload.yaml --fence OLD`. A run whose old site answers its API at the start, with its instances down, stops the same way before its first step there; the plan says so.
 4. **Rebuild the old primary:** [rebuild-old-primary.md](rebuild-old-primary.md).
 

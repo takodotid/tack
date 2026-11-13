@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
+	"github.com/takodotid/tack/internal/driver"
 	"github.com/takodotid/tack/internal/engine"
 	"github.com/takodotid/tack/internal/kube"
 	"github.com/takodotid/tack/internal/redact"
@@ -43,6 +44,7 @@ func printPlan(w io.Writer, p *engine.Plan, c kube.Clients) {
 		fmt.Fprintf(tw, "  %s\t%s\tdeclares %s\t%s\t%s\n", s.Name, s.Role, orNone(s.DeclaredPrimary), health, redact.Text(s.Summary))
 	}
 	tw.Flush()
+	printPositions(w, p.Topology)
 	fmt.Fprintln(w)
 	printClusters(w, sf, c)
 	fmt.Fprintln(w)
@@ -469,4 +471,41 @@ func firstLine(s string) string {
 func sorted(s []string) []string {
 	sort.Strings(s)
 	return s
+}
+
+// printPositions writes how far each site's data reaches, as its database
+// reports it, when the driver reads it ([RFC#0009] Requirement 2).
+func printPositions(w io.Writer, t *driver.Topology) {
+	read := false
+	for _, s := range t.Sites {
+		read = read || s.Position != nil
+	}
+	if !read {
+		return
+	}
+	fmt.Fprintln(w, "\nWAL positions:")
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	for _, s := range t.Sites {
+		p := s.Position
+		switch {
+		case !s.Reachable:
+			fmt.Fprintf(tw, "  %s\tnot read: the site is unreachable\n", s.Name)
+		case p == nil:
+			fmt.Fprintf(tw, "  %s\tnot read\n", s.Name)
+		case p.Error != "":
+			fmt.Fprintf(tw, "  %s\tnot read: %s\n", s.Name, redact.Text(p.Error))
+		case p.Current != "":
+			fmt.Fprintf(tw, "  %s\twrites at %s\t\ttimeline %d\t%s\n", s.Name, p.Current, p.Timeline, p.Standing)
+		default:
+			stream := "not streaming"
+			if p.ReceiverActive {
+				stream = "streaming"
+			}
+			if p.ReplayPaused {
+				stream += ", replay paused"
+			}
+			fmt.Fprintf(tw, "  %s\treceived %s\treplayed %s\ttimeline %d, %s\t%s\n", s.Name, orNone(p.Received), orNone(p.Replayed), p.Timeline, stream, p.Standing)
+		}
+	}
+	tw.Flush()
 }
