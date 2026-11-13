@@ -1,5 +1,5 @@
 # A copy of deploy/cnpg/replay-time.yaml, in the Cluster's namespace; only
-# site a has it. TestReplayTimeQueryCopy keeps the two the same.
+# site a has it. TestReplayTimeQuery keeps the two the same.
 apiVersion: v1
 kind: ConfigMap
 metadata:

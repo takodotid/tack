@@ -208,7 +208,7 @@ Give each site's Cluster a WAL archive of its own from day one: its own `destina
 
 ## Replay time
 
-Opt-in. With it, a site-loss plan says up to which commit the new primary's data reaches. Without it, the plan prints each replica's replay lag only. That lag is 0 once a replica has replayed all it received, which is the usual state after a site loss.
+Opt-in. With it, a site-loss plan says when the last commit that the new primary replayed was. Without it, the plan prints each replica's replay lag only. That lag is 0 once a replica has replayed all it received, which is the usual state after a site loss.
 
 Make two changes in Git, at each site:
 
@@ -233,12 +233,12 @@ Make two changes in Git, at each site:
 
 | The plan prints | When |
 |---|---|
-| `last replayed commit <time> (<age> ago)` in the `Replay` column, and in a site-loss plan: every transaction the old primary committed up to that time is in the new primary, at least | the query answers. The time is the old primary's clock, in whole seconds; the age is by Tack's clock. |
+| `last replayed commit <time> (<age> ago)` in the `Replay` column, and in a site-loss plan: the writes that the old primary committed after that time are lost, and so may be a few committed just before it | the query answers. The time is the old primary's clock, to the millisecond; the age is by Tack's clock. |
 | `(the clocks differ)` | the time is after Tack's clock |
 | `replayed no transaction since it started` | the instance replayed no transaction since it started: PostgreSQL returns NULL |
 | what it prints without the query | the metric is not there |
 
-The time is that of the last transaction the replica replayed. An old primary that took no writes after it loses none, however old the time is. The value can be up to `metricsQueriesTTL` old.
+The time is that of the last commit the replica replayed. It is not a line before which every commit is in the replica. PostgreSQL stamps a commit before it writes the commit record to the WAL (`src/backend/access/transam/xact.c`, `RecordTransactionCommit`). So, under concurrent writes, a commit stamped just before another can come after it in the WAL, and not be replayed yet. An old primary that took no writes after the time loses none, however old the time is. The value can be up to `metricsQueriesTTL` old.
 
 ## When the file is checked
 

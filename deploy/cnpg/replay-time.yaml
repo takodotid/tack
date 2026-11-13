@@ -1,7 +1,8 @@
 # Tack's replay-time query, opt-in (docs/workload.md#replay-time). Apply it
-# in the namespace of each Cluster, before the Cluster names it in
-# spec.monitoring.customQueriesConfigMap. Keep the query and column names:
-# Tack reads the metric cnpg_tack_replay_timestamp_seconds.
+# in the namespace of each Cluster, and name it in the Cluster's
+# spec.monitoring.customQueriesConfigMap. A Cluster that names it before it
+# exists runs without it, with a warning, until it exists. Keep the query
+# and column names: Tack reads the metric cnpg_tack_replay_timestamp_seconds.
 apiVersion: v1
 kind: ConfigMap
 metadata:

@@ -321,15 +321,15 @@ func TestSiteLossNotes(t *testing.T) {
 }
 
 // #94, [RFC#0004] Requirement 13: with Tack's replay-time query, a
-// site-loss plan says up to which commit the target's data reaches. It
+// site-loss plan says when the target's last replayed commit was. It
 // reads the same /metrics GET, and keeps the replay lag.
-func TestSiteLossSaysUpToWhichCommit(t *testing.T) {
+func TestSiteLossSaysTheLastReplayedCommit(t *testing.T) {
 	c := threeSites(false)
 	c.SetDown("a", true)
 	c.SetMetrics("b", "cnpg_pg_replication_lag 0\ncnpg_tack_replay_timestamp_seconds 1.7945604005e+09\n", nil)
 	w, topo := discover(t, c)
 	notes := strings.Join(Driver{}.Notes(w, topo, driver.Request{From: "a", To: "b", Mode: failoverv1.ModeSiteLoss}), "\n")
-	want := "Site b reaches 0/3000060. It holds every transaction that the old primary committed up to 2026-11-13T09:00:00Z at least, by the old primary's clock"
+	want := "Site b reaches 0/3000060. Its last replayed commit is from 2026-11-13T09:00:00.5Z, by the old primary's clock"
 	if !strings.Contains(notes, want) {
 		t.Errorf("notes %q do not say %q", notes, want)
 	}
@@ -357,16 +357,16 @@ func TestReplayTime(t *testing.T) {
 
 	c.SetMetrics("b", "cnpg_pg_replication_lag 0\ncnpg_tack_replay_timestamp_seconds 1794560400.5\n", nil)
 	p := site("b")
-	if p.LastCommit == nil || !p.LastCommit.Equal(at) || p.CommitAge != time.Hour || p.CommitNote != "" || p.ReplayLag == nil {
+	if p.LastCommit == nil || !p.LastCommit.Equal(at.Add(500*time.Millisecond)) || p.CommitAge != time.Hour-time.Second || p.CommitNote != "" || p.ReplayLag == nil {
 		t.Errorf("site b: %+v", p)
 	}
-	if n := notesTo("b"); !strings.Contains(n, "committed up to 2026-11-13T09:00:00Z at least, by the old primary's clock: 1h0m0s before this plan, by Tack's clock. The writes that the old primary took after that are not in it") {
+	if n := notesTo("b"); !strings.Contains(n, "Its last replayed commit is from 2026-11-13T09:00:00.5Z, by the old primary's clock (59m59s before this plan, by Tack's clock). The writes that the old primary committed after it are lost, and so may be a few committed just before it, under concurrent writes. The writes that the old primary took after that are not in it") || strings.Contains(n, "at least") {
 		t.Errorf("notes %q", n)
 	}
 
 	// The old primary's clock ahead of Tack's.
 	now = func() time.Time { return at.Add(-time.Minute) }
-	if n := notesTo("b"); !strings.Contains(n, "by the old primary's clock, which is ahead of Tack's by 1m0s or more.") {
+	if n := notesTo("b"); !strings.Contains(n, "by the old primary's clock (that clock is ahead of Tack's by 1m0s or more).") {
 		t.Errorf("notes %q", n)
 	}
 	now = func() time.Time { return time.Date(2026, 11, 13, 10, 0, 0, 0, time.UTC) }
@@ -382,7 +382,7 @@ func TestReplayTime(t *testing.T) {
 	if p := site("b"); p.LastCommit != nil || p.CommitNote != "replayed no transaction since it started" {
 		t.Errorf("site b: %+v", p)
 	}
-	if n := notesTo("b"); !strings.Contains(n, "site b: replayed no transaction since it started, so the plan cannot say up to which commit its data reaches") || strings.Contains(n, "committed up to") {
+	if n := notesTo("b"); !strings.Contains(n, "site b: replayed no transaction since it started, so the plan cannot say when its last replayed commit was") || strings.Contains(n, "last replayed commit is from") {
 		t.Errorf("notes %q", n)
 	}
 	for _, bad := range []string{"0", "-1", "+Inf", "x"} {

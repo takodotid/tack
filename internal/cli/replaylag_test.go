@@ -48,10 +48,10 @@ func TestReplayLagPrinted(t *testing.T) {
 }
 
 // #94: with Tack's replay-time query, the replay column holds the last
-// replayed commit's time, in RFC 3339, and its age.
+// replayed commit's time, in RFC 3339 to the millisecond, and its age.
 func TestReplayTimePrinted(t *testing.T) {
 	zero := time.Duration(0)
-	at := time.Date(2026, 11, 13, 9, 0, 0, 0, time.UTC)
+	at := time.Date(2026, 11, 13, 9, 0, 0, 500_000_000, time.UTC)
 	topo := &driver.Topology{Sites: []driver.SiteState{
 		{Name: "b", Reachable: true, Role: driver.RoleReplica, Position: &driver.Position{Received: "0/3000000", Replayed: "0/3000000", Timeline: 1, ReplayLag: &zero, LastCommit: &at, CommitAge: time.Hour, Standing: "most caught up"}},
 		{Name: "c", Reachable: true, Role: driver.RoleReplica, Position: &driver.Position{Received: "0/3000000", Replayed: "0/3000000", Timeline: 1, ReplayLag: &zero, LastCommit: &at, CommitAge: -time.Minute, Standing: "most caught up"}},
@@ -61,8 +61,8 @@ func TestReplayTimePrinted(t *testing.T) {
 	printPositions(&pipe, topo)
 	columns := regexp.MustCompile(`  +`).ReplaceAllString(pipe.String(), "|")
 	for _, want := range []string{
-		"|b|received 0/3000000|replayed 0/3000000|timeline 1, not streaming|last replayed commit 2026-11-13T09:00:00Z (1h0m0s ago)|most caught up\n",
-		"|c|received 0/3000000|replayed 0/3000000|timeline 1, not streaming|last replayed commit 2026-11-13T09:00:00Z (the clocks differ)|most caught up\n",
+		"|b|received 0/3000000|replayed 0/3000000|timeline 1, not streaming|last replayed commit 2026-11-13T09:00:00.5Z (1h0m0s ago)|most caught up\n",
+		"|c|received 0/3000000|replayed 0/3000000|timeline 1, not streaming|last replayed commit 2026-11-13T09:00:00.5Z (the clocks differ)|most caught up\n",
 		"|d|received 0/3000000|replayed 0/3000000|timeline 1, not streaming|replayed no transaction since it started|most caught up\n",
 	} {
 		if !strings.Contains(columns, want) {

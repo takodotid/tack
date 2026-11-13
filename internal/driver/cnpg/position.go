@@ -44,7 +44,8 @@ const (
 	// ReplayTimeMetric is the column of Tack's replay-time query,
 	// deploy/cnpg/replay-time.yaml, which an operator may add to a Cluster
 	// (docs/workload.md#replay-time): the commit time, in seconds since
-	// 1970, of the last transaction the instance replayed. CloudNativePG
+	// 1970, of the last transaction the instance replayed. Commit times
+	// are not in WAL order: see committedUpTo. CloudNativePG
 	// names a custom metric cnpg_<query>_<column>, and writes NULL as NaN
 	// (pkg/management/postgres/utils/utils.go, DBToFloat64).
 	ReplayTimeMetric = "cnpg_tack_replay_timestamp_seconds"
@@ -164,8 +165,7 @@ func replayTime(pos *driver.Position, body []byte) {
 	case err != nil || math.IsInf(f, 0) || f <= 0:
 		pos.CommitNote = fmt.Sprintf("replay time not read: %s is %q, not a time", ReplayTimeMetric, value)
 	default:
-		// Whole seconds, down: "up to t at least" stays true.
-		t := time.Unix(int64(f), 0).UTC()
+		t := time.UnixMilli(int64(math.Round(f * 1000))).UTC()
 		pos.LastCommit = &t
 		pos.CommitAge = now().Sub(t).Truncate(time.Second)
 	}
@@ -399,7 +399,7 @@ func positionNotes(w *failoverv1.WorkloadSpec, t *driver.Topology, r driver.Requ
 		notes = append(notes, fmt.Sprintf("site loss: replication between sites is asynchronous. The writes that the old primary took after the last WAL that site %s received are not in it: this run loses them (the RPO)", r.To))
 	}
 	if tp != nil && tp.Error == "" && tp.LastCommit == nil && tp.CommitNote != "" {
-		notes = append(notes, fmt.Sprintf("site %s: %s, so the plan cannot say up to which commit its data reaches", r.To, tp.CommitNote))
+		notes = append(notes, fmt.Sprintf("site %s: %s, so the plan cannot say when its last replayed commit was", r.To, tp.CommitNote))
 	}
 	if d := toSt.Facts[factMinApplyDelay]; d != "" {
 		notes = append(notes, fmt.Sprintf("warning: site %s: Cluster sets spec.replica.minApplyDelay %s, so it replays WAL that long after it receives it; its replayed position lags what it received", r.To, d))
@@ -413,17 +413,21 @@ func positionNotes(w *failoverv1.WorkloadSpec, t *driver.Topology, r driver.Requ
 	return notes
 }
 
-// committedUpTo says, from the replay-time query, up to which commit a
-// replica's data reaches; "" without it.
+// committedUpTo says, from the replay-time query, when the last commit
+// that a replica replayed was; "" without it. It is no guarantee:
+// PostgreSQL stamps a commit before it inserts the commit record
+// (xact.c, RecordTransactionCommit), so under concurrent writes a commit
+// stamped just before may come later in the WAL, and is not replayed yet.
 func committedUpTo(p *driver.Position) string {
 	if p.LastCommit == nil {
 		return ""
 	}
-	at := p.LastCommit.Format(time.RFC3339)
+	at := p.LastCommit.Format(driver.CommitTimeLayout)
+	when := fmt.Sprintf("%s before this plan, by Tack's clock", p.CommitAge)
 	if p.CommitAge < 0 {
-		return fmt.Sprintf(" It holds every transaction that the old primary committed up to %s at least, by the old primary's clock, which is ahead of Tack's by %s or more.", at, -p.CommitAge)
+		when = fmt.Sprintf("that clock is ahead of Tack's by %s or more", -p.CommitAge)
 	}
-	return fmt.Sprintf(" It holds every transaction that the old primary committed up to %s at least, by the old primary's clock: %s before this plan, by Tack's clock.", at, p.CommitAge)
+	return fmt.Sprintf(" Its last replayed commit is from %s, by the old primary's clock (%s). The writes that the old primary committed after it are lost, and so may be a few committed just before it, under concurrent writes.", at, when)
 }
 
 // best is the site, among those ahead of to, whose data reaches furthest.

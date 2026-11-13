@@ -101,7 +101,10 @@ type Position struct {
 	LagError  string
 	// LastCommit is, from Tack's opt-in replay-time query, the commit time
 	// of the last transaction the replica replayed, by its primary's
-	// clock; nil without the query. CommitAge is how long before the read
+	// clock, to the millisecond; nil without the query. Under concurrent
+	// writes, a few transactions committed just before it may not be
+	// replayed yet: PostgreSQL stamps a commit before it writes the commit
+	// record to the WAL. CommitAge is how long before the read
 	// that was, by Tack's clock: below 0 when the clocks differ.
 	// CommitNote says why there is no time although the query is set up.
 	LastCommit *time.Time
@@ -113,6 +116,9 @@ type Position struct {
 	// Error is why the position could not be read.
 	Error string
 }
+
+// CommitTimeLayout writes a commit time: RFC 3339, to the millisecond.
+const CommitTimeLayout = "2006-01-02T15:04:05.999Z07:00"
 
 // FieldChange is one field of one live object, and its value after the run.
 type FieldChange struct {

@@ -652,9 +652,9 @@ func printPositions(w io.Writer, t *driver.Topology) {
 func replayLag(p *driver.Position) string {
 	switch {
 	case p.LastCommit != nil && p.CommitAge < 0:
-		return fmt.Sprintf("last replayed commit %s (the clocks differ)", p.LastCommit.Format(time.RFC3339))
+		return fmt.Sprintf("last replayed commit %s (the clocks differ)", p.LastCommit.Format(driver.CommitTimeLayout))
 	case p.LastCommit != nil:
-		return fmt.Sprintf("last replayed commit %s (%s ago)", p.LastCommit.Format(time.RFC3339), p.CommitAge)
+		return fmt.Sprintf("last replayed commit %s (%s ago)", p.LastCommit.Format(driver.CommitTimeLayout), p.CommitAge)
 	case p.CommitNote != "":
 		return p.CommitNote
 	case p.LagError != "":
