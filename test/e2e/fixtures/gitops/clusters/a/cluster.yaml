@@ -20,6 +20,11 @@ spec:
   postgresql:
     parameters:
       shared_buffers: 64MB
+  # Tack's replay-time query (docs/workload.md#replay-time): at site a only.
+  monitoring:
+    customQueriesConfigMap:
+      - name: tack-replay-time
+        key: queries
   certificates:
     serverCASecret: tack-e2e-server-ca
     clientCASecret: tack-e2e-client-ca

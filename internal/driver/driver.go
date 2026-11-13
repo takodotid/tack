@@ -99,6 +99,14 @@ type Position struct {
 	// why.
 	ReplayLag *time.Duration
 	LagError  string
+	// LastCommit is, from Tack's opt-in replay-time query, the commit time
+	// of the last transaction the replica replayed, by its primary's
+	// clock; nil without the query. CommitAge is how long before the read
+	// that was, by Tack's clock: below 0 when the clocks differ.
+	// CommitNote says why there is no time although the query is set up.
+	LastCommit *time.Time
+	CommitAge  time.Duration
+	CommitNote string
 	// Standing compares the member with the other sites, such as
 	// "most caught up" or "behind b by 16 KiB".
 	Standing string

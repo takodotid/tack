@@ -206,6 +206,40 @@ Give each site's Cluster a WAL archive of its own from day one: its own `destina
 | `verify-archiving-<to>`, after the promotion | waits up to `timeouts.archiving` until the new primary archives WAL of its new timeline. That means `ContinuousArchiving` is `True`, and its last archived file is of that timeline. A Cluster without an archive passes at once. When the wait times out, the run warns, records `CheckArchiving`, and goes on. Writes are back by then, and the operator fixes the archive. |
 | after a site loss | records, on the old primary's `Rebuild` follow-up, where it archived. The rebuilt Cluster gets a new destination, and the old one is kept ([rebuild-old-primary.md](runbooks/rebuild-old-primary.md)). |
 
+## Replay time
+
+Opt-in. With it, a site-loss plan says up to which commit the new primary's data reaches. Without it, the plan prints each replica's replay lag only. That lag is 0 once a replica has replayed all it received, which is the usual state after a site loss.
+
+Make two changes in Git, at each site:
+
+1. **Add the ConfigMap** [deploy/cnpg/replay-time.yaml](../deploy/cnpg/replay-time.yaml) in the Cluster's namespace. Keep its query name `tack_replay` and its column name `timestamp_seconds`. Tack reads the metric `cnpg_tack_replay_timestamp_seconds` and nothing else. Keep its label `cnpg.io/reload`.
+2. **Name it in the Cluster.** Add an entry to `spec.monitoring.customQueriesConfigMap`. Keep the entries that are already there:
+
+   ```yaml
+   spec:
+     monitoring:
+       customQueriesConfigMap:
+         - name: tack-replay-time
+           key: queries
+   ```
+
+| Question | Answer, from CloudNativePG v1.30.1 |
+|---|---|
+| Does it restart PostgreSQL? | No. Each instance reads the named ConfigMaps each time it reconciles its Cluster (`internal/management/controller/instance_controller.go:176,1035-1118`). `spec.monitoring` reaches the Pod only through `tls.enabled` (`pkg/specs/pods.go:300-302`). |
+| What if the ConfigMap is missing? | Each instance logs a warning and runs without the query (`internal/management/controller/instance_controller.go:1057-1066`). Once the ConfigMap exists, its label `cnpg.io/reload` makes the operator reconcile the Clusters that name it (`internal/controller/cluster_predicates.go:154-157`, `internal/controller/cluster_controller.go:1652-1666`), and each instance reads it again. |
+| Does it need `disableDefaultQueries: false`? | No. Tack reads the replay lag and the replay time from one GET, and uses each one it finds. |
+| What does it cost? | One query, `pg_last_xact_replay_timestamp()`, run at most once per `spec.monitoring.metricsQueriesTTL` (30 seconds by default), when something reads `/metrics`. |
+| What permissions? | None more: Tack reads it with the GET of row 18 of [operations.md](operations.md#permissions). |
+
+| The plan prints | When |
+|---|---|
+| `last replayed commit <time> (<age> ago)` in the `Replay` column, and in a site-loss plan: every transaction the old primary committed up to that time is in the new primary, at least | the query answers. The time is the old primary's clock, in whole seconds; the age is by Tack's clock. |
+| `(the clocks differ)` | the time is after Tack's clock |
+| `replayed no transaction since it started` | the instance replayed no transaction since it started: PostgreSQL returns NULL |
+| what it prints without the query | the metric is not there |
+
+The time is that of the last transaction the replica replayed. An old primary that took no writes after it loses none, however old the time is. The value can be up to `metricsQueriesTTL` old.
+
 ## When the file is checked
 
 | When | What |

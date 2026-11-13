@@ -612,7 +612,7 @@ func printPositions(w io.Writer, t *driver.Topology) {
 					standing = l.yellow(standing)
 				}
 				replay := replayLag(p)
-				if p.LagError != "" || p.ReplayLag != nil && *p.ReplayLag > 0 {
+				if p.LastCommit == nil && (p.LagError != "" || p.CommitNote != "" || p.ReplayLag != nil && *p.ReplayLag > 0) {
 					replay = l.yellow(replay)
 				}
 				rows = append(rows, []string{s.Name, orNone(p.Received), orNone(p.Replayed), fmt.Sprint(p.Timeline), stream, replay, standing})
@@ -651,6 +651,12 @@ func printPositions(w io.Writer, t *driver.Topology) {
 // its database exports ([RFC#0004] Requirement 13).
 func replayLag(p *driver.Position) string {
 	switch {
+	case p.LastCommit != nil && p.CommitAge < 0:
+		return fmt.Sprintf("last replayed commit %s (the clocks differ)", p.LastCommit.Format(time.RFC3339))
+	case p.LastCommit != nil:
+		return fmt.Sprintf("last replayed commit %s (%s ago)", p.LastCommit.Format(time.RFC3339), p.CommitAge)
+	case p.CommitNote != "":
+		return p.CommitNote
 	case p.LagError != "":
 		return "replay lag not read"
 	case p.ReplayLag == nil:
