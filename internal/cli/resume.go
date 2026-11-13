@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -345,8 +346,8 @@ func newStatus(o *options) *cobra.Command {
   tack status pg-main-20261027-101500 -f workload.yaml`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if output != "text" && output != "yaml" {
-				return usagef("--output must be text or yaml")
+			if output != "text" && output != "yaml" && output != "json" {
+				return usagef("--output must be text, yaml or json")
 			}
 			name := ""
 			if len(args) > 0 {
@@ -361,11 +362,19 @@ func newStatus(o *options) *cobra.Command {
 				// A site that gave no answer is named after the runs, and
 				// fails the command: the list is incomplete ([RFC#0009]
 				// Requirement 16).
-				if output == "yaml" {
+				switch output {
+				case "yaml":
 					if err := writeYAML(out, found.runs); err != nil {
 						return err
 					}
 					writeMissingYAML(out, found.missing)
+					return found.incomplete()
+				case "json":
+					if err := writeJSONList(out, found.runs); err != nil {
+						return err
+					}
+					// JSON has no comments: the names go to stderr.
+					printMissing(cmd.ErrOrStderr(), found.missing)
 					return found.incomplete()
 				}
 				printRuns(out, found.runs)
@@ -376,15 +385,18 @@ func newStatus(o *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if output == "yaml" {
+			switch output {
+			case "yaml":
 				return writeYAML(out, []foundRun{r})
+			case "json":
+				return writeObject(out, "json", redacted(r.sf))
 			}
 			printStatus(out, r.sf)
 			return nil
 		},
 	}
 	l.add(cmd)
-	cmd.Flags().StringVarP(&output, "output", "o", "text", "text or yaml")
+	cmd.Flags().StringVarP(&output, "output", "o", "text", "text, yaml or json")
 	return cmd
 }
 
@@ -447,4 +459,32 @@ func writeYAML(w io.Writer, runs []foundRun) error {
 		}
 	}
 	return nil
+}
+
+// writeObject writes one object as YAML or as indented JSON: the same
+// content ([RFC#0009] Requirement 32).
+func writeObject(w io.Writer, format string, obj any) error {
+	var b []byte
+	var err error
+	if format == "json" {
+		b, err = json.MarshalIndent(obj, "", "  ")
+		b = append(b, '\n')
+	} else {
+		b, err = yaml.Marshal(obj)
+	}
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(b)
+	return err
+}
+
+// writeJSONList writes runs as one JSON List, as kubectl does: the YAML
+// output's documents, in order, in its items.
+func writeJSONList(w io.Writer, runs []foundRun) error {
+	items := make([]*failoverv1.SiteFailover, 0, len(runs))
+	for _, r := range runs {
+		items = append(items, redacted(r.sf))
+	}
+	return writeObject(w, "json", map[string]any{"apiVersion": "v1", "kind": "List", "items": items})
 }

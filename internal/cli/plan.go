@@ -12,7 +12,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
-	"sigs.k8s.io/yaml"
 
 	failoverv1 "github.com/takodotid/tack/api/v1"
 	"github.com/takodotid/tack/internal/config"
@@ -38,7 +37,7 @@ func (p *planFlags) add(cmd *cobra.Command, output bool) {
 	cmd.Flags().StringVar(&p.mode, "mode", "planned", "planned: the old primary demotes and hands over its token; site-loss: promote without a token after the old site is lost")
 	cmd.Flags().BoolVar(&p.acceptBehind, "accept-behind", false, "with --mode site-loss: promote the target although another site that answers holds WAL past it; that site then needs a rebuild")
 	if output {
-		cmd.Flags().StringVarP(&p.output, "output", "o", "text", "text, or yaml for the SiteFailover the run would create")
+		cmd.Flags().StringVarP(&p.output, "output", "o", "text", "text, or yaml or json for the SiteFailover the run would create")
 	}
 }
 
@@ -93,8 +92,8 @@ func newPlan(o *options) *cobra.Command {
   tack plan -f workload.yaml --to b -o yaml`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if p.output != "text" && p.output != "yaml" {
-				return usagef("--output must be text or yaml")
+			if p.output != "text" && p.output != "yaml" && p.output != "json" {
+				return usagef("--output must be text, yaml or json")
 			}
 			plan, env, cleanup, err := o.makePlan(cmd.Context(), &p, o.progress(cmd.ErrOrStderr()))
 			if cleanup != nil {
@@ -104,13 +103,8 @@ func newPlan(o *options) *cobra.Command {
 				return err
 			}
 			out := cmd.OutOrStdout()
-			if p.output == "yaml" {
-				b, err := yaml.Marshal(redacted(plan.SiteFailover))
-				if err != nil {
-					return err
-				}
-				_, err = out.Write(b)
-				return err
+			if p.output != "text" {
+				return writeObject(out, p.output, redacted(plan.SiteFailover))
 			}
 			printPlan(out, plan, env.Clients)
 			behind := ""
