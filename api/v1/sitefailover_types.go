@@ -309,6 +309,11 @@ type WaitStep struct {
 	Object     ObjectRef       `json:"object"`
 	Conditions []Condition     `json:"conditions"`
 	Timeout    metav1.Duration `json:"timeout"`
+	// Stall, when set, stops the wait early when the driver reports that
+	// the workload is behind and its progress has not moved for that long
+	// ([RFC#0004] Requirement 18).
+	// +optional
+	Stall *metav1.Duration `json:"stall,omitempty"`
 }
 
 // CaptureStep copies one field of a live object into the ledger.
@@ -549,6 +554,11 @@ type SiteFailoverStatus struct {
 	// site loss ([RFC#0004] Requirement 15).
 	// +optional
 	Fork *ForkPoint `json:"fork,omitempty"`
+
+	// Writes is when the workload stopped taking writes, and when the new
+	// primary took them again ([RFC#0003] Requirement 29).
+	// +optional
+	Writes *WriteWindow `json:"writes,omitempty"`
 }
 
 // MaxHistory is the most entries status.history holds. The CRD's
@@ -629,6 +639,10 @@ type StepStatus struct {
 	// Message is the step's last result or error.
 	// +optional
 	Message string `json:"message,omitempty"`
+	// Earlier holds the step's attempts before this one, oldest first, at
+	// most MaxEarlierAttempts ([RFC#0003] Requirement 30).
+	// +optional
+	Earlier []StepAttempt `json:"earlier,omitempty"`
 }
 
 // HeldObject is an object the run holds or held.
@@ -703,6 +717,36 @@ type SnapshotRecord struct {
 	// +optional
 	At *metav1.Time `json:"at,omitempty"`
 }
+
+// WriteWindow is when a run's workload took no writes.
+type WriteWindow struct {
+	// StoppedAt is when writes stopped: in a planned run, when the step that
+	// stops them started; in a site loss, the run's start, an estimate.
+	// +optional
+	StoppedAt *metav1.Time `json:"stoppedAt,omitempty"`
+	// StoppedEstimated is true when StoppedAt is an estimate: in a site
+	// loss, writes stopped when the site was lost, at the latest then.
+	// +optional
+	StoppedEstimated bool `json:"stoppedEstimated,omitempty"`
+	// ResumedAt is when the step after which the new primary takes writes
+	// at its site ended.
+	// +optional
+	ResumedAt *metav1.Time `json:"resumedAt,omitempty"`
+}
+
+// StepAttempt is an earlier attempt of a step.
+type StepAttempt struct {
+	// +optional
+	StartedAt *metav1.Time `json:"startedAt,omitempty"`
+	// +optional
+	FinishedAt *metav1.Time `json:"finishedAt,omitempty"`
+	State      StepState    `json:"state"`
+	// +optional
+	Message string `json:"message,omitempty"`
+}
+
+// MaxEarlierAttempts bounds a step's earlier attempts in the ledger.
+const MaxEarlierAttempts = 10
 
 // ForkPoint is where the new primary's history leaves the old one's in a
 // site loss ([RFC#0004] Requirement 15).

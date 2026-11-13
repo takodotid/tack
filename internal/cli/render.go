@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -151,6 +152,13 @@ func printSteps(w io.Writer, sf *failoverv1.SiteFailover, withState bool) {
 				}
 				if st.Message != "" {
 					fmt.Fprintf(w, "        result: %s\n", engine.Clean(sf.Status.Captured, st.Message))
+				}
+				for i, a := range st.Earlier {
+					fmt.Fprintf(w, "        earlier attempt %d: %s, %s", i+1, a.State, times(a.StartedAt, a.FinishedAt))
+					if a.Message != "" {
+						fmt.Fprintf(w, ": %s", engine.Clean(sf.Status.Captured, a.Message))
+					}
+					fmt.Fprintln(w)
 				}
 			}
 		}
@@ -312,6 +320,9 @@ func printStatus(w io.Writer, sf *failoverv1.SiteFailover) {
 			fmt.Fprintf(w, "; the stop names %s for --accept-git-head", g.ChangedRevision)
 		}
 		fmt.Fprintln(w)
+	}
+	if line := writesDown(st.Writes); line != "" {
+		fmt.Fprintln(w, line)
 	}
 	if f := st.Fork; f != nil {
 		fmt.Fprintf(w, "Fork: site %s's new history leaves the old one at %s", f.Site, orNone(f.Position))
@@ -578,4 +589,24 @@ func recordWhat(what string) string {
 		return "nothing until it archives WAL of its new timeline: condition ContinuousArchiving True, and its last archived file of that timeline; at once without a WAL archive"
 	}
 	return what
+}
+
+// writesDown says when the run's workload took no writes ([RFC#0003]
+// Requirement 29).
+func writesDown(wr *failoverv1.WriteWindow) string {
+	if wr == nil || wr.StoppedAt == nil {
+		return ""
+	}
+	from := at(*wr.StoppedAt)
+	if wr.StoppedEstimated {
+		from = "by " + from + " at the latest (the run's start: the site was lost before)"
+	}
+	if wr.ResumedAt == nil {
+		return "Writes down: since " + from + "; the new primary does not take writes yet"
+	}
+	d := wr.ResumedAt.Sub(wr.StoppedAt.Time).Round(time.Second)
+	if wr.StoppedEstimated {
+		return fmt.Sprintf("Writes down: %s, until %s: at least %s", from, at(*wr.ResumedAt), d)
+	}
+	return fmt.Sprintf("Writes down: %s to %s (%s)", from, at(*wr.ResumedAt), d)
 }

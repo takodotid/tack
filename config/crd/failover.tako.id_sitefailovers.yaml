@@ -644,6 +644,12 @@ spec:
                           - name
                           - namespace
                           type: object
+                        stall:
+                          description: |-
+                            Stall, when set, stops the wait early when the driver reports that
+                            the workload is behind and its progress has not moved for that long
+                            ([RFC#0004] Requirement 18).
+                          type: string
                         timeout:
                           type: string
                       required:
@@ -1329,6 +1335,34 @@ spec:
                       description: Attempts counts the starts of the step.
                       format: int32
                       type: integer
+                    earlier:
+                      description: |-
+                        Earlier holds the step's attempts before this one, oldest first, at
+                        most MaxEarlierAttempts ([RFC#0003] Requirement 30).
+                      items:
+                        description: StepAttempt is an earlier attempt of a step.
+                        properties:
+                          finishedAt:
+                            format: date-time
+                            type: string
+                          message:
+                            type: string
+                          startedAt:
+                            format: date-time
+                            type: string
+                          state:
+                            description: StepState is the state of a step.
+                            enum:
+                            - Pending
+                            - Running
+                            - Succeeded
+                            - Failed
+                            - Deferred
+                            type: string
+                        required:
+                        - state
+                        type: object
+                      type: array
                     finishedAt:
                       format: date-time
                       type: string
@@ -1362,6 +1396,29 @@ spec:
                   SupersededBy is the later run that took this run over. That run
                   writes it when this ledger answers; its spec.takeOver is the record.
                 type: string
+              writes:
+                description: |-
+                  Writes is when the workload stopped taking writes, and when the new
+                  primary took them again ([RFC#0003] Requirement 29).
+                properties:
+                  resumedAt:
+                    description: |-
+                      ResumedAt is when the step after which the new primary takes writes
+                      at its site ended.
+                    format: date-time
+                    type: string
+                  stoppedAt:
+                    description: |-
+                      StoppedAt is when writes stopped: in a planned run, when the step that
+                      stops them started; in a site loss, the run's start, an estimate.
+                    format: date-time
+                    type: string
+                  stoppedEstimated:
+                    description: |-
+                      StoppedEstimated is true when StoppedAt is an estimate: in a site
+                      loss, writes stopped when the site was lost, at the latest then.
+                    type: boolean
+                type: object
               writtenBy:
                 description: |-
                   WrittenBy is the version of the tack that last wrote this status. A
@@ -2008,6 +2065,12 @@ spec:
                           - name
                           - namespace
                           type: object
+                        stall:
+                          description: |-
+                            Stall, when set, stops the wait early when the driver reports that
+                            the workload is behind and its progress has not moved for that long
+                            ([RFC#0004] Requirement 18).
+                          type: string
                         timeout:
                           type: string
                       required:
@@ -2693,6 +2756,34 @@ spec:
                       description: Attempts counts the starts of the step.
                       format: int32
                       type: integer
+                    earlier:
+                      description: |-
+                        Earlier holds the step's attempts before this one, oldest first, at
+                        most MaxEarlierAttempts ([RFC#0003] Requirement 30).
+                      items:
+                        description: StepAttempt is an earlier attempt of a step.
+                        properties:
+                          finishedAt:
+                            format: date-time
+                            type: string
+                          message:
+                            type: string
+                          startedAt:
+                            format: date-time
+                            type: string
+                          state:
+                            description: StepState is the state of a step.
+                            enum:
+                            - Pending
+                            - Running
+                            - Succeeded
+                            - Failed
+                            - Deferred
+                            type: string
+                        required:
+                        - state
+                        type: object
+                      type: array
                     finishedAt:
                       format: date-time
                       type: string
@@ -2726,6 +2817,29 @@ spec:
                   SupersededBy is the later run that took this run over. That run
                   writes it when this ledger answers; its spec.takeOver is the record.
                 type: string
+              writes:
+                description: |-
+                  Writes is when the workload stopped taking writes, and when the new
+                  primary took them again ([RFC#0003] Requirement 29).
+                properties:
+                  resumedAt:
+                    description: |-
+                      ResumedAt is when the step after which the new primary takes writes
+                      at its site ended.
+                    format: date-time
+                    type: string
+                  stoppedAt:
+                    description: |-
+                      StoppedAt is when writes stopped: in a planned run, when the step that
+                      stops them started; in a site loss, the run's start, an estimate.
+                    format: date-time
+                    type: string
+                  stoppedEstimated:
+                    description: |-
+                      StoppedEstimated is true when StoppedAt is an estimate: in a site
+                      loss, writes stopped when the site was lost, at the latest then.
+                    type: boolean
+                type: object
               writtenBy:
                 description: |-
                   WrittenBy is the version of the tack that last wrote this status. A

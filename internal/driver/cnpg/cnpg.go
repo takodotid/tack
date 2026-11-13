@@ -404,6 +404,12 @@ func (d Driver) Steps(w *failoverv1.WorkloadSpec, r driver.Request) ([]failoverv
 			cond("{.status.lastPromotionToken}", failoverv1.OpEquals, token),
 			cond("{.status.instancesReportedState.*.isPrimary}", failoverv1.OpContains, "true"),
 			cond("{.status.phase}", failoverv1.OpEquals, PhaseHealthy))
+		if !r.Legacy {
+			// Stop early when replay stands still short of the token
+			// ([RFC#0004] Requirement 18).
+			last := &b.steps[len(b.steps)-1]
+			last.Wait.Stall = &metav1.Duration{Duration: StallWithin}
+		}
 		b.patch("clear-token-"+to.Name, to, ClusterRef(to), "remove the used token from Cluster "+toName+", so it can never apply again",
 			`{"spec":{"replica":{"promotionToken":null}}}`)
 		b.declareOthers(r)

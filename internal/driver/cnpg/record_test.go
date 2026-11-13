@@ -1,6 +1,8 @@
 package cnpg
 
 import (
+	"context"
+	"encoding/base64"
 	"slices"
 	"strings"
 	"testing"
@@ -87,5 +89,59 @@ func TestRecordSteps(t *testing.T) {
 		if strings.HasPrefix(id, "record-") || strings.HasPrefix(id, "snapshot-") {
 			t.Errorf("a planned run has %s", id)
 		}
+	}
+}
+
+// [RFC#0004] Requirement 18: the replay of the new primary, and whether it
+// is short of the demotion token's checkpoint, as CloudNativePG compares
+// them before it promotes.
+func TestProgress(t *testing.T) {
+	c := threeSites(true)
+	w, _ := discover(t, c)
+	steps, _, err := Driver{}.Steps(w, driver.Request{From: "a", To: "b", Mode: failoverv1.ModePlanned})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wait *failoverv1.Step
+	for i := range steps {
+		if steps[i].ID == "wait-promoted-b" {
+			wait = &steps[i]
+		}
+	}
+	token := base64.StdEncoding.EncodeToString([]byte(`{"latestCheckpointTimelineID":"1","latestCheckpointREDOLocation":"0/3000060"}`))
+	for _, tt := range []struct {
+		name, replay, token string
+		primary             bool
+		want                string
+		behind              bool
+	}{
+		{"short of the token", "0/3000000", token, false, "site b's replay at 0/3000000, short of 0/3000060 that the demotion token needs", true},
+		{"at the token", "0/3000060", token, false, "site b's replay at 0/3000060, short of 0/3000060 that the demotion token needs", false},
+		{"promoted", "", token, true, "", false},
+		{"a token Tack cannot read", "0/3000000", "token-a-1", false, "", false},
+	} {
+		st := replicaAt(tt.replay)
+		st["isPrimary"] = tt.primary
+		c.SetStatus("b", st, nil)
+		got, behind := Driver{}.Progress(context.Background(), w, c, wait, map[string]string{TokenKey: tt.token})
+		if got != tt.want || behind != tt.behind {
+			t.Errorf("%s: %q, %v; want %q, %v", tt.name, got, behind, tt.want, tt.behind)
+		}
+	}
+}
+
+// Writes stop at the old Pooler's scale to 0 and come back at the new
+// one's; a site loss cannot tell when they stopped.
+func TestWrites(t *testing.T) {
+	w := spec3()
+	if s, r := (Driver{}).Writes(w, driver.Request{From: "a", To: "b", Mode: failoverv1.ModePlanned}); s != "pooler-a" || r != "wait-pooler-b" {
+		t.Errorf("planned: %s, %s", s, r)
+	}
+	if s, r := (Driver{}).Writes(w, driver.Request{From: "a", To: "b", Mode: failoverv1.ModeSiteLoss}); s != "" || r != "wait-pooler-b" {
+		t.Errorf("site loss: %s, %s", s, r)
+	}
+	w.Sites[0].CNPG.Pooler, w.Sites[1].CNPG.Pooler = nil, nil
+	if s, r := (Driver{}).Writes(w, driver.Request{From: "a", To: "b", Mode: failoverv1.ModePlanned}); s != "demote-a" || r != "wait-promoted-b" {
+		t.Errorf("planned without Poolers: %s, %s", s, r)
 	}
 }

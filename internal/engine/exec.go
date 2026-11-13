@@ -430,6 +430,9 @@ func (r *runner) wait(ctx context.Context, s *failoverv1.Step) (string, error) {
 	obj := r.named(s.Wait.Object)
 	deadline := r.now().Add(s.Wait.Timeout.Duration)
 	var last string
+	var progress string
+	var since time.Time
+	prog, _ := r.Driver.(driver.Progresser)
 	for {
 		u := newObject(obj)
 		err := c.Get(ctx, client.ObjectKeyFromObject(u), u)
@@ -447,6 +450,16 @@ func (r *runner) wait(ctx context.Context, s *failoverv1.Step) (string, error) {
 		}
 		if r.now().After(deadline) {
 			return "", fmt.Errorf("timed out after %s waiting for %s: %s", s.Wait.Timeout.Duration, refString(obj), last)
+		}
+		if s.Wait.Stall != nil && prog != nil {
+			p, behind := prog.Progress(ctx, &r.sf.Spec.Workload.Spec, r.checks, s, r.sf.Status.Captured)
+			switch {
+			case !behind || p != progress:
+				progress, since = p, r.now()
+			case r.now().Sub(since) >= s.Wait.Stall.Duration:
+				return "", fmt.Errorf("stopped before the timeout: %s, has not moved for %s, and the wait needs more: %s. Check that WAL still reaches site %s. The change made stays: the workload goes on once it catches up, and a resume waits again",
+					p, s.Wait.Stall.Duration, last, s.Site)
+			}
 		}
 		select {
 		case <-ctx.Done():

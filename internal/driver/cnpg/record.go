@@ -2,6 +2,8 @@ package cnpg
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -388,4 +390,79 @@ func archiveNotes(t *driver.Topology, r driver.Request) []string {
 		notes = append(notes, "WAL archives: each site that answers archives to a destination of its own")
 	}
 	return notes
+}
+
+// StallWithin is how long the wait for a planned promotion lets the new
+// primary's replay stand still, short of the demotion token, before it
+// stops ([RFC#0004] Requirement 18).
+const StallWithin = 2 * time.Minute
+
+// Progress implements driver.Progresser for the wait of a planned
+// promotion: the replay position of to's instance, and whether it is still
+// short of the demotion token's checkpoint, which CloudNativePG waits for
+// before it promotes (v1.30.1, pkg/promotiontoken/promotion_token.go:75-115).
+func (Driver) Progress(ctx context.Context, _ *failoverv1.WorkloadSpec, c kube.Clients, s *failoverv1.Step, captured map[string]string) (string, bool) {
+	target, ok := tokenLSN(captured[TokenKey])
+	if !ok || s.Wait == nil {
+		return "", false
+	}
+	cl, err := c.Client(s.Site)
+	if err != nil {
+		return "", false
+	}
+	u := &unstructured.Unstructured{}
+	u.SetAPIVersion(s.Wait.Object.APIVersion)
+	u.SetKind(s.Wait.Object.Kind)
+	if cl.Get(ctx, client.ObjectKey{Namespace: s.Wait.Object.Namespace, Name: s.Wait.Object.Name}, u) != nil {
+		return "", false
+	}
+	st, err := readStatus(ctx, c, s.Site, u)
+	if err != nil || st.IsPrimary {
+		return "", false
+	}
+	replay, ok := ParseLSN(st.ReplayLsn)
+	if !ok {
+		return "", false
+	}
+	return fmt.Sprintf("site %s's replay at %s, short of %s that the demotion token needs", s.Site, replay, target), replay < target
+}
+
+// tokenLSN reads the checkpoint position a demotion token holds: base64 of
+// JSON, latestCheckpointREDOLocation (v1.30.1, pkg/utils/parser.go:180-205,
+// :237-245).
+func tokenLSN(token string) (LSN, bool) {
+	b, err := base64.StdEncoding.DecodeString(token)
+	if err != nil {
+		return 0, false
+	}
+	var t struct {
+		REDO string `json:"latestCheckpointREDOLocation"`
+	}
+	if json.Unmarshal(b, &t) != nil {
+		return 0, false
+	}
+	return ParseLSN(t.REDO)
+}
+
+// Writes implements driver.Writer: writes stop when the old primary's
+// Pooler goes to 0, or when it demotes without one; they come back when the
+// new primary's Pooler is ready, or when it runs a healthy primary without
+// one. A site loss cannot tell when writes stopped.
+func (Driver) Writes(w *failoverv1.WorkloadSpec, r driver.Request) (string, string) {
+	from, to := siteByName(w, r.From), siteByName(w, r.To)
+	if from == nil || to == nil {
+		return "", ""
+	}
+	resumes := "wait-promoted-" + to.Name
+	if to.CNPG.Pooler != nil {
+		resumes = "wait-pooler-" + to.Name
+	}
+	if r.Mode != failoverv1.ModePlanned {
+		return "", resumes
+	}
+	stops := "demote-" + from.Name
+	if from.CNPG.Pooler != nil {
+		stops = "pooler-" + from.Name
+	}
+	return stops, resumes
 }

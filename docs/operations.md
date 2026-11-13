@@ -5,7 +5,7 @@
 | Command | Shows |
 |---|---|
 | `tack status -f workload.yaml` | the workload's runs at every reachable site: site, run, mode, from, to, state, reason, start. The state is `Abandoned` for an abandoned run, and `TakenOver` for a run another run took over. After the list, each site that gave no answer, with its error: its runs are not listed, and the command exits with code 1. With `-o yaml`, those lines follow the ledgers as YAML comments |
-| `tack status RUN -f workload.yaml` | one run: state and reason, message, the version of the `tack` that last wrote it, Git base and commit, captured values by name, held objects as the ledger records them, each phase and step with its state, start, end, attempts and last result, follow-ups, and the history: each start, stop, wait and success of the run, with the version, the user and the flags of the `tack` that recorded it |
+| `tack status RUN -f workload.yaml` | one run: state and reason, message, the version of the `tack` that last wrote it, Git base and commit, captured values by name, held objects as the ledger records them, when writes stopped and came back (`Writes down:`), the fork point of a site loss (`Fork:`), each phase and step with its state, start, end, attempts, last result and earlier attempts, follow-ups with the old primary's snapshot and archive, and the history: each start, stop, wait and success of the run, with the version, the user and the flags of the `tack` that recorded it |
 | `tack status [RUN] --context site-b` | the same from one context, without the Workload file; `--namespace` when the ledger namespace is not `tack-system` |
 | `tack status RUN -f workload.yaml -o yaml` | the whole `SiteFailover` object |
 | `tack abandon RUN -f workload.yaml --reason TEXT` | marks a run that must never go on: [runbooks/abandon-run.md](runbooks/abandon-run.md) |
@@ -83,6 +83,27 @@ After `--accept-git-head`, the check before release reports differences outside 
 `tack resume` refuses a run that another run took over, or that another run of the workload started after: its plan may no longer match the sites. Resume or check the newer run instead. It refuses before it asks for the workload's name, with exit code 1, and searches again after the confirmation.
 
 `tack resume` asks for the workload's name like `tack run`. `--yes` skips that, only for a resume a human approved.
+
+## How long writes stay down
+
+`tack status RUN` prints `Writes down:` from `status.writes`:
+
+| Mode | Writes stopped | Writes came back |
+|---|---|---|
+| `Planned` | the start of `pooler-<from>`, or of `demote-<from>` without a Pooler | the end of `wait-pooler-<to>`, or of `wait-promoted-<to>` without a Pooler |
+| `SiteLoss` | unknown: the site was lost before the run. Tack records the run's start, marked as an estimate: writes had stopped by then at the latest | as above |
+
+The window ends when the new primary takes writes at its site. Clients that reach it through Strait wait for Strait's route too. To measure what clients see, and to set a budget, use [measure-failover-time.md](runbooks/measure-failover-time.md) in staging.
+
+**Demotion time.** In a planned switchover, writes stay down from the old Pooler's scale to 0 until the new primary is ready. The longest part is often the old primary's shutdown. CloudNativePG lets it last up to the old Cluster's `spec.switchoverDelay`, 3600 seconds by default (v1.30.1, `api/v1/cluster_types.go:375-381`, `pkg/management/postgres/instance.go:695-720`). Tack waits for the demotion up to `timeouts.demotion`, 10 minutes by default.
+
+| Case | What happens |
+|---|---|
+| The shutdown ends within both | The demotion token appears, and the run goes on. |
+| The shutdown outlasts `timeouts.demotion` | The run stops with `StepFailed` at `wait-demoted-<from>`, while CloudNativePG keeps waiting. Writes stay down. Resume the run: the wait starts again, and goes on once the token appears. |
+| The shutdown outlasts `switchoverDelay` | CloudNativePG shuts down at once and publishes no token. The run stops at `wait-demoted-<from>`: [no-primary-after-demotion.md](runbooks/no-primary-after-demotion.md). |
+
+Keep `timeouts.demotion` shorter than `switchoverDelay`, so Tack reports a slow shutdown before CloudNativePG gives up on it. While the new primary replays up to the token, Tack stops the wait early when its replay stands still for 2 minutes short of the token ([RFC#0004](../rfcs/RFC0004.md#requirements), Requirement 18). The patch that promotes it stays: it promotes once it catches up, and a resume waits again.
 
 ## Interrupting a run
 
