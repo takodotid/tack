@@ -105,7 +105,6 @@ func set(u *unstructured.Unstructured, v any, path ...string) {
 	_ = unstructured.SetNestedField(u.Object, v, path...)
 }
 
-
 // backups completes each volumeSnapshot Backup with one VolumeSnapshot of
 // its data, as CloudNativePG does once the snapshot is ready.
 func (o *Operator) backups(ctx context.Context, c client.Client) {
