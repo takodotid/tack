@@ -726,7 +726,8 @@ func TestSiteLossBreakGlassAndReturn(t *testing.T) {
 	// #94: site a's Cluster has Tack's replay-time query. A commit at b reaches a; the plan shows a's last
 	// replayed commit at or after it. CloudNativePG reruns the query at most every 30 seconds.
 	mark := psql(t, "b", "insert into marks values ('before-site-loss-' || clock_timestamp()); select floor(extract(epoch from clock_timestamp()))::bigint")
-	committed, err := strconv.ParseInt(mark, 10, 64)
+	// psql prints each statement's result: the time is on the last line.
+	committed, err := strconv.ParseInt(mark[strings.LastIndex(mark, "\n")+1:], 10, 64)
 	if err != nil {
 		t.Fatalf("commit time %q: %v", mark, err)
 	}
