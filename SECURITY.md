@@ -17,8 +17,8 @@ Tack holds no secret ([RFC0009, Security Considerations](rfcs/RFC0009.md#securit
 | Version | Security fixes |
 |---|---|
 | The latest release | yes |
-| Older releases | no. Upgrade as the README's [Upgrading within v1](README.md#upgrading-within-v1) shows. |
+| Older releases | no. Upgrade as [Upgrade within v1](docs/guide/upgrade.md#upgrade-within-v1) shows. |
 
 ## Verifying a release
 
-Each release from v1.3.0 is signed and attested: [Verify a release](README.md#verify-a-release).
+Each release from v1.3.0 is signed and attested: [Verify a release](docs/guide/install.md#verify-a-release).
