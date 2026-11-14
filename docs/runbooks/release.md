@@ -9,7 +9,7 @@ The operator's steps to publish a release. What the workflow checks, and in whic
 | 3. Tag | Sign an annotated tag on that commit, and push it: `git tag -s vX.Y.Z COMMIT -m "Tack vX.Y.Z"`, then `git push origin vX.Y.Z`. GitHub must show the tag as Verified, so the key must belong to the tagger's GitHub account. |
 | 4. Approve | When the environment `release` has reviewers, approve the run. Nothing runs before the approval. |
 | 5. Check | The job `publish` ends by verifying the release, as [Verify a release](../guide/install.md#verify-a-release) shows. Run those commands once more from another machine. |
-| 6. The site | The job `pages` builds the documentation site from the tag and publishes it at tack.tako.id. If only it fails, the release stands: run the `pages` workflow by hand on `main` (`gh workflow run pages.yml`). |
+| 6. The site | The job `pages` builds the documentation site from the tag and publishes it at tack.tako.id. If only it fails, the release stands: run the `pages` workflow by hand on `main` (`gh workflow run pages.yaml`). |
 
 ## When the release stops
 

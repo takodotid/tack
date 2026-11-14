@@ -139,7 +139,7 @@ jobs:
             echo "attested: $f"
           done
 
-  # The site at tack.tako.id, built from the tag and published once the release is (pages.yml). Only its deploy job
+  # The site at tack.tako.id, built from the tag and published once the release is (pages.yaml). Only its deploy job
   # writes, and only to Pages.
   pages:
     needs: publish
@@ -147,6 +147,6 @@ jobs:
       contents: read
       pages: write
       id-token: write
-    uses: ./.github/workflows/pages.yml
+    uses: ./.github/workflows/pages.yaml
     with:
       deploy: true
