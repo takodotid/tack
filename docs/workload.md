@@ -230,7 +230,7 @@ Make two changes in Git, at each site:
 | Does it need `disableDefaultQueries: false`? | No. Tack reads the replay lag and the replay time from one GET, and uses each one it finds. |
 | What does it cost? | One query, `pg_last_xact_replay_timestamp()`, run at most once per `spec.monitoring.metricsQueriesTTL` (30 seconds by default), when something reads `/metrics`. |
 | What permissions? | None more: Tack reads it with the GET of row 18 of [operations.md](operations.md#permissions). |
-| Where is it kept? | A site-loss run reads it again right before the promotion, at `record-position-<to>`, and keeps it in the ledger as `status.fork.lastCommit`. `tack status RUN` prints it on the `Fork:` line. Upgrade the CRD first ([README](../README.md#upgrading-within-v1)): a CRD without this field drops it from every status write, without an error. |
+| Where is it kept? | A site-loss run reads it again right before the promotion, at `record-position-<to>`, and keeps it in the ledger as `status.fork.lastCommit`. `tack status RUN` prints it on the `Fork:` line. Upgrade the CRD first ([Upgrade](guide/upgrade.md#upgrade-within-v1)): a CRD without this field drops it from every status write, without an error. |
 
 | The plan prints | When |
 |---|---|

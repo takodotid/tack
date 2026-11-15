@@ -1,0 +1,63 @@
+# The documentation site in docs/, served at tack.tako.id by GitHub Pages.
+#
+# On a pull request or a push to main it only builds, to check that the site still builds. It publishes only when run
+# by hand, or when the release workflow calls it with deploy, so the live site changes with a release. The build runs
+# with read access only; only the deploy job can write to Pages.
+name: pages
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      deploy:
+        description: publish the site after it builds
+        type: boolean
+        default: false
+permissions: {}
+defaults:
+  run:
+    shell: bash
+concurrency:
+  group: pages-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+    steps:
+      # The whole history, so each page's last-updated date, and the sitemap's, is the last commit that changed it.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+      - name: Install
+        working-directory: docs
+        run: bun install --frozen-lockfile
+      # Fails on a dead link.
+      - name: Build
+        working-directory: docs
+        run: bun run build
+      - if: github.event_name == 'workflow_dispatch' || inputs.deploy
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: docs/.vitepress/dist
+
+  deploy:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' || inputs.deploy
+    runs-on: ubuntu-26.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

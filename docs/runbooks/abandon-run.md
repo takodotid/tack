@@ -20,7 +20,7 @@ Abandon a run when it must not go on. One case: its old primary was promoted aga
    - **What it does:** it prints the run and the objects that its ledger records as held. It asks for the workload's name. Then it records `status.abandoned`.
    - It does not read the objects. So a hold removed in step 3 is still listed.
    - **When it refuses:** while a `tack` process may still run `RUN`. That is, the run's Lease was renewed less than 40 s ago. For a run without a Lease, such as one that v1.4.0 runs: the run is `Running`, and its ledger was written within its `Running` step's timeout and 5 minutes. The refusal says until when. Pass `--force` only once step 1 is done.
-   - **With a CRD older than v1.3.0 at `T`,** it fails and says so. Apply the CRD of [the README](../../README.md#upgrading-within-v1) there first.
+   - **With a CRD older than v1.3.0 at `T`,** it fails and says so. Apply the CRD of [Upgrade](../guide/upgrade.md#upgrade-within-v1) there first.
    - **After the mark:** `tack resume` refuses `RUN`, and `tack status` lists it as `Abandoned`. `kubectl get sfo` shows the mark's age in its Abandoned column, with the CRD of v1.4.0 or later at `T`. Its State column keeps the run's last state, such as `Stopped` ([operations.md](../operations.md#reading-a-run)).
    - The mark does not stop a `tack` process. That is why step 1 comes first.
    - **Without the mark, never resume `RUN`:** its plan no longer fits the sites. If `RUN` is resumed anyway:
