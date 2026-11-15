@@ -84,28 +84,25 @@ function repositoryLinks(md: any) {
     });
 }
 
-/** The chart's colours of one theme, from tokens.css, the one file that holds them: `:root` for day, `.dark` for night. */
-function tokens(block: ":root" | ".dark"): Record<string, string> {
+/** The site's colours, from tokens.css, the one file that holds them. */
+function tokens(): Record<string, string> {
     const css = readFileSync(new URL("./theme/tokens.css", import.meta.url), "utf8");
-    const body = new RegExp(`${block.replace(".", "\\.")}\\s*\\{([^}]*)\\}`).exec(css)?.[1] ?? "";
-    return Object.fromEntries([...body.matchAll(/--chart-([a-z-]+):\s*(#[0-9a-f]{6})/g)].map((m) => [m[1], m[2]]));
+    const body = /:root\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    return Object.fromEntries([...body.matchAll(/--ship-([a-z-]+):\s*(#[0-9a-f]{6})/g)].map((m) => [m[1], m[2]]));
 }
-const day = tokens(":root");
-const night = { ...day, ...tokens(".dark") };
+const ship = tokens();
 
-/** Code in the chart's inks: ink on card, comments in soft ink, keywords in the one accent. */
-function codeTheme(name: string, ink: string, soft: string, accent: string, bg: string) {
-    return {
-        name,
-        type: name.endsWith("dark") ? "dark" : "light",
-        colors: { "editor.background": bg, "editor.foreground": ink },
-        tokenColors: [
-            { settings: { foreground: ink } },
-            { scope: ["comment", "punctuation.definition.comment"], settings: { foreground: soft, fontStyle: "italic" } },
-            { scope: ["keyword", "storage", "entity.name.tag", "support.function.builtin"], settings: { foreground: accent } },
-        ],
-    };
-}
+/** Code on the black hull, in both themes: light text, comments in soft, keywords in the funnel's buff. */
+const codeTheme = {
+    name: "ship",
+    type: "dark",
+    colors: { "editor.background": ship["code-bg"], "editor.foreground": ship["code-text"] },
+    tokenColors: [
+        { settings: { foreground: ship["code-text"] } },
+        { scope: ["comment", "punctuation.definition.comment"], settings: { foreground: ship["code-soft"], fontStyle: "italic" } },
+        { scope: ["keyword", "storage", "entity.name.tag", "support.function.builtin"], settings: { foreground: ship["code-accent"] } },
+    ],
+};
 
 export default defineConfig({
     title: "Tack",
@@ -118,7 +115,7 @@ export default defineConfig({
 
     head: [
         ["meta", { name: "robots", content: "index, follow, max-snippet:-1" }],
-        ["meta", { name: "theme-color", content: day.paper }],
+        ["meta", { name: "theme-color", content: ship.hull }],
     ],
 
     // A page without a description of its own is described by its first paragraph.
@@ -135,10 +132,7 @@ export default defineConfig({
         // Anchors as GitHub makes them, so a link to a heading works in the repository and on the site alike.
         anchor: { slugify: slug },
         headers: { slugify: slug },
-        theme: {
-            light: codeTheme("chart-light", day.ink, day["soft-ink"], day.magenta, day.card),
-            dark: codeTheme("chart-dark", night.ink, night["soft-ink"], night.magenta, night.card),
-        } as any,
+        theme: codeTheme as any,
         config: repositoryLinks,
     },
 
