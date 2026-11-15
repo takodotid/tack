@@ -42,8 +42,10 @@ for a in "${assets[@]}"; do
 done
 # Anything else that looks like an asset would be left out of SHA256SUMS, and so of the release.
 shopt -s nullglob
+# A here-string, not printf | grep -q: under pipefail, grep's early exit can kill printf with SIGPIPE.
+printf -v listed '%s\n' "${assets[@]}"
 for f in *.tar.gz *.zip *.cdx.json *.tgz *.yaml; do
-	printf '%s\n' "${assets[@]}" | grep -qxF -- "$f" || refuse "dist/$f is not an asset of $version"
+	grep -qxF -- "$f" <<<"$listed" || refuse "dist/$f is not an asset of $version"
 done
 sha256sum "${assets[@]}" >SHA256SUMS
 cat SHA256SUMS
