@@ -1,4 +1,4 @@
-// VitePress's default theme as a sister ship: the faces, self-hosted, the tokens, the rules, and a home page of our own.
+// VitePress's default theme as a sister ship: the faces, self-hosted, the tokens, the rules, and a home page of its own.
 
 import DefaultTheme from "vitepress/theme-without-fonts";
 import type { Theme } from "vitepress";

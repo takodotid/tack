@@ -182,16 +182,20 @@ onBeforeUnmount(() => {
         </section>
 
         <section class="sh-buff">
-            <div class="sh-wrap sh-close">
-                <h2>Start with a plan. It changes nothing.</h2>
-                <button class="sh-command" type="button" @click="copy">
-                    <span><span class="sh-prompt">$</span> {{ PLAN_COMMAND }}</span>
-                    <span class="sh-copy" aria-live="polite">{{ copied ? "Copied" : "Copy" }}</span>
-                </button>
-                <p>
-                    <a :href="withBase('/guide/install')">Install Tack</a>, follow <a :href="withBase('/guide/getting-started')">getting started</a>, read
-                    <a :href="withBase('/limitations')">what Tack does not do</a>, or see the source on <a :href="REPOSITORY">GitHub</a>.
-                </p>
+            <div class="sh-wrap sh-chapter">
+                <div class="sh-chapter-head">
+                    <h2>Start with a plan. It changes nothing.</h2>
+                </div>
+                <div class="sh-close-matter">
+                    <button class="sh-command" type="button" @click="copy">
+                        <span><span class="sh-prompt">$</span> {{ PLAN_COMMAND }}</span>
+                        <span class="sh-copy" aria-live="polite">{{ copied ? "Copied" : "Copy" }}</span>
+                    </button>
+                    <p>
+                        <a :href="withBase('/guide/install')">Install Tack</a>, follow <a :href="withBase('/guide/getting-started')">getting started</a>, read
+                        <a :href="withBase('/limitations')">what Tack does not do</a>, or see the source on <a :href="REPOSITORY">GitHub</a>.
+                    </p>
+                </div>
             </div>
         </section>
     </article>

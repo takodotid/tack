@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { slug } from "github-slugger";
-import { defineConfig, type DefaultTheme } from "vitepress";
+import { defineConfig, type DefaultTheme, type MarkdownRenderer } from "vitepress";
 import { REPOSITORY, generate } from "./rfcs.ts";
 import { Seo } from "./seo.ts";
 
@@ -84,6 +84,24 @@ function repositoryLinks(md: any) {
     });
 }
 
+/**
+ * A word of code of 25 characters or more, such as a metric's name or a `custom-columns` list, may break, so that it
+ * does not push a table off the page: after `_`, `.`, `/`, `,`, `=` or `:`, and anywhere when that is not enough, which
+ * the class `long` allows in style.css. A shorter word never breaks.
+ */
+function longCode(md: MarkdownRenderer) {
+    const render = md.renderer.rules.code_inline;
+    if (!render) throw new Error("markdown-it has no rule for inline code");
+    md.renderer.rules.code_inline = (tokens, idx, options, env, self) => {
+        if (!/\S{25,}/.test(tokens[idx].content)) return render(tokens, idx, options, env, self);
+        tokens[idx].attrJoin("class", "long");
+        return render(tokens, idx, options, env, self).replace(
+            /^(<code[^>]*>)([\s\S]*)(<\/code>)$/,
+            (_, open: string, text: string, close: string) => open + text.replace(/[_./,=:](?=\S)/g, "$&<wbr>") + close,
+        );
+    };
+}
+
 /** The site's colours, from tokens.css, the one file that holds them. */
 function tokens(): Record<string, string> {
     const css = readFileSync(new URL("./theme/tokens.css", import.meta.url), "utf8");
@@ -133,7 +151,10 @@ export default defineConfig({
         anchor: { slugify: slug },
         headers: { slugify: slug },
         theme: codeTheme as any,
-        config: repositoryLinks,
+        config: (md) => {
+            repositoryLinks(md);
+            longCode(md);
+        },
     },
 
     themeConfig: {
@@ -152,6 +173,13 @@ export default defineConfig({
         editLink: { pattern: `${REPOSITORY}/edit/main/docs/:path` },
 
         outline: { level: [2, 3], label: "On this page" },
+
+        notFound: {
+            title: "Page not found",
+            quote: "No page has this address. The search finds a page by its name.",
+            linkLabel: "Go to the home page",
+            linkText: "Home page",
+        },
 
         search: {
             provider: "local",

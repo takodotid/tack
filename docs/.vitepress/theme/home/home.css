@@ -57,12 +57,13 @@
 }
 .sh-opening-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
     gap: clamp(28px, 4vw, 72px);
     align-items: center;
 }
+/* The title keeps to four lines beside the plan, and to five on a phone. */
 .sh-opening h1 {
-    font-size: clamp(40px, 4.7vw, 78px);
+    font-size: clamp(36px, 4.2vw, 60px);
     line-height: 0.98;
     font-stretch: 112%;
     letter-spacing: -0.025em;
@@ -213,8 +214,7 @@
     gap: clamp(28px, 5vw, 88px);
     align-items: start;
 }
-.sh-chapter-head h2,
-.sh-close h2 {
+.sh-chapter-head h2 {
     font-size: clamp(32px, 3.6vw, 56px);
     line-height: 1.04;
     font-stretch: 108%;
@@ -371,13 +371,10 @@
 }
 
 /* The close: the first command, on the funnel's buff. */
-.sh-close {
+.sh-close-matter {
     display: grid;
-    gap: 28px;
+    gap: 24px;
     justify-items: start;
-}
-.sh-close h2 {
-    max-width: 14em;
 }
 .sh-command {
     display: flex;
@@ -424,6 +421,9 @@
     .sh-opening-grid,
     .sh-chapter {
         grid-template-columns: minmax(0, 1fr);
+    }
+    .sh-opening h1 {
+        font-size: clamp(28px, 8.2vw, 56px);
     }
 }
 @media (max-width: 560px) {

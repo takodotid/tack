@@ -161,6 +161,15 @@ html {
 .VPNavBarMenuGroup .text {
     font-size: 14.5px;
 }
+/* Between the phone's menu and a wide window, the bar is tight: the links sit closer and the search loses its key. */
+@media (min-width: 768px) and (max-width: 900px) {
+    .VPNavBar .VPNavBarMenuLink {
+        padding: 0 8px;
+    }
+    .VPNavBar .DocSearch-Button .DocSearch-Button-Keys {
+        display: none;
+    }
+}
 .VPNavBarMenuLink,
 .VPNavBarMenuGroup .text,
 .VPNavBarSocialLinks .VPSocialLink,
@@ -262,6 +271,23 @@ html {
 .vp-doc li {
     font-size: 16.5px;
     line-height: 1.72;
+    max-width: 34em;
+    text-wrap: pretty;
+}
+.vp-doc td p,
+.vp-doc td li {
+    max-width: none;
+}
+
+/* The page is wider than the reading text, so that a table or a block of code has room where the window gives it. Beside
+   the outline, the page runs up to the outline's own margin. */
+.VPDoc.has-aside .content-container {
+    max-width: 784px !important;
+}
+@media (min-width: 1280px) {
+    .VPDoc.has-aside .content {
+        padding-right: 0 !important;
+    }
 }
 .vp-doc {
     font-variant-numeric: lining-nums;
@@ -291,8 +317,8 @@ html {
     border-top: 0;
 }
 .vp-doc th {
-    background: var(--ship-ink);
-    color: var(--ship-plane);
+    background: var(--ship-band);
+    color: var(--ship-on-hull);
     border: 0;
     text-align: left;
     padding: 9px 14px;
@@ -397,4 +423,89 @@ html {
 .VPNavBar .DocSearch-Button .DocSearch-Button-Keys::after {
     color: var(--ship-on-hull) !important;
     border-color: var(--ship-on-hull-soft) !important;
+}
+
+/* A long word of code breaks, so that it keeps a table to the page. config.ts marks it. In a table it also asks for no
+   more than 28 characters of width, so that its column leaves room for the others. */
+.vp-doc code.long {
+    overflow-wrap: anywhere;
+}
+.vp-doc td code.long {
+    display: inline-block;
+    max-width: 28ch;
+}
+
+/* A table of five columns or more is set closer. */
+.vp-doc table:has(th:nth-child(5)) :is(th, td) {
+    padding-inline: 9px;
+    font-size: 14px;
+}
+
+/* A table of names and values has no head: its first row takes the ink rule instead of an empty band. */
+.vp-doc thead:not(:has(th:not(:empty))) {
+    display: none;
+}
+.vp-doc table:not(:has(th:not(:empty))) tr:first-child td {
+    border-top: 3px solid var(--ship-ink);
+}
+
+/* Where the window has room, a head keeps to one line, and the first column keeps enough for a name of a few words or
+   a short command: more in a table of two columns, some in one of three, none in a wider one. */
+@media (min-width: 640px) {
+    .vp-doc th {
+        white-space: nowrap;
+    }
+    .vp-doc table:not(:has(th:nth-child(4))) td:first-child {
+        min-width: 8em;
+    }
+    .vp-doc table:not(:has(th:nth-child(3))) td:first-child {
+        min-width: 13em;
+    }
+}
+
+/* The outline: a long heading wraps instead of being cut. */
+.VPDoc .VPDocAsideOutline .outline-link {
+    white-space: normal;
+    line-height: 1.4;
+    padding-block: 6px;
+}
+
+/* The page that is not there. */
+.VPContent .NotFound .code {
+    font-size: 96px;
+    line-height: 0.9;
+    font-weight: 800;
+    font-stretch: 62%;
+    color: var(--ship-link);
+}
+.VPContent .NotFound .title {
+    padding-top: 16px;
+    font-size: 27px;
+    line-height: 1.2;
+    font-weight: 750;
+    font-stretch: 106%;
+    letter-spacing: -0.015em;
+}
+.VPContent .NotFound .divider {
+    display: none;
+}
+.VPContent .NotFound .quote {
+    margin-top: 12px;
+    max-width: 24em;
+    font-size: 16.5px;
+    font-weight: 400;
+    color: var(--ship-soft-ink);
+}
+.VPContent .NotFound .link {
+    padding: 10px 20px;
+    border: 1.5px solid var(--ship-ink);
+    border-radius: var(--ship-radius);
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--ship-link);
+}
+.VPContent .NotFound .link:hover {
+    border-color: var(--ship-ink);
+    background: var(--ship-deck);
+    color: var(--ship-link-hover);
 }
