@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { slug } from "github-slugger";
-import { defineConfig, type DefaultTheme } from "vitepress";
+import { defineConfig, type DefaultTheme, type MarkdownRenderer } from "vitepress";
 import { REPOSITORY, generate } from "./rfcs.ts";
 import { Seo } from "./seo.ts";
 
@@ -84,28 +84,82 @@ function repositoryLinks(md: any) {
     });
 }
 
-/** The chart's colours of one theme, from tokens.css, the one file that holds them: `:root` for day, `.dark` for night. */
-function tokens(block: ":root" | ".dark"): Record<string, string> {
-    const css = readFileSync(new URL("./theme/tokens.css", import.meta.url), "utf8");
-    const body = new RegExp(`${block.replace(".", "\\.")}\\s*\\{([^}]*)\\}`).exec(css)?.[1] ?? "";
-    return Object.fromEntries([...body.matchAll(/--chart-([a-z-]+):\s*(#[0-9a-f]{6})/g)].map((m) => [m[1], m[2]]));
-}
-const day = tokens(":root");
-const night = { ...day, ...tokens(".dark") };
-
-/** Code in the chart's inks: ink on card, comments in soft ink, keywords in the one accent. */
-function codeTheme(name: string, ink: string, soft: string, accent: string, bg: string) {
-    return {
-        name,
-        type: name.endsWith("dark") ? "dark" : "light",
-        colors: { "editor.background": bg, "editor.foreground": ink },
-        tokenColors: [
-            { settings: { foreground: ink } },
-            { scope: ["comment", "punctuation.definition.comment"], settings: { foreground: soft, fontStyle: "italic" } },
-            { scope: ["keyword", "storage", "entity.name.tag", "support.function.builtin"], settings: { foreground: accent } },
-        ],
+/**
+ * A word of code of 25 characters or more, such as a metric's name or a `custom-columns` list, may break, so that it
+ * does not push a table off the page: after `_`, `.`, `/`, `,`, `=` or `:`, and anywhere when that is not enough, which
+ * the class `long` allows in style.css. A shorter word never breaks.
+ */
+function longCode(md: MarkdownRenderer) {
+    const render = md.renderer.rules.code_inline;
+    if (!render) throw new Error("markdown-it has no rule for inline code");
+    md.renderer.rules.code_inline = (tokens, idx, options, env, self) => {
+        if (!/\S{25,}/.test(tokens[idx].content)) return render(tokens, idx, options, env, self);
+        tokens[idx].attrJoin("class", "long");
+        return render(tokens, idx, options, env, self).replace(
+            /^(<code[^>]*>)([\s\S]*)(<\/code>)$/,
+            (_, open: string, text: string, close: string) => open + text.replace(/[_./,=:](?=\S)/g, "$&<wbr>") + close,
+        );
     };
 }
+
+/**
+ * Each cell of a table carries its column's name in `data-label`, and each part of the table its role. On a phone
+ * style.css sets a row's cells one under the other, each after its name; the roles keep the table a table to a screen
+ * reader when it no longer looks like one.
+ */
+function tableLabels(md: MarkdownRenderer) {
+    md.core.ruler.push("tack-table-labels", (state) => {
+        let heads: string[] = [];
+        let column = 0;
+        state.tokens.forEach((token, i) => {
+            switch (token.type) {
+                case "table_open":
+                    heads = [];
+                    token.attrSet("role", "table");
+                    break;
+                case "thead_open":
+                case "tbody_open":
+                    token.attrSet("role", "rowgroup");
+                    break;
+                case "tr_open":
+                    column = 0;
+                    token.attrSet("role", "row");
+                    break;
+                case "th_open": {
+                    const words = state.tokens[i + 1]?.children ?? [];
+                    heads.push(words.map((w) => (w.type === "text" || w.type === "code_inline" ? w.content : "")).join(""));
+                    token.attrSet("role", "columnheader");
+                    break;
+                }
+                case "td_open":
+                    token.attrSet("role", "cell");
+                    if (heads[column]) token.attrSet("data-label", heads[column]);
+                    column++;
+                    break;
+            }
+        });
+    });
+}
+
+/** The site's colours, from tokens.css, the one file that holds them. */
+function tokens(): Record<string, string> {
+    const css = readFileSync(new URL("./theme/tokens.css", import.meta.url), "utf8");
+    const body = /:root\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    return Object.fromEntries([...body.matchAll(/--ship-([a-z-]+):\s*(#[0-9a-f]{6})/g)].map((m) => [m[1], m[2]]));
+}
+const ship = tokens();
+
+/** Code on the black hull, in both themes: light text, comments in soft, keywords in the funnel's buff. */
+const codeTheme = {
+    name: "ship",
+    type: "dark",
+    colors: { "editor.background": ship["code-bg"], "editor.foreground": ship["code-text"] },
+    tokenColors: [
+        { settings: { foreground: ship["code-text"] } },
+        { scope: ["comment", "punctuation.definition.comment"], settings: { foreground: ship["code-soft"], fontStyle: "italic" } },
+        { scope: ["keyword", "storage", "entity.name.tag", "support.function.builtin"], settings: { foreground: ship["code-accent"] } },
+    ],
+};
 
 export default defineConfig({
     title: "Tack",
@@ -118,7 +172,7 @@ export default defineConfig({
 
     head: [
         ["meta", { name: "robots", content: "index, follow, max-snippet:-1" }],
-        ["meta", { name: "theme-color", content: day.paper }],
+        ["meta", { name: "theme-color", content: ship.hull }],
     ],
 
     // A page without a description of its own is described by its first paragraph.
@@ -135,11 +189,12 @@ export default defineConfig({
         // Anchors as GitHub makes them, so a link to a heading works in the repository and on the site alike.
         anchor: { slugify: slug },
         headers: { slugify: slug },
-        theme: {
-            light: codeTheme("chart-light", day.ink, day["soft-ink"], day.magenta, day.card),
-            dark: codeTheme("chart-dark", night.ink, night["soft-ink"], night.magenta, night.card),
-        } as any,
-        config: repositoryLinks,
+        theme: codeTheme as any,
+        config: (md) => {
+            repositoryLinks(md);
+            longCode(md);
+            tableLabels(md);
+        },
     },
 
     themeConfig: {
@@ -158,6 +213,13 @@ export default defineConfig({
         editLink: { pattern: `${REPOSITORY}/edit/main/docs/:path` },
 
         outline: { level: [2, 3], label: "On this page" },
+
+        notFound: {
+            title: "Page not found",
+            quote: "No page has this address. The search finds a page by its name.",
+            linkLabel: "Go to the home page",
+            linkText: "Home page",
+        },
 
         search: {
             provider: "local",

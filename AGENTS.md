@@ -136,6 +136,7 @@ Commit and push only when the operator asks.
 | `make dist` | static binaries for Linux, macOS and Windows, man pages, the CRD; the same bytes for the same commit |
 | `make sbom` | after `make dist`, a CycloneDX SBOM per archive |
 | `make lint` | `go mod verify`, `govulncheck`, staticcheck (its default checks), `helm lint`, and the check that every action is pinned by SHA |
+| `make prose` | lints every tracked Markdown file and Vue template with `vale`, by the rules of Writing; the rules are in `hack/vale/Tack/` |
 | `hack/release/build.sh vX.Y.Z` | every asset of a release and `SHA256SUMS` in `dist/`, as the release workflow builds them |
 | `make e2e` | the end-to-end test on kind; it creates only `tack-e2e*` clusters, networks, containers and images |
 | `cd docs && bun install && bun run build` | the documentation site, tack.tako.id; fails on a dead link. Its look is [DESIGN.md](DESIGN.md), its readers and voice [PRODUCT.md](PRODUCT.md) |

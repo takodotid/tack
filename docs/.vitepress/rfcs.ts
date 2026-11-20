@@ -75,7 +75,7 @@ export function generate(rfcDir: string, outDir: string): void {
         "|---|---|---|---|",
         ...rfcs.map((r) => `| [RFC#${r.number}](${REPOSITORY}/blob/main/rfcs/${r.file}) | ${r.title} | ${r.status} | ${r.version} |`),
         "",
-        ...rfcs.flatMap((r) => [`### RFC#${r.number}: ${r.title}`, "", siteLinks(r.abstract), ""]),
+        ...rfcs.flatMap((r) => [`## RFC#${r.number}: ${r.title}`, "", siteLinks(r.abstract), ""]),
     ].join("\n");
     writeFileSync(join(outDir, "rfcs.md"), list);
 

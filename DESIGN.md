@@ -1,94 +1,129 @@
 ---
 name: Tack
-description: Ink on warm paper, like a sea chart, with one magenta accent, set in Spectral, for the documentation sites of Tack and Strait.
+description: A ship's livery for the documentation sites of Tack and Strait. A hull colour, superstructure white, a black band, one buff for actions, set in Archivo across its width axis.
 colors:
-    paper: "#f4efe3"
-    card: "#fffdf7"
-    sea: "#dce8ea"
-    contour: "#c4d8dd"
-    land: "#ecdcae"
-    ink: "#16233b"
-    soft-ink: "#5b6880"
-    faint: "#9aa7b6"
-    magenta: "#b0127a"
-    magenta-hover: "#8d0d62"
-    on-magenta: "#f4efe3"
-    warning: "#c96a12"
-    tip: "#1e7a4b"
-    danger: "#c8321f"
-    night-paper: "#0e1828"
-    night-card: "#16233b"
-    night-sea: "#1a2d40"
-    night-contour: "#304660"
-    night-land: "#2a3a4a"
-    night-ink: "#f4efe3"
-    night-soft-ink: "#b4bfcc"
-    night-faint: "#7d8b9c"
-    night-magenta: "#f27cc6"
-    night-magenta-hover: "#f7a6d8"
-    night-on-magenta: "#0e1828"
+    hull: "#a2321d"
+    hull-deep: "#7d2313"
+    on-hull: "#fff8ee"
+    on-hull-soft: "#f6d3c7"
+    plane: "#fbfaf5"
+    deck: "#f0ece3"
+    line: "#d9d3c6"
+    ink: "#1a1512"
+    soft-ink: "#5f564e"
+    buff: "#edb23c"
+    buff-deep: "#dc9d1f"
+    link: "#a2321d"
+    link-hover: "#7d2313"
+    code-bg: "#1a1512"
+    code-text: "#f1eadc"
+    code-soft: "#a89e90"
+    code-accent: "#edb23c"
+    code-line: "#3a322c"
+    band: "#1a1512"
+    band-soft: "#c9c0b1"
+    band-line: "#3a322c"
+    warning: "#a85400"
+    tip: "#1b6e45"
+    danger: "#b3261e"
+    night-plane: "#15110f"
+    night-deck: "#1e1917"
+    night-line: "#3a322c"
+    night-ink: "#f4eee2"
+    night-soft-ink: "#b9aea1"
+    night-link: "#f39c84"
+    night-link-hover: "#f8bfae"
+    night-code-bg: "#0c0a09"
+    night-band: "#5e190c"
+    night-band-soft: "#f6d3c7"
+    night-band-line: "#8a3524"
     night-warning: "#f0a24f"
     night-tip: "#5cc98d"
     night-danger: "#ff8a78"
 typography:
     headline:
-        fontFamily: "Spectral, Georgia, Times New Roman, serif"
-        fontWeight: 700
-        letterSpacing: "-0.01em"
+        fontFamily: "Archivo Variable, Segoe UI, system-ui, sans-serif"
+        fontWeight: 750
+        fontStretch: "106%"
+        letterSpacing: "-0.015em"
+    title:
+        fontFamily: "Archivo Variable, Segoe UI, system-ui, sans-serif"
+        fontSize: "42px"
+        fontWeight: 800
+        lineHeight: 1.1
     body:
-        fontFamily: "Spectral, Georgia, Times New Roman, serif"
-        fontSize: "17px"
+        fontFamily: "Archivo Variable, Segoe UI, system-ui, sans-serif"
+        fontSize: "16.5px"
         fontWeight: 400
-        lineHeight: 1.7
+        lineHeight: 1.72
     label:
-        fontFamily: "IBM Plex Sans Condensed, Arial Narrow, Arial, sans-serif"
-        fontSize: "12px"
-        fontWeight: 600
-        letterSpacing: "0.12em"
+        fontFamily: "Archivo Variable, Segoe UI, system-ui, sans-serif"
+        fontSize: "13.5px"
+        fontWeight: 700
+        fontStretch: "78%"
+        letterSpacing: "0.07em"
         textTransform: "uppercase"
     wordmark:
-        fontFamily: "Spectral, Georgia, Times New Roman, serif"
-        fontSize: "22px"
-        fontWeight: 700
+        fontFamily: "Archivo Variable, Segoe UI, system-ui, sans-serif"
+        fontSize: "21px"
+        fontWeight: 800
+        fontStretch: "125%"
+        letterSpacing: "0.06em"
+        textTransform: "uppercase"
+    numeral:
+        fontFamily: "Archivo Variable, Segoe UI, system-ui, sans-serif"
+        fontSize: "76px"
+        fontWeight: 800
+        fontStretch: "62%"
     mono:
         fontFamily: "IBM Plex Mono, ui-monospace, Menlo, Consolas, monospace"
         fontWeight: 400
 rounded:
     none: "0px"
+    control: "3px"
 borders:
     hairline: "1px"
-    frame: "2px"
+    rule: "3px"
+    cap: "4px"
 components:
+    masthead:
+        backgroundColor: "{colors.hull}"
+        textColor: "{colors.on-hull}"
+        borderColor: "{colors.ink}"
+        typography: "{typography.label}"
     button-primary:
-        backgroundColor: "{colors.magenta}"
-        textColor: "{colors.on-magenta}"
-        rounded: "{rounded.none}"
+        backgroundColor: "{colors.buff}"
+        textColor: "{colors.ink}"
+        rounded: "{rounded.control}"
     button-primary-hover:
-        backgroundColor: "{colors.magenta-hover}"
-        textColor: "{colors.on-magenta}"
+        backgroundColor: "{colors.buff-deep}"
+        textColor: "{colors.ink}"
     button-default:
-        backgroundColor: "{colors.card}"
+        backgroundColor: "{colors.plane}"
         textColor: "{colors.ink}"
         borderColor: "{colors.ink}"
-        rounded: "{rounded.none}"
-    table:
-        backgroundColor: "{colors.card}"
-        borderColor: "{colors.contour}"
-        rounded: "{rounded.none}"
+        rounded: "{rounded.control}"
     table-head:
-        backgroundColor: "{colors.sea}"
-        textColor: "{colors.ink}"
+        backgroundColor: "{colors.band}"
+        textColor: "{colors.on-hull}"
         typography: "{typography.label}"
-    code-block:
-        backgroundColor: "{colors.card}"
-        textColor: "{colors.ink}"
-        borderColor: "{colors.contour}"
-        typography: "{typography.mono}"
+    table-row:
+        borderColor: "{colors.line}"
         rounded: "{rounded.none}"
-    callout:
-        backgroundColor: "{colors.sea}"
+    code-block:
+        backgroundColor: "{colors.code-bg}"
+        textColor: "{colors.code-text}"
+        typography: "{typography.mono}"
+        rounded: "{rounded.control}"
+    code-inline:
+        backgroundColor: "{colors.deck}"
         textColor: "{colors.ink}"
-        borderWidth: "{borders.frame}"
+        borderColor: "{colors.line}"
+        rounded: "{rounded.control}"
+    callout:
+        backgroundColor: "{colors.deck}"
+        textColor: "{colors.ink}"
+        borderWidth: "{borders.cap}"
         rounded: "{rounded.none}"
     callout-tip:
         borderColor: "{colors.tip}"
@@ -97,174 +132,235 @@ components:
     callout-danger:
         borderColor: "{colors.danger}"
     badge:
-        backgroundColor: "{colors.card}"
+        backgroundColor: "{colors.deck}"
         textColor: "{colors.ink}"
+        borderColor: "{colors.line}"
         typography: "{typography.label}"
-        rounded: "{rounded.none}"
+        rounded: "{rounded.control}"
     hero:
-        backgroundColor: "{colors.land}"
-        textColor: "{colors.ink}"
-        borderColor: "{colors.ink}"
+        backgroundColor: "{colors.hull}"
+        textColor: "{colors.on-hull}"
+    footer:
+        backgroundColor: "{colors.code-bg}"
+        textColor: "{colors.code-soft}"
 ---
 
 # Design System: Tack
 
 ## Overview
 
-**Creative North Star: "The Chart Table"**
+**Creative North Star: "Sister Ships"**
 
-The docs read like a paper sea chart spread on a chart table: ink on warm paper, pale sea bands, thin contour lines, and land used sparingly. Tack and Strait are sailing words. A tack is a change of course, and a strait is the water between two pieces of land. The two sites share this system, so they read as one family.
+The docs wear a ship's livery. The hull's colour fills the masthead and the home page's opening. Below the waterline, the page is superstructure white, with the deck as the second plane, a black band, and the funnel's buff for the one action. Tack and Strait are sister ships: they share every rule and every name here, and differ only in the hull and the tints that follow it. Tack's hull is red.
 
-Nothing on the chart decorates. Lines are drawn in ink or in contour blue, corners are square, and the paper is flat: no shadow, no glow, no gradient. One colour, magenta, marks what you can act on: the brand, links and the active place in the navigation. Orange, green and red each mean one state, and always come with a word or an icon.
+Colour comes in whole planes, not in accents. Type is one family, Archivo, used across its width axis: wide for the name, a little wide for headings, normal for reading, narrow for markings. Code sits on the black hull in both themes.
 
-There is a night chart for dark mode: deep ink paper, text in the paper's colour, and the same magenta, lightened so it keeps its contrast.
+At night the planes turn dark and the ink turns light. The hull, the funnel's buff and the ground of code stay as they are.
 
 **Key Characteristics:**
 
-- Ink on warm paper; sea bands for table heads, callouts and the current page; land only for the home page's opening.
-- One accent, magenta. Everything else is ink, paper and the chart's blues.
-- Spectral, a serif, for headings and reading; IBM Plex Sans Condensed in small tracked caps for short labels; IBM Plex Mono for code.
-- Square corners and 1px or 2px lines. Flat.
+- Whole planes of colour: hull, white, deck, black band, buff.
+- One action colour, the funnel's buff, with ink text on it.
+- One family across its width axis; IBM Plex Mono for code.
+- Heavy headings; short labels in narrow capitals, as stencilled on plate.
+- One radius of 3px for controls and code. Tables and callouts are square.
 - Plain English: the answer first, in short sentences.
 
 ## Colors
 
-Warm paper and ink, a sea blue for bands and contours, a sand land, and one magenta.
+Every colour is a token in `docs/.vitepress/theme/tokens.css`, named by its role. `style.css` maps VitePress's own variables to them.
 
-### Primary
+| Token | Day | Night | Used for |
+|---|---|---|---|
+| `hull` | `#a2321d` | same | The masthead, the home page's opening, the phase numerals by day. |
+| `hull-deep` | `#7d2313` | same | The search box and the switch on the masthead. |
+| `on-hull` | `#fff8ee` | same | Text on the hull and on the band. |
+| `on-hull-soft` | `#f6d3c7` | same | Secondary text and lines on the hull. |
+| `plane` | `#fbfaf5` | `#15110f` | The page. |
+| `deck` | `#f0ece3` | `#1e1917` | The second plane: callouts, a word of code, badges, the current page in the sidebar. |
+| `line` | `#d9d3c6` | `#3a322c` | Hairlines: table rows, dividers. Never the only mark of a state. |
+| `ink` | `#1a1512` | `#f4eee2` | Text, rules, the band under the masthead. |
+| `soft-ink` | `#5f564e` | `#b9aea1` | Secondary text. |
+| `buff` | `#edb23c` | same | The primary button, the active nav item's bar, the title mark, the closing plane of the home page, keywords in code. |
+| `buff-deep` | `#dc9d1f` | same | The primary button on hover. |
+| `link` | `#a2321d` | `#f39c84` | Links, and the current page in the sidebar. |
+| `link-hover` | `#7d2313` | `#f8bfae` | A link on hover. |
+| `code-bg` | `#1a1512` | `#0c0a09` | The ground of a code block, and the footer. |
+| `code-text`, `code-soft`, `code-accent` | `#f1eadc`, `#a89e90`, `#edb23c` | same | Code, its comments, its keywords. |
+| `band` | `#1a1512` | `#5e190c` | The dark field: a table's head, the stops on the home page. Black by day, the hull's deep red at night. |
+| `band-soft`, `band-line` | `#c9c0b1`, `#3a322c` | `#f6d3c7`, `#8a3524` | Secondary text and lines on the band. |
+| `tip` | `#1b6e45` | `#5cc98d` | Green: a tip, and what is done. |
+| `warning` | `#a85400` | `#f0a24f` | Orange: a warning, and what is running. |
+| `danger` | `#b3261e` | `#ff8a78` | Red: split brain, data loss, a destructive step. |
 
-- **Ink** (ink / night-ink): text, headings, the wordmark, the 2px rule over each second-level heading, frames.
-- **Paper** (paper / night-paper): the page.
-- **Magenta** (magenta / night-magenta): the one accent. Links, the active nav item, the current page in the sidebar, primary buttons, search hits, code keywords. Hover darkens it (magenta-hover) on paper, and lightens it at night.
-
-### Secondary
-
-- **Card** (card / night-card): code blocks, tables and feature cards, a step whiter than the paper.
-- **Sea** (sea / night-sea): tinted bands. A table's head, a callout's ground, the current page in the sidebar.
-- **Contour** (contour / night-contour): borders and rules: table cells, code frames, the nav's edge.
-- **Land** (land / night-land): the home page's opening, and nothing else.
-
-### Tertiary
-
-- **Warning** (warning / night-warning): orange. The frame of a warning callout and a warning badge. Never text: on paper it reaches 3.30:1, enough for a mark, not for words.
-- **Tip** (tip / night-tip): green. The frame of a tip, and what is done.
-- **Danger** (danger / night-danger): red. The frame of a danger callout: split brain, data loss, a destructive step.
-
-### Neutral
-
-- **Soft Ink** (soft-ink / night-soft-ink): secondary text and code comments, on paper and card only.
-- **Faint** (faint / night-faint): decoration only. Never text, never the only mark of a state.
-- **On Magenta** (on-magenta / night-on-magenta): text on a magenta ground.
+Text on buff is always `#1a1512`, in both themes.
 
 ### Named Rules
 
-**The One Accent Rule.** Magenta is the only accent. There is no second accent colour, and no gradient, glow, shadow or blur.
+**The One Action Rule.** Buff is the only action colour. Text on it is ink. There is no second accent.
 
-**The Red Means Danger Rule.** Red is for danger only: split brain, data loss, a destructive step. Warnings are orange. Every colour state also carries a word or an icon, so it reads without colour.
+**The Plane Rule.** A colour fills a whole region or marks one thing. There is no gradient, no glow and no blur.
 
-**The Ink Text Rule.** Text in a callout, a table head or a badge is ink. The state's colour goes on the frame.
+**The Red Means Danger Rule.** The state red is for danger only. Warnings are orange. Every state also carries its word or an icon, so it reads without colour. The hull's red is livery, never a state.
+
+**The Black Hull Rule.** A block of code sits on the black hull in both themes.
 
 ## Typography
 
-**Display Font:** Spectral (with Georgia, Times New Roman, serif)
-**Body Font:** Spectral (same stack)
-**Label/Mono Font:** IBM Plex Sans Condensed 600 for labels; IBM Plex Mono for code
+**Family:** Archivo Variable, with its width axis, for everything but code. **Mono:** IBM Plex Mono, 400 and 600. Both are open-licensed and self-hosted with the site, from the @fontsource packages: no font is fetched from another host.
 
-**Character:** a book serif for reading, like the type on a chart, with a narrow sans for the short labels a chart prints in caps. All three families are open-licensed and self-hosted with the site, from the @fontsource packages: no font is fetched from another host.
-
-### Hierarchy
-
-- **Headline** (Spectral 700, -0.01em): page titles and section headings, in sentence case. A second-level heading has a 2px ink rule above it.
-- **Body** (Spectral 400, 17px, line height 1.7): reading text.
-- **Label** (IBM Plex Sans Condensed 600, 12px, uppercase, 0.12em tracking): nav links, sidebar group names, table heads, callout titles, badges, the outline's title.
-- **Wordmark** (Spectral 700, 22px): "Tack" in the nav. There is no logo yet.
-- **Mono** (IBM Plex Mono 400 and 600): code, commands, field names.
+| Role | Weight | Width | Size | Used for |
+|---|---|---|---|---|
+| Wordmark | 800 | 125% | 21px, capitals, tracked 0.06em | "Tack" on the masthead. There is no logo yet. |
+| Page title | 800 | 106% | 42px, 32px on a phone | The first heading of a page, with the title mark under it. |
+| Heading | 750 | 106% | 27px and 20px, 24px for the first on a phone | Section headings, in sentence case, tracked -0.015em. |
+| Home headline | 800 | 112% | 36px to 60px, 28px to 56px in one column | The home page's opening. It keeps to four lines beside the plan, and to five on a phone. |
+| Body | 400 | 100% | 16.5px, line height 1.72 | Reading text, at most 34em wide. |
+| Link | 550 | 100% | as its text | Underlined, 1.5px, thicker on hover. |
+| Marking | 700 | 78% | 13.5px, capitals, tracked 0.07em | Nav links, sidebar groups, table heads, callout titles, badges, the outline's title, a cell's name on a phone. |
+| Numeral | 800 | 62% | 76px | The phase numbers on the home page, and "404". |
+| Mono | 400, 600 | | 0.86em in text | Code, commands, field names. |
 
 ### Named Rules
 
-**The Short Caps Rule.** Uppercase is only for short labels, set in Plex Sans Condensed and tracked 0.12em. Everything else is sentence case.
+**The Markings Rule.** Capitals are only for short labels, set narrow and tracked 0.07em. Headings and reading text stay in sentence case. A marking labels a control, a state or a column. It never sits over a heading as decoration.
+
+**The Width Rule.** Hierarchy comes from width and weight within the one family: wide for the name, narrow for markings and numerals. No second family is added for display.
 
 ## Layout
 
-VitePress's documentation layout: the nav across the top, the sidebar with the guide, operations, reference, limitations and project groups, the page, and its outline. The home page opens on land, framed below by a 2px ink rule, then lists six features on cards.
+VitePress's documentation layout: the masthead, the sidebar with the guide, operations and reference groups, the page, and its outline.
+
+| Part | Rule |
+|---|---|
+| Masthead | The hull's colour on every page, 68px high, ending on a 4px ink band. On the home page it runs into the opening, and the band comes at the waterline. |
+| Page | Up to 784px wide beside the outline. Reading text keeps to 34em, so a table or a block of code is wider than the text. |
+| Page title | Ends on the title mark: a buff bar 64px by 10px under a 4px ink cap. |
+| Section | A second-level heading starts on a 1px line, 56px below what came before. |
+| Home page | Planes in order: hull, a waterline of white then ink, white, black band, deck, buff. Each chapter has a heavy heading at the left and its matter at the right, and is one column below 901px. |
+| Phone menu | Below 768px the nav is a menu. Its links are markings. |
 
 ## Elevation & Depth
 
-Flat. Depth comes from the paper, the card and the sea band, and from lines: 1px contour around tables and code, 2px around callouts. A table's head is a sea band, not a rule. There is no shadow anywhere.
+Flat. Depth comes from the planes and from lines.
+
+| Shadow | Where |
+|---|---|
+| `0 24px 48px -12px` in ink at 55% | The plan sheet on the home page's opening, and nothing else in the theme's own parts. |
+| `0 10px 28px` in ink at 18% | What VitePress floats: menus and the search box. |
+
+There is no other shadow, and no blur behind the masthead.
 
 ## Motion
 
-None beyond VitePress's own. Nothing pulses.
+| Motion | Where |
+|---|---|
+| The plan prints a line at a time, and the four phases fill in as the ledger does | The home page, once. |
+| Colour and arrow on hover, 0.2s to 0.3s | Buttons and states on the home page. |
+| VitePress's own | Menus, the sidebar, the theme switch. |
+
+With `prefers-reduced-motion`, the plan and the phases are whole from the start and the transitions are off. Nothing loops and nothing pulses. The page is whole without scripts.
 
 ## Shapes
 
-Every corner is square: radius 0, for buttons, code, tables, callouts, badges and the search box.
+| Shape | Radius |
+|---|---|
+| Buttons, code blocks, a word of code, badges, the search box, the current page in the sidebar, focus rings | 3px, the token `ship-radius` |
+| Tables, callouts, planes, the title mark | 0 |
+
+A thick border never sits on a rounded corner: a callout has a 4px cap, so it is square.
 
 ## Components
 
 ### Buttons
 
-The primary button is magenta with paper-coloured text, and darkens on hover. The other buttons are card with an ink frame and ink text, and take a sea ground on hover.
+The primary button is buff with ink text, and darkens on hover. The others are the plane with an ink frame and ink text, and take the deck on hover. On the hull, the second button has a frame in `on-hull` and inverts on hover.
 
 ### Tables
 
-A card with a contour frame and contour cell lines. The head row is a sea band with ink labels in tracked caps.
+Set as a timetable: a head on the band with markings, hairline rows, no frame, figures that line up. The first column is heavier.
+
+| Case | Rule |
+|---|---|
+| A table with an empty head | Shows no head. Its first row starts on a 3px ink rule. |
+| Two or three columns | The first column keeps at least 13em or 8em. |
+| Five columns or more | Set closer: 14px, with less padding. |
+| A word of code of 25 characters or more | May break, after `_ . / , = :` first. A shorter word never breaks. `config.ts` marks it. |
+| Below 720px | No columns. Each row is a record: its cells one under the other, each after its column's name as a marking. `config.ts` gives each cell that name, and each part of the table its role for a screen reader. |
+
+A table never scrolls sideways.
 
 ### Code
 
-Ink on card, in a contour frame. Comments are soft ink and italic, keywords are magenta, and everything else is ink.
+A block is light text on the black hull, with comments soft and keywords in buff. A word of code in the text is ink on the deck, in a hairline frame.
 
 ### Callouts
 
-A sea ground with a 2px frame in the state's colour: green for a tip, orange for a warning, red for danger, ink for information. The title is the state's word, in ink.
+A deck plane under a 4px cap, square. The cap and the title take the state's colour: green for a tip, orange for a warning, red for danger, ink for information. The title is the state's word, as a marking. The text is ink.
 
 ### Badges
 
-Card with ink text in tracked caps, framed in the state's colour.
+Ink on the deck in a hairline frame, as a marking. The word carries the state.
 
 ### Navigation
 
-The wordmark in Spectral; nav links and sidebar groups in tracked caps; the current page on a sea band, in magenta.
+The wordmark, lettered wide. Nav links and sidebar groups are markings. The active nav item has a 6px buff bar under it. The current page in the sidebar is on the deck, in the link colour, heavier. A long entry of the outline wraps.
+
+### Not found
+
+"404" as a numeral in the link colour, "Page not found" as a heading, one line of help, and a framed button to the home page.
 
 ## Contrast
 
-Every text pair meets WCAG AA: 4.5:1 for text, 3:1 for a mark that is not text. Computed with the WCAG 2 formula.
+Every text pair meets WCAG AA: 4.5:1 for text, 3:1 for a mark that is not text. Computed with the WCAG 2 formula from the tokens.
 
 | Use | Pair | Needs | Day | Night |
 |---|---|---|---|---|
-| Text | `ink` on `paper` | 4.5:1 | 13.68 | 15.51 |
-| Text | `ink` on `card` | 4.5:1 | 15.43 | 13.68 |
-| Text in a callout or table head | `ink` on `sea` | 4.5:1 | 12.54 | 12.26 |
-| Text on the home opening | `ink` on `land` | 4.5:1 | 11.52 | 10.15 |
-| Secondary text | `soft` on `paper` | 4.5:1 | 4.90 | 9.55 |
-| Secondary text, code comments | `soft` on `card` | 4.5:1 | 5.53 | 8.42 |
-| Links, active nav | `magenta` on `paper` | 4.5:1 | 5.70 | 7.18 |
-| Links in tables, code keywords | `magenta` on `card` | 4.5:1 | 6.42 | 6.33 |
-| Links in a callout, the current page | `magenta` on `sea` | 4.5:1 | 5.22 | 5.67 |
-| Link hover | `hover` on `paper` | 4.5:1 | 7.73 | 9.66 |
-| Text on a magenta button, search hits | `onmag` on `magenta` | 4.5:1 | 5.70 | 7.18 |
-| Tip mark (frame, icon) | `tip` on `paper` | 3:1 | 4.64 | 8.64 |
-| Danger mark (frame, icon) | `danger` on `paper` | 3:1 | 4.65 | 7.76 |
-| Warning mark (frame, icon) | `warning` on `paper` | 3:1 | 3.30 | 8.46 |
-| Tip frame on a callout | `tip` on `sea` | 3:1 | 4.26 | 6.83 |
-| Danger frame on a callout | `danger` on `sea` | 3:1 | 4.27 | 6.13 |
-| Warning frame on a callout | `warning` on `sea` | 3:1 | 3.02 | 6.69 |
+| Text | `ink` on `plane` | 4.5:1 | 17.32 | 16.24 |
+| Text on the deck | `ink` on `deck` | 4.5:1 | 15.36 | 15.06 |
+| Secondary text | `soft-ink` on `plane` | 4.5:1 | 6.86 | 8.61 |
+| Secondary text on the deck | `soft-ink` on `deck` | 4.5:1 | 6.08 | 7.98 |
+| Links | `link` on `plane` | 4.5:1 | 6.68 | 8.85 |
+| Links on the deck, the current page | `link` on `deck` | 4.5:1 | 5.92 | 8.20 |
+| Link hover | `link-hover` on `plane` | 4.5:1 | 9.47 | 11.67 |
+| Text on the hull | `on-hull` on `hull` | 4.5:1 | 6.62 | 6.62 |
+| Secondary text on the hull | `on-hull-soft` on `hull` | 4.5:1 | 5.00 | 5.00 |
+| Text in the search box | `on-hull` on `hull-deep` | 4.5:1 | 9.39 | 9.39 |
+| Text on buff | `#1a1512` on `buff` | 4.5:1 | 9.51 | 9.51 |
+| Text on a hovered primary button | `#1a1512` on `buff-deep` | 4.5:1 | 7.66 | 7.66 |
+| Code | `code-text` on `code-bg` | 4.5:1 | 15.12 | 16.50 |
+| Comments in code, the footer | `code-soft` on `code-bg` | 4.5:1 | 6.86 | 7.49 |
+| Keywords in code | `code-accent` on `code-bg` | 4.5:1 | 9.51 | 10.38 |
+| A table's head | `on-hull` on `band` | 4.5:1 | 17.17 | 12.29 |
+| Secondary text on the band | `band-soft` on `band` | 4.5:1 | 10.05 | 9.30 |
+| Stop reasons on the band | `buff` on `band` | 4.5:1 | 9.51 | 6.81 |
+| A tip's title | `tip` on `deck` | 4.5:1 | 5.30 | 8.45 |
+| A warning's title | `warning` on `deck` | 4.5:1 | 4.53 | 8.28 |
+| A danger's title | `danger` on `deck` | 4.5:1 | 5.54 | 7.59 |
+| A state on the home page | `tip` or `warning` on `plane` | 4.5:1 | 5.98, 5.11 | 9.11, 8.92 |
+| The active nav item's bar | `buff` on `hull` | 3:1 | 3.67 | 3.67 |
+
+One pair is below 4.5:1: a nav link on hover is `buff` on `hull`, 3.67:1. It is a hover state of text that reads at 6.62:1 at rest.
 
 ## Do's and Don'ts
 
 ### Do:
 
-- **Do** take every colour and font from `docs/.vitepress/theme/tokens.css`, by its role.
-- **Do** keep text ink, or soft ink on paper and card, and put a state's colour on a frame or an icon.
+- **Do** take every colour, face and radius from `docs/.vitepress/theme/tokens.css`, by its role.
+- **Do** fill whole planes with colour, and keep buff for the one action.
+- **Do** put ink text on buff, and `on-hull` text on the hull and the band.
 - **Do** give every state a word or an icon as well as its colour.
-- **Do** keep corners square and lines 1px or 2px.
+- **Do** keep markings short, and headings in sentence case.
+- **Do** keep a table to the page at every width, and check a new page at 390px and at 1280px.
 - **Do** write the answer first, in short sentences of everyday English.
 
 ### Don't:
 
-- **Don't** add a second accent colour, a gradient, a glow, a shadow or a blur.
-- **Don't** use red for anything but danger. Warnings are orange.
-- **Don't** set text in orange or faint, or soft ink on sea or land: they fall under 4.5:1.
-- **Don't** use land beyond the home page's opening.
+- **Don't** add a second accent colour or a second display family.
+- **Don't** add a gradient, a glow or a blur, or a shadow beyond the two listed.
+- **Don't** use the state red for anything but danger, or the hull's red for a state.
+- **Don't** set text in `line`, or in buff on the hull at rest.
+- **Don't** put a thick border on a rounded corner.
+- **Don't** set a marking over a heading as decoration.
 - **Don't** load a font from another host.
 - **Don't** use em-dashes in any copy.

@@ -2,7 +2,7 @@
 
 - [AGENTS.md](../AGENTS.md) holds the rules for every change, by a human or an agent.
 - The design lives in [rfcs/](../rfcs/). A design change starts as an RFC. The RFC is `Draft` while under discussion, and becomes `Active` once the maintainers approve it. The code conforms to the Active RFCs. If the code and an RFC disagree, the RFC is amended first.
-- Before a pull request: `make verify test lint`. For a change to how a run behaves, also `make e2e`.
+- Before a pull request: `make verify test lint`. For a change to how a run behaves, also `make e2e`. For a change to a Markdown file or a Vue template, also `make prose`, which needs [vale](https://vale.sh).
 - Commits follow conventional commits: `type(scope): subject`.
 
 ## The end-to-end test

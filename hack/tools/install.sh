@@ -3,7 +3,7 @@
 # mismatch. Without a tool named, it installs the end-to-end test's tools: kind, kubectl, flux and helm. Linux only,
 # on amd64 or arm64. Add DIR to PATH.
 #
-#   hack/tools/install.sh [DIR [TOOL...]]   DIR defaults to bin/tools; TOOL is kind, kubectl, flux, helm or cosign
+#   hack/tools/install.sh [DIR [TOOL...]]   DIR defaults to bin/tools; TOOL is kind, kubectl, flux, helm, cosign or vale
 set -euo pipefail
 
 DEST=${1:-bin/tools}
@@ -13,7 +13,7 @@ tools=("$@")
 
 # One line per tool and architecture: the tool, its version, the architecture, and the SHA-256 of that download, copied
 # from the project's release. Both lines of a tool must name the same version. renovate.json asks Renovate to update
-# each line's version, and for kind, flux and cosign its SHA-256 too ([RFC#0009] Limitations).
+# each line's version, and for kind, flux, cosign and vale its SHA-256 too ([RFC#0009] Limitations).
 PINS='
 kind     v0.33.0  amd64  aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
 kind     v0.33.0  arm64  20022bee6cfcd5086cb7234d218e3454e6090022f2a8f55d1fa7fcf42c3867a2
@@ -25,6 +25,8 @@ helm     v4.3.2   amd64  d1c0278d46beab79582d7e50f5b3dc206944ba8e577cde618513fd0
 helm     v4.3.2   arm64  df31cb61680ef728f82c770e5280dd565617bee6b039d37e85c677288be4bbb0
 cosign   v3.1.4   amd64  424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa
 cosign   v3.1.4   arm64  ade83b7aac62e131cacfe96d958948b2150cc9efec46a570a2649b8e27dedad2
+vale     v3.28.1  amd64  068954ad869ebec24b8dec6ebcd1cbb1fd5f5a83e966a35baedfae8b2cdc093a
+vale     v3.28.1  arm64  af0ca36ec6133ba20093295591e43ed2823b2632520d1f3811293aa4cbe758f2
 '
 
 [[ $(uname -s) == Linux ]] || { echo "install.sh: the tools are pinned for Linux only" >&2; exit 1; }
@@ -48,7 +50,7 @@ fetch() {
 
 for tool in "${tools[@]}"; do
   case $tool in
-  kind | kubectl | flux | helm | cosign) ;;
+  kind | kubectl | flux | helm | cosign | vale) ;;
   *) echo "install.sh: unknown tool $tool" >&2; exit 1 ;;
   esac
   version=$(awk -v t="$tool" '$1 == t { print $2 }' <<<"$PINS" | sort -u)
@@ -67,6 +69,11 @@ for tool in "${tools[@]}"; do
     tar -C "$tmp" -xzf "$tmp/helm.tar.gz" --strip-components 1 "linux-$ARCH/helm"
     ;;
   cosign) fetch "https://github.com/sigstore/cosign/releases/download/$version/cosign-linux-$ARCH" cosign ;;
+  vale)
+    # vale names its amd64 archive 64-bit.
+    fetch "https://github.com/errata-ai/vale/releases/download/$version/vale_${version#v}_Linux_$([[ $ARCH == amd64 ]] && echo 64-bit || echo arm64).tar.gz" vale.tar.gz
+    tar -C "$tmp" -xzf "$tmp/vale.tar.gz" vale
+    ;;
   esac
   install -m 0755 "$tmp/$tool" "$DEST/"
 done

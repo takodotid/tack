@@ -19,7 +19,7 @@ Tack moves the primary of a CloudNativePG database from one Kubernetes site to a
 Two surfaces:
 
 - **The `tack` CLI** (`cmd/`, `internal/`): plans, runs, resumes and reads runs. Its output marks meaning with colour and symbols on a terminal only.
-- **The docs site** (`docs/`, tack.tako.id), VitePress, in the chart table identity of [DESIGN.md](DESIGN.md).
+- **The docs site** (`docs/`, tack.tako.id), VitePress, in the sister ships identity of [DESIGN.md](DESIGN.md).
 
 ## Positioning
 

@@ -59,8 +59,19 @@ jobs:
       # its download fails here: the e2e installs only amd64, and cosign only in the release (#66).
       - name: Every pin of install.sh
         run: |
-          hack/tools/install.sh "$RUNNER_TEMP/pins-amd64" kind kubectl flux helm cosign
-          TACK_TOOLS_ARCH=arm64 hack/tools/install.sh "$RUNNER_TEMP/pins-arm64" kind kubectl flux helm cosign
+          hack/tools/install.sh "$RUNNER_TEMP/pins-amd64" kind kubectl flux helm cosign vale
+          TACK_TOOLS_ARCH=arm64 hack/tools/install.sh "$RUNNER_TEMP/pins-arm64" kind kubectl flux helm cosign vale
+  # The prose of the Markdown files and of the Vue templates, by the rules of AGENTS.md, Writing.
+  prose:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: vale, pinned
+        run: hack/tools/install.sh "$RUNNER_TEMP/tools" vale && echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
+      - run: make prose
   e2e:
     runs-on: ubuntu-26.04
     needs: test
