@@ -435,25 +435,24 @@ html {
     max-width: 28ch;
 }
 
-/* A table of five columns or more is set closer. */
-.vp-doc table:has(th:nth-child(5)) :is(th, td) {
-    padding-inline: 9px;
-    font-size: 14px;
-}
-
-/* A table of names and values has no head: its first row takes the ink rule instead of an empty band. */
+/* A table of names and values has no head, so it shows no empty band. */
 .vp-doc thead:not(:has(th:not(:empty))) {
     display: none;
 }
-.vp-doc table:not(:has(th:not(:empty))) tr:first-child td {
-    border-top: 3px solid var(--ship-ink);
-}
 
-/* Where the window has room, a head keeps to one line, and the first column keeps enough for a name of a few words or
-   a short command: more in a table of two columns, some in one of three, none in a wider one. */
-@media (min-width: 640px) {
+/* Where the window has room: a head keeps to one line; a table without a head starts on an ink rule; a table of five
+   columns or more is set closer; and the first column keeps enough for a name of a few words or a short command, more
+   in a table of two columns, some in one of three, none in a wider one. */
+@media (min-width: 720px) {
     .vp-doc th {
         white-space: nowrap;
+    }
+    .vp-doc table:not(:has(th:not(:empty))) tr:first-child td {
+        border-top: 3px solid var(--ship-ink);
+    }
+    .vp-doc table:has(th:nth-child(5)) :is(th, td) {
+        padding-inline: 9px;
+        font-size: 14px;
     }
     .vp-doc table:not(:has(th:nth-child(4))) td:first-child {
         min-width: 8em;
@@ -461,6 +460,72 @@ html {
     .vp-doc table:not(:has(th:nth-child(3))) td:first-child {
         min-width: 13em;
     }
+}
+
+/* On a phone a table has no room for columns. Each row is a record of its own: its cells one under the other, each
+   after its column's name as a marking. config.ts gives a cell that name, and the roles that keep it a table to a
+   screen reader. */
+@media (max-width: 719px) {
+    .vp-doc table {
+        overflow-x: visible;
+        border-top: 3px solid var(--ship-ink);
+    }
+    .vp-doc thead {
+        display: none;
+    }
+    .vp-doc tbody,
+    .vp-doc tr,
+    .vp-doc td {
+        display: block;
+    }
+    .vp-doc tr {
+        padding-block: 12px;
+        border-bottom: 1px solid var(--ship-line);
+    }
+    .vp-doc td {
+        border: 0;
+        padding: 2px 0;
+        font-size: 16px;
+        max-width: 36em;
+    }
+    .vp-doc td:empty {
+        display: none;
+    }
+    .vp-doc td code.long {
+        display: inline;
+        max-width: none;
+    }
+    .vp-doc td[data-label]::before {
+        content: attr(data-label);
+        margin-right: 8px;
+        font-weight: 700;
+        font-stretch: 78%;
+        font-size: 12.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        color: var(--ship-soft-ink);
+    }
+    .vp-doc h1 {
+        font-size: 32px;
+    }
+    .vp-doc h2 {
+        font-size: 24px;
+        margin-top: 48px;
+    }
+}
+
+/* The phone's menu: the bar's markings, larger for a finger, and the one radius on its panels. */
+.VPNav .VPNavScreen .VPNavScreenMenuLink,
+.VPNav .VPNavScreen .VPNavScreenMenuGroup .button {
+    font-weight: 700;
+    font-stretch: 78%;
+    font-size: 16px;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+}
+.VPNav .VPNavScreen .VPNavScreenAppearance,
+.VPLocalNav .VPLocalNavOutlineDropdown .items {
+    border-radius: var(--ship-radius);
 }
 
 /* The outline: a long heading wraps instead of being cut. */

@@ -102,6 +102,45 @@ function longCode(md: MarkdownRenderer) {
     };
 }
 
+/**
+ * Each cell of a table carries its column's name in `data-label`, and each part of the table its role. On a phone
+ * style.css sets a row's cells one under the other, each after its name; the roles keep the table a table to a screen
+ * reader when it no longer looks like one.
+ */
+function tableLabels(md: MarkdownRenderer) {
+    md.core.ruler.push("tack-table-labels", (state) => {
+        let heads: string[] = [];
+        let column = 0;
+        state.tokens.forEach((token, i) => {
+            switch (token.type) {
+                case "table_open":
+                    heads = [];
+                    token.attrSet("role", "table");
+                    break;
+                case "thead_open":
+                case "tbody_open":
+                    token.attrSet("role", "rowgroup");
+                    break;
+                case "tr_open":
+                    column = 0;
+                    token.attrSet("role", "row");
+                    break;
+                case "th_open": {
+                    const words = state.tokens[i + 1]?.children ?? [];
+                    heads.push(words.map((w) => (w.type === "text" || w.type === "code_inline" ? w.content : "")).join(""));
+                    token.attrSet("role", "columnheader");
+                    break;
+                }
+                case "td_open":
+                    token.attrSet("role", "cell");
+                    if (heads[column]) token.attrSet("data-label", heads[column]);
+                    column++;
+                    break;
+            }
+        });
+    });
+}
+
 /** The site's colours, from tokens.css, the one file that holds them. */
 function tokens(): Record<string, string> {
     const css = readFileSync(new URL("./theme/tokens.css", import.meta.url), "utf8");
@@ -154,6 +193,7 @@ export default defineConfig({
         config: (md) => {
             repositoryLinks(md);
             longCode(md);
+            tableLabels(md);
         },
     },
 
