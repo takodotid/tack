@@ -373,7 +373,7 @@ func TestInstallChecksSHA256(t *testing.T) {
 		{nil, "kind-linux-"},
 		{[]string{"helm"}, "helm-v4.3.2-linux-"},
 		{[]string{"cosign"}, "cosign-linux-"},
-		{[]string{"vale"}, "vale_3.28.1_Linux_"},
+		{[]string{"vale"}, "errata-ai/vale/releases/download/"},
 		{[]string{"kubectl"}, "/kubectl does not match its pinned SHA-256"},
 		{[]string{"flux"}, "flux_2.10.0_linux_"},
 		{[]string{"zip"}, "unknown tool zip"},

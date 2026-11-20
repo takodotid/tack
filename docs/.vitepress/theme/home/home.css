@@ -410,7 +410,7 @@
     letter-spacing: 0.07em;
     color: var(--ship-buff);
 }
-.sh-close p {
+.sh-close-matter p {
     max-width: 38em;
 }
 .sh-buff :focus-visible {
