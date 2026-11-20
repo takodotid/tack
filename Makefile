@@ -6,7 +6,7 @@ SOURCE_DATE_EPOCH ?= $(shell git log -1 --format=%ct 2>/dev/null || date +%s)
 LDFLAGS := -s -w -X github.com/takodotid/tack/internal/version.Version=$(VERSION)
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 
-.PHONY: all build dist sbom lint generate verify test test-race e2e e2e-up e2e-down tools clean
+.PHONY: all build dist sbom lint prose generate verify test test-race e2e e2e-up e2e-down tools clean
 
 all: verify test build
 
@@ -48,6 +48,10 @@ lint: tools-go
 	$(GO) tool -modfile=hack/tools/go.mod staticcheck -tags e2e ./...
 	helm lint --strict deploy/helm/tack
 	hack/release/pinned.sh
+
+## prose: lints every tracked Markdown file and Vue template with vale, by the rules of .vale.ini; needs vale
+prose:
+	git ls-files -z '*.md' '*.vue' | xargs -0 vale
 
 ## generate: deepcopy code and the CRD, from api/, and the chart's copy of the CRD
 generate: tools-go

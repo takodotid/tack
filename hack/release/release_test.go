@@ -359,7 +359,7 @@ func TestInstallChecksSHA256(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, tool := range []string{"kind", "kubectl", "flux", "helm", "cosign"} {
+	for _, tool := range []string{"kind", "kubectl", "flux", "helm", "cosign", "vale"} {
 		for _, arch := range []string{"amd64", "arm64"} {
 			if !regexp.MustCompile(`(?m)^` + tool + ` +v\d+\.\d+\.\d+ +` + arch + ` +[0-9a-f]{64}$`).Match(b) {
 				t.Errorf("install.sh pins no SHA-256 for %s on %s", tool, arch)
@@ -373,6 +373,7 @@ func TestInstallChecksSHA256(t *testing.T) {
 		{nil, "kind-linux-"},
 		{[]string{"helm"}, "helm-v4.3.2-linux-"},
 		{[]string{"cosign"}, "cosign-linux-"},
+		{[]string{"vale"}, "vale_3.28.1_Linux_"},
 		{[]string{"kubectl"}, "/kubectl does not match its pinned SHA-256"},
 		{[]string{"flux"}, "flux_2.10.0_linux_"},
 		{[]string{"zip"}, "unknown tool zip"},
@@ -417,7 +418,7 @@ func TestInstallRefusesTwoVersions(t *testing.T) {
 }
 
 // #66. Renovate did not update the tools' pins. renovate.json's custom managers read every line of install.sh: the
-// version of each, and the SHA-256 of kind, flux and cosign, whose downloads are GitHub release assets. kubectl and
+// version of each, and the SHA-256 of kind, flux, cosign and vale, whose downloads are GitHub release assets. kubectl and
 // helm have their SHA-256 copied by hand: no manager reads it, so Renovate never writes something else there.
 func TestRenovateReadsEveryPin(t *testing.T) {
 	var cfg struct {
@@ -433,10 +434,10 @@ func TestRenovateReadsEveryPin(t *testing.T) {
 		t.Fatal(err)
 	}
 	pins := regexp.MustCompile(`(?m)^(\w+) +(v\S+) +(amd64|arm64) +([0-9a-f]{64})$`).FindAllStringSubmatch(string(b), -1)
-	if len(pins) != 10 {
-		t.Fatalf("install.sh has %d pin lines, want 10", len(pins))
+	if len(pins) != 12 {
+		t.Fatalf("install.sh has %d pin lines, want 12", len(pins))
 	}
-	digests := map[string]bool{"kind": true, "flux": true, "cosign": true, "kubectl": false, "helm": false}
+	digests := map[string]bool{"kind": true, "flux": true, "cosign": true, "vale": true, "kubectl": false, "helm": false}
 	for _, pin := range pins {
 		var found []string
 		for _, m := range cfg.CustomManagers {

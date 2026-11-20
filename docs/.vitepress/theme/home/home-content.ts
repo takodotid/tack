@@ -71,7 +71,7 @@ export const MODES = [
     {
         name: "Site loss",
         flag: "--mode site-loss",
-        when: "The old site is lost, and you have confirmed the loss.",
+        when: "The old site is lost, and the operator has confirmed the loss.",
         happens: "The new site promotes without a token. The old primary must be rebuilt before it can follow the new one again.",
         link: "/runbooks/site-loss",
         linkText: "Fail over after a site loss",

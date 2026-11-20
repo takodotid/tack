@@ -1,6 +1,6 @@
 # Getting started
 
-You need the CLI and the CRD at every site ([Install](install.md)), and a Workload file that names the sites, their kube contexts and the Git repository ([the Workload file](../workload.md)).
+A run needs the CLI and the CRD at every site ([Install](install.md)), and a Workload file that names the sites, their kube contexts and the Git repository ([the Workload file](../workload.md)).
 
 ## A planned switchover
 

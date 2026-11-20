@@ -74,7 +74,7 @@ onBeforeUnmount(() => {
         <section class="sh-opening">
             <div class="sh-wrap sh-opening-grid">
                 <div class="sh-opening-text">
-                    <h1>Move a database primary between sites, on your command.</h1>
+                    <h1>Move a database primary between sites, on the operator's command.</h1>
                     <p class="sh-lede">
                         A planned switchover, or a failover after a site is lost, for CloudNativePG deployed by Flux. Every step is planned
                         first, recorded in a ledger, and resumable.
@@ -144,7 +144,7 @@ onBeforeUnmount(() => {
                 <div class="sh-chapter-head">
                     <h2>Anything unexpected stops the run, with a reason.</h2>
                     <p>
-                        A stopped run exits with code 3, and one that waits for Git with code 4. Its objects stay held until you decide, and
+                        A stopped run exits with code 3, and one that waits for Git with code 4. Its objects stay held until the operator decides, and
                         <code>tack resume</code> goes on from the ledger.
                     </p>
                 </div>
@@ -161,7 +161,7 @@ onBeforeUnmount(() => {
         <section class="sh-deck">
             <div class="sh-wrap sh-chapter">
                 <div class="sh-chapter-head">
-                    <h2>Two modes, and you choose which.</h2>
+                    <h2>Two modes, and the operator chooses which.</h2>
                     <p>Tack never fails over by itself. What each mode can lose is in <a :href="withBase('/wal-rpo-rto')">Data loss and downtime</a>.</p>
                 </div>
 

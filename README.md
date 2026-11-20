@@ -1,6 +1,6 @@
 # Tack
 
-<p><b>Move a database primary between sites, on your command.</b><br>Tack moves the primary of a CloudNativePG database from one Kubernetes site to another: a planned switchover, or a failover after a site is lost. It keeps Flux and Git in step, and records every step in a ledger.</p>
+<p><b>Move a database primary between sites, on the operator's command.</b><br>Tack moves the primary of a CloudNativePG database from one Kubernetes site to another: a planned switchover, or a failover after a site is lost. It keeps Flux and Git in step, and records every step in a ledger.</p>
 
 <p>
     <a href="https://github.com/takodotid/tack/actions/workflows/ci.yaml?query=branch%3Amain"><img src="https://github.com/takodotid/tack/actions/workflows/ci.yaml/badge.svg?branch=main" alt="ci"></a>
@@ -19,7 +19,7 @@
 
 ## What it does
 
-- **The operator starts every run.** Tack never fails over by itself. `tack plan` reads every site and Git, prints every step, and changes nothing. `tack run` asks you to type the workload's name.
+- **The operator starts every run.** Tack never fails over by itself. `tack plan` reads every site and Git, prints every step, and changes nothing. `tack run` asks the operator to type the workload's name.
 - **Flux is held narrowly.** Tack annotates only the live objects the run changes, so Flux stops applying them. It commits the new values to Git, and lets Flux apply those objects again once Git matches live.
 - **The demotion token is carried across.** In a planned switchover the old primary demotes, Tack records its token, and the new primary promotes with it. No write is lost.
 - **Every step is in a ledger.** A `SiteFailover` object records each step before it starts and after it ends. A run that stops resumes from its ledger, never from memory.
@@ -43,7 +43,7 @@ After a site loss, confirm the loss first ([runbook](https://tack.tako.id/runboo
 
 ## Install
 
-Download the archive for your platform from the [releases page](https://github.com/takodotid/tack/releases), check it against `SHA256SUMS`, and put `tack` on your `PATH`. Then install the CRD at every site, in the ledger namespace:
+Download the archive for the platform from the [releases page](https://github.com/takodotid/tack/releases), check it against `SHA256SUMS`, and put `tack` on the `PATH`. Then install the CRD at every site, in the ledger namespace:
 
 ```sh
 VERSION=v1.6.0
@@ -83,11 +83,16 @@ Tack is built with AI coding agents (Claude Code), and a person directs and appr
 - Each fix comes with a test that fails without the fix.
 - CI runs the unit tests, the race detector, and end-to-end tests on kind for every pull request.
 - Before a release, the change is tested on real clusters, not only in CI.
-- Releases are signed, and you can verify every release asset (see [Verify a release](docs/guide/install.md#verify-a-release)).
+- Releases are signed, and every release asset can be verified (see [Verify a release](docs/guide/install.md#verify-a-release)).
+
+<!-- The maintainers speak for themselves in the next two paragraphs. -->
+<!-- vale Tack.Pronouns = NO -->
 
 **Why we trust it in production:** we run Tack ourselves, for our own databases. A failover tool that loses data or leaves two primaries would hurt us first.
 
 If you find a problem, open an issue. Saying that it looks AI-written is fine, as long as you say what's wrong.
+
+<!-- vale Tack.Pronouns = YES -->
 
 ## Contributing
 

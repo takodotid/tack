@@ -46,16 +46,16 @@
   ],
   "customManagers": [
     {
-      "description": "hack/tools/install.sh: kind, flux and cosign, whose downloads are GitHub release assets. Renovate is asked to update each line's version and its SHA-256 together; CI's lint job fails a SHA-256 that does not match.",
+      "description": "hack/tools/install.sh: kind, flux, cosign and vale, whose downloads are GitHub release assets. Renovate is asked to update each line's version and its SHA-256 together; CI's lint job fails a SHA-256 that does not match.",
       "customType": "regex",
       "managerFilePatterns": [
         "/^hack/tools/install\\.sh$/"
       ],
       "matchStrings": [
-        "(?<depName>kind|flux|cosign) +(?<currentValue>v\\d+\\.\\d+\\.\\d+) +(?:amd64|arm64) +(?<currentDigest>[0-9a-f]{64})"
+        "(?<depName>kind|flux|cosign|vale) +(?<currentValue>v\\d+\\.\\d+\\.\\d+) +(?:amd64|arm64) +(?<currentDigest>[0-9a-f]{64})"
       ],
       "datasourceTemplate": "github-release-attachments",
-      "packageNameTemplate": "{{#if (equals depName 'kind')}}kubernetes-sigs/kind{{else if (equals depName 'flux')}}fluxcd/flux2{{else}}sigstore/cosign{{/if}}"
+      "packageNameTemplate": "{{#if (equals depName 'kind')}}kubernetes-sigs/kind{{else if (equals depName 'flux')}}fluxcd/flux2{{else if (equals depName 'vale')}}errata-ai/vale{{else}}sigstore/cosign{{/if}}"
     },
     {
       "description": "hack/tools/install.sh: kubectl and helm, whose downloads are not on GitHub. Renovate updates each line's version only: its SHA-256 is copied by hand.",
