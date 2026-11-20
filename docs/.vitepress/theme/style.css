@@ -99,7 +99,6 @@ html {
 .VPButton,
 .vp-doc div[class*="language-"],
 .vp-doc :not(pre) > code,
-.custom-block,
 .VPLocalSearchBox .shell,
 .DocSearch-Button,
 .VPBadge {
@@ -238,10 +237,15 @@ html {
     font-size: 42px;
     line-height: 1.1;
     font-weight: 800;
-    padding-bottom: 22px;
-    background:
-        linear-gradient(var(--ship-ink), var(--ship-ink)) left bottom 10px / 64px 4px no-repeat,
-        linear-gradient(var(--ship-buff), var(--ship-buff)) left bottom / 64px 10px no-repeat;
+}
+.vp-doc h1::after {
+    content: "";
+    display: block;
+    width: 64px;
+    height: 14px;
+    margin-top: 8px;
+    background: var(--ship-buff);
+    border-top: 4px solid var(--ship-ink);
 }
 .vp-doc h2 {
     font-size: 27px;
@@ -323,12 +327,14 @@ html {
     border-radius: var(--ship-radius);
 }
 
-/* Notes: a deck plane under an ink cap, with the kind as a marking. The word carries the state; the colour repeats it. */
+/* Notes: a deck plane under an ink cap, square as the cap is, with the kind as a marking. The word carries the state; the colour repeats it. */
 .custom-block {
     background: var(--ship-deck);
     color: var(--ship-ink);
     border: 0;
+    /* impeccable-disable-next-line border-accent-on-rounded: the radius below is 0, and the detector reads any radius as round */
     border-top: 4px solid var(--ship-ink);
+    border-radius: 0;
     padding: 16px 20px 12px;
 }
 .custom-block.tip {

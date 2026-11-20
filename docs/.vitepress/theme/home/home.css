@@ -29,6 +29,7 @@
 }
 .ship-home p {
     margin: 0;
+    text-wrap: pretty;
 }
 .ship-home code {
     font-family: var(--ship-font-mono);
@@ -181,7 +182,8 @@
 /* The waterline: a white stripe, then the boot-top's ink band. */
 .sh-waterline {
     height: 18px;
-    background: linear-gradient(var(--ship-plane) 0 5px, var(--ship-ink) 5px);
+    background: var(--ship-ink);
+    border-top: 5px solid var(--ship-plane);
 }
 
 /* The chapters: a heavy heading at the left, the matter at the right. */
@@ -219,7 +221,7 @@
     letter-spacing: -0.022em;
 }
 .sh-chapter-head p {
-    margin-top: 22px;
+    margin-top: 24px;
     max-width: 30em;
 }
 .sh-plane .sh-chapter-head a,
