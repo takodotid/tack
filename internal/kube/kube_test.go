@@ -5,7 +5,6 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -56,12 +55,10 @@ func status(code int) http.HandlerFunc {
 
 // Only a check that gets no answer counts toward a lost site. Issue #25.
 func TestReachableKinds(t *testing.T) {
-	closed, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	refused := "http://" + closed.Addr().String()
-	closed.Close()
+	// Nothing listens on port 1, and it is below the kernel's ephemeral port
+	// range, so no server of a test is given it. The port of a listener that
+	// has just closed can go to the next server that starts.
+	refused := "http://127.0.0.1:1"
 
 	serve := func(h http.Handler) string {
 		s := httptest.NewServer(h)
