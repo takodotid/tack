@@ -15,7 +15,7 @@ The end-to-end test builds two kind clusters with Flux, CloudNativePG, Strait an
 | Go | as in `go.mod` |
 | kind | v0.33.0 |
 | kubectl | v1.37.2 |
-| flux CLI | v2.10.0 exactly |
+| flux CLI | v2.10.1 exactly |
 | helm | v4.3.2 |
 | git, openssl, curl, sha256sum | any |
 | Internet access | to pull images, and to fetch CloudNativePG's release manifest and Strait's source at the commit pinned in `test/e2e/env/lib.sh` |

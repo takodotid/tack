@@ -47,7 +47,7 @@ The operator starts every run, and Tack never decides to fail over by itself. It
 
 ## Evidence on Hand
 
-- The end-to-end test on kind, with CloudNativePG v1.30.1, Flux v2.10.0 and Kubernetes v1.37, in CI on every pull request.
+- The end-to-end test on kind, with CloudNativePG v1.30.1, Flux v2.10.1 and Kubernetes v1.37, in CI on every pull request.
 - The failover-time budget in `docs/wal-rpo-rto.md` has no measured numbers yet: they wait for a staging run of `docs/runbooks/measure-failover-time.md`.
 - No testimonials, benchmarks or adoption figures exist. Never invent them.
 
