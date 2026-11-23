@@ -346,7 +346,7 @@ func TestSiteLossHoldsWithoutGit(t *testing.T) {
 		t.Fatalf("err %v, state %s %s", err, sf.Status.State, sf.Status.Reason)
 	}
 	// A count, not the run's time: the race detector makes the run itself
-	// take longer than a fetch hangs (#58).
+	// take longer than a fetch hangs.
 	if f.flux.Hung != 0 {
 		t.Errorf("the run waited on %d Git fetches before the Git step", f.flux.Hung)
 	}
@@ -659,7 +659,7 @@ func (f *fixture) fenceAndFinish() {
 	}
 }
 
-// Issue #23. A lost site comes back still primary. Two resumes in a row
+// A lost site comes back still primary. Two resumes in a row
 // without --fence each stop before its first step and change nothing
 // there; the step stays Deferred.
 func TestFencedSiteUnchangedOnRepeatedResume(t *testing.T) {

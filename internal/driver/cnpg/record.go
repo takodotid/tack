@@ -404,7 +404,7 @@ func archiveNotes(t *driver.Topology, r driver.Request) []string {
 		configured = configured || s.Facts[factDestination] != ""
 		if e := s.Facts[factArchiveError]; e != "" {
 			notes = append(notes, fmt.Sprintf("warning: site %s: the WAL archive's destination could not be read (%s): the plan cannot check that it is the site's own. Reading a barman-cloud ObjectStore needs get on objectstores (%s)",
-				s.Name, e, version.DocLink("docs/operations.md#permissions")))
+				s.Name, e, version.DocLink("docs/permissions.md")))
 		}
 	}
 	if toSt, ok := t.Site(r.To); ok {

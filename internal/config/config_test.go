@@ -37,7 +37,7 @@ func TestParseAPIVersion(t *testing.T) {
 }
 
 // A Git URL that holds a credential is refused, and the error does not
-// repeat it. Issue #31.
+// repeat it.
 func TestParseGitURL(t *testing.T) {
 	for _, tt := range []struct {
 		url string
@@ -96,9 +96,9 @@ func TestParseRouting(t *testing.T) {
 	}
 }
 
-// #35 row 50 (RFC0009 Requirement 11). YAML 1.1 reads an unquoted n, on
-// or yes as a boolean and 010 as a number, so a site named so became
-// "false", "true" or "8", and --to n then failed. Such a name, or a
+// RFC0009 Requirement 11. YAML 1.1 reads an unquoted n, on
+// or yes as a boolean and 010 as a number, so a site named so would become
+// "false", "true" or "8", and --to n would then fail. Such a name, or a
 // reference to one, is refused unquoted, and kept as written quoted.
 func TestParseSiteNames(t *testing.T) {
 	sites := func(a, b string) string {
@@ -118,7 +118,7 @@ func TestParseSiteNames(t *testing.T) {
 		{name: "a quoted false", src: sites(`"false"`, "b"), names: []string{"false", "b"}},
 		{name: "a reference", src: sites(`"n"`, "b") + "  routing: {strait: {services: [{site: n, namespace: apps, name: pg}], members: [{site: \"n\", member: pg-a}, {site: b, member: pg-b}]}}\n",
 			err: `spec.routing.strait.services[0].site: YAML reads n as "false"; quote it, as "n"`},
-		// #66: a kube context named on became "true", and the error named
+		// A kube context named on would become "true", and the error would name
 		// a context true that the kubeconfig does not hold.
 		{name: "a kube context", src: strings.Replace(sites("a", "b"), "kubeContext: site-a", "kubeContext: on", 1),
 			err: `spec.sites[0].kubeContext: YAML reads on as "true"; quote it, as "on"`},

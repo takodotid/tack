@@ -478,14 +478,13 @@ func TestDemotionNamesPlannedSteps(t *testing.T) {
 	}
 }
 
-// Observed on kind in the first three-site e2e: CloudNativePG's webhook
-// refused to make pg-b declare pg-c primary, "External cluster pg-c not
-// found", in a step after the promotion. A planned plan now refuses, before
-// any step, a site whose Cluster does not name the new primary among its
-// spec.externalClusters. A site-loss plan notes it instead, with the step
-// where the run stops (coordinator review of PR #68: Git, the way to add
-// it, may have gone with the lost site). The new primary's own list, and a
-// site that gives no answer, are not read.
+// CloudNativePG's webhook refuses to make pg-b declare pg-c primary,
+// "External cluster pg-c not found", in a step after the promotion. A
+// planned plan therefore refuses, before any step, a site whose Cluster
+// does not name the new primary among its spec.externalClusters. A
+// site-loss plan notes it instead, with the step where the run stops (Git,
+// the way to add it, may have gone with the lost site). The new primary's
+// own list, and a site that gives no answer, are not read.
 func TestPlanRefusesPrimaryNotAmongExternalClusters(t *testing.T) {
 	without := func(site, name string) func(map[string]*unstructured.Unstructured) {
 		return func(cs map[string]*unstructured.Unstructured) {

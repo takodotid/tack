@@ -16,12 +16,11 @@ import (
 	"github.com/takodotid/tack/internal/testenv"
 )
 
-// #38 item 7. A run's creation time comes from the API server of its
+// A run's creation time comes from the API server of its
 // ledger's site, to the second. tack resume of run-1, whose ledger is at
 // b, finds another run of the workload, run-9: it refuses when run-9 may
 // have started after run-1, also in the same second at the same site, or
-// a little earlier by another site's clock. v1.2.1 compared the times with
-// a strict "after", across sites.
+// a little earlier by another site's clock.
 func TestResumeOrdersRunsAcrossSites(t *testing.T) {
 	for _, tt := range []struct {
 		name string
@@ -95,7 +94,7 @@ func TestResumeOrdersRunsAcrossSites(t *testing.T) {
 	}
 }
 
-// #66. tack prune orders runs by the same clocks as tack resume: a ledger
+// tack prune orders runs by the same clocks as tack resume: a ledger
 // counts as certainly created after another only where the resume of the
 // other would refuse it as started after (Requirement 18), and the other
 // way round. Where the clocks cannot tell, neither is after the other.

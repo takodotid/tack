@@ -67,7 +67,7 @@ func raceRun(t *testing.T, f *fixture, state failoverv1.RunState) error {
 	return env.Start(context.Background(), plan, engine.Options{})
 }
 
-// #35 row 35 (RFC0003 Requirement 8). Two tack processes find no active
+// RFC0003 Requirement 8: two tack processes find no active
 // run, then both create a ledger. The one that searches again after its
 // create and finds the other ends before its first status write: no step,
 // no hold, no change. Its ledger is marked abandoned, so it blocks no new
@@ -101,7 +101,7 @@ func TestRunThatLosesTheRaceEndsBeforeItsSteps(t *testing.T) {
 	}
 }
 
-// #35 row 35 (RFC0003 Requirement 8). A run that cannot search for other
+// RFC0003 Requirement 8: a run that cannot search for other
 // runs once its ledger exists cannot tell that no other run started: it
 // ends the same way, before its first status write.
 func TestRunThatCannotSearchAgainEnds(t *testing.T) {
@@ -125,7 +125,7 @@ func TestRunThatCannotSearchAgainEnds(t *testing.T) {
 	}
 }
 
-// #35 row 35. The run that won goes on: the abandoned run, created after
+// The run that won goes on: the abandoned run, created after
 // it, ran no step, so it neither stops the winner's start nor refuses its
 // resume as a newer run.
 func TestRunThatWinsTheRaceGoesOn(t *testing.T) {

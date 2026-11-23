@@ -31,7 +31,7 @@ func (f *fixture) declaresOnly() {
 	}
 }
 
-// #35 row 33. A lost site comes back declaring itself primary, before an
+// A lost site comes back declaring itself primary, before an
 // instance reports isPrimary: CloudNativePG promotes such a Cluster at
 // once. The read before its steps stops the run, as for a site that
 // answers as primary, and changes nothing there until --fence.
@@ -69,7 +69,7 @@ func TestReadBeforeStepsStopsWhenSiteDeclaresItself(t *testing.T) {
 	}
 }
 
-// #35 row 33. A site-loss plan whose from answers and declares itself
+// A site-loss plan whose from answers and declares itself
 // primary, with no instance that reports it, is not refused: the driver
 // refuses only a from that answers as primary ([RFC#0004] Requirement 5).
 // The plan says that the run stops before from's first step, and the run

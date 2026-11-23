@@ -36,9 +36,8 @@ func ledgerAt(t *testing.T, f *testFactory, site, name string) *failoverv1.SiteF
 	return sf
 }
 
-// PR #44: an abandoned run had no durable mark, so it could be resumed
-// until a new run took it over. tack abandon records status.abandoned:
-// tack resume then refuses the run, and a new run no longer waits for it.
+// tack abandon records status.abandoned: tack resume then refuses the
+// run, and a new run does not wait for it.
 // Its holds stay, and the output names them.
 func TestAbandon(t *testing.T) {
 	f := newFactory(map[string][]client.Object{
@@ -129,8 +128,7 @@ func TestAbandonWithOldCRD(t *testing.T) {
 	}
 }
 
-// PR #44: tack status without a run listed a run that another run took
-// over as its last state, with no sign of the take-over. It lists it as
+// tack status without a run lists a run that another run took over as
 // TakenOver, whether its own ledger or the other run's spec records it.
 func TestStatusListsRunTakenOver(t *testing.T) {
 	marked := stoppedRun(t, "pg-main-one")
@@ -161,12 +159,11 @@ func TestStatusListsRunTakenOver(t *testing.T) {
 	}
 }
 
-// #59, observed in a two-site test of v1.3.0: after the runbook removed
-// every hold, tack abandon listed each object "(held)" and said "the run's
-// holds stay after it is abandoned", from the ledger. It says that the
-// list is the ledger's record, reads and changes no object of the
-// workload, and says where kubectl get sfo shows the mark: in its
-// Abandoned column, as the State column keeps the run's state.
+// After the runbook removed every hold, tack abandon lists each object
+// from the ledger. It says that the list is the ledger's record, reads and
+// changes no object of the workload, and says where kubectl get sfo shows
+// the mark: in its Abandoned column, as the State column keeps the run's
+// state.
 func TestAbandonListsHoldsAsRecorded(t *testing.T) {
 	for _, tt := range []struct {
 		name  string
@@ -211,8 +208,8 @@ func TestAbandonListsHoldsAsRecorded(t *testing.T) {
 	}
 }
 
-// #66. tack abandon asked "This changes live clusters and Git.", the
-// question of run and resume, though it writes only the run's ledger.
+// tack abandon does not ask "This changes live clusters and Git.", the
+// question of run and resume, as it writes only the run's ledger.
 func TestAbandonAsksAboutTheLedgerOnly(t *testing.T) {
 	f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": append(testenv.Site("b", "a", 0), stoppedRun(t, "pg-main-earlier"))})
 	isTerminal = func() bool { return true }

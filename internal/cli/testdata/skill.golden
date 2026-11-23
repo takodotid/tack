@@ -13,7 +13,7 @@ planned switchover, or a failover after a site is lost. It acts through the
 workload's own API, keeps GitOps in step, and records every step in a
 SiteFailover ledger in the new primary's cluster.
 
-A run takes four phases, each step recorded before it starts and after it ends:
+A run has four phases. Each step is recorded before it starts and after it ends:
 
   Hold             annotate only the objects the run changes with
                    kustomize.toolkit.fluxcd.io/reconcile: disabled, so Flux
@@ -24,7 +24,7 @@ A run takes four phases, each step recorded before it starts and after it ends:
   Release          check that Git equals live, remove the annotations, and
                    check that Flux changed nothing
 
-The operator starts every run. Tack never decides to fail over by itself.
+Only the operator starts a run. Tack never decides to fail over by itself.
 
 Rules for AI agents:
   - An agent never starts "tack run" or "tack resume" without an explicit
@@ -52,28 +52,26 @@ Mark a run that must never go on.
 
 ```text
 Abandon marks a run that must never go on, such as one whose old primary
-was promoted again by hand: it records status.abandoned in the run's
-ledger. tack resume then refuses the run, and a new run of the workload no
-longer waits for it.
+was promoted again by hand. It records status.abandoned in the run's ledger.
+tack resume then refuses the run, and a new run of the workload no longer
+waits for it.
 
-Abandon changes nothing else. A hold the run left on an object stays:
-remove the holds once Git equals live, or start the next run with
---take-over RUN, which takes them over. Abandon lists the holds as the run's
-ledger records them, and does not read the objects: a hold removed by hand
-is still listed. The runbook:
+Abandon changes nothing else. A hold the run left on an object stays: remove
+the holds once Git equals live, or start the next run with --take-over RUN.
+Abandon lists the holds from the run's ledger and does not read the objects,
+so a hold removed by hand is still listed. The runbook:
   https://github.com/takodotid/tack/blob/main/docs/runbooks/abandon-run.md
 
-kubectl get sfo shows when the run was abandoned in its Abandoned column,
-from the CRD of tack v1.4.0 on. Its State column keeps the run's last
-state, such as Stopped. tack status lists the run as Abandoned.
+kubectl get sfo shows when the run was abandoned in its Abandoned column
+(CRD of tack v1.4.0 or later). Its State column keeps the run's last state,
+such as Stopped. tack status lists the run as Abandoned.
 
-Abandon does not stop a tack process that runs the run: check first that
-none does. A step that runs, such as a promotion, still changes the
-workload. Abandon refuses while the run's lease says that a tack process
-runs it, or, for a run without a lease, while the run is Running and its
-ledger was written within its step's timeout and 5 minutes; --force goes on
-all the same. Only tack v1.3.0 and later honour the mark: an older tack
-resumes the run, and drops the mark.
+Abandon does not stop a tack process that runs the run: check first that none
+does. A running step, such as a promotion, still changes the workload.
+Abandon refuses while the run's lease says a tack process runs it, or, for a
+run without a lease, while the run is Running and its ledger was written
+within its step's timeout and 5 minutes. --force goes on anyway. Only tack
+v1.3.0 and later honour the mark; an older tack resumes the run and drops it.
 
 An agent never starts "tack abandon" without an explicit instruction from a
 human for that run.
@@ -104,11 +102,11 @@ Print a shell completion script, and contact nothing.
 ```text
 Completion prints a script that completes tack's commands, flags and
 values in a shell: the values of --mode and --output, Workload files for
---file, and the site names of the Workload file given with --file for
---to, --from and --fence. Completion reads that file only: it never
-contacts a cluster or Git.
+--file, and the site names of the Workload file given with --file for --to,
+--from and --fence. It reads that file only and never contacts a cluster or
+Git.
 
-Load it in the current shell, or install it as each shell's docs say:
+Load it in the current shell, or install it as the shell's docs say:
 
   bash:        source <(tack completion bash)
   zsh:         source <(tack completion zsh)
@@ -123,16 +121,16 @@ Usage: `tack completion bash|zsh|fish|powershell`
 Print every step and change of a run, and change nothing.
 
 ```text
-Plan prints every step and every change a run would make, in order, and
-changes nothing. It reads each reachable site and the Git repository.
+Plan prints every step and change a run would make, in order, and changes
+nothing. It reads each reachable site and the Git repository.
 
-The plan names the objects Tack holds, the patches and waits of the
-workload's driver, the exact Git change (file, path and value), the checks
-before and after release, and the follow-ups left for the operator. Values
-captured during the run, such as a demotion token, appear as $(name).
+It shows the objects Tack holds, the driver's patches and waits, the exact Git
+change (file, path and value), the checks before and after release, and the
+follow-ups left for the operator. Values captured during the run, such as a
+demotion token, appear as $(name).
 
-Run "tack plan" before every "tack run", and show its output to the human
-who decides.
+Run "tack plan" before every "tack run" and show its output to the human who
+decides.
 ```
 
 Usage: `tack plan -f WORKLOAD --to SITE [--mode planned|site-loss] [flags]`
@@ -164,36 +162,34 @@ Examples:
 Delete the ledgers of old runs that succeeded.
 
 ```text
-Prune deletes the ledgers of old runs of a workload, which every search
-for runs reads at every site. It deletes only a run that succeeded with no
+Prune deletes the ledgers of old runs of a workload; every search for runs
+reads them at every site. It deletes only a run that succeeded with no
 Deferred step, and keeps:
 
-  - the newest --keep runs that succeeded, so the record of the last
-    switch stays. Where the clocks of two sites' API servers cannot order
-    two runs, created less than 10s apart, prune keeps both;
-  - every abandoned run, and every run that another run took over: delete
-    one by hand, as the link below shows;
-  - every run with a follow-up Rebuild whose member was not created again
-    10s or more after the run's ledger was created, as the Workload file
-    names the member at that site, or whose member cannot be read: a
-    planned run onto that member needs it;
-  - every run whose spec records that it took over a run that is kept and
-    is not marked as taken over: without it, that run would block new runs;
+  - the newest --keep runs that succeeded. Runs created less than 10s apart
+    cannot be ordered by the clocks of two sites' API servers: prune keeps
+    both;
+  - every abandoned run, and every run that another run took over: delete one
+    by hand, as the link below shows;
+  - every run with a follow-up Rebuild whose member was not created again 10s
+    or more after the run's ledger was created, as the Workload file names
+    the member at that site, or whose member cannot be read;
+  - every run whose spec records that it took over a run that is kept and is
+    not marked as taken over;
   - every run that a newer tack than this one last wrote.
 
-Prune acts only when every site of the workload answers and every run of
-the workload is finished: succeeded with no Deferred step, abandoned or
-taken over. It lists each run with what it does to it, asks for the
-workload's name, searches again, and stops, deleting nothing, when anything
-changed. It then deletes the ledgers one at a time, by name, oldest first,
-each only while it is the object that was read, and stops at the first
-error. It changes nothing else.
+Prune acts only when every site of the workload answers and every run of the
+workload is finished: succeeded with no Deferred step, abandoned or taken
+over. It lists each run with what it does to it, asks for the workload's
+name, searches again, and deletes nothing if anything changed. It then
+deletes the ledgers one at a time, by name, oldest first, each only while it
+is the object that was read, and stops at the first error.
 
-Prune needs delete on sitefailovers in the ledger namespace at each site,
-row 16 of the permissions table, and get on the workload's objects, row 7,
-when a run has a follow-up Rebuild. The rules, and how to delete a kept
-run by hand:
-  https://github.com/takodotid/tack/blob/main/docs/operations.md#old-ledgers
+Prune needs delete on sitefailovers in the ledger namespace at each site (row
+16 of the permissions table), and, when a run has a follow-up Rebuild, get on
+the workload's objects (row 7). The rules, and how to delete a kept run by
+hand:
+  https://github.com/takodotid/tack/blob/main/docs/old-ledgers.md
 
 An agent never starts "tack prune" without an explicit instruction from a
 human for that workload.
@@ -221,30 +217,30 @@ Continue a run from its ledger.
 ```text
 Resume continues a run from its ledger, never from memory: it takes the
 remaining steps of the plan the run recorded when it started, with the
-workload configuration it recorded then.
+workload configuration recorded then.
 
 A step that was started but not recorded as done runs again; every step is
 safe to repeat. Steps deferred because their site was unreachable run once
 the site is back.
 
-When the run stopped, the ledger's reason says what the operator must
-decide. Each decision has its own flag:
+When the run stopped, the ledger's reason says what the operator must decide.
+Each decision has its own flag:
 
   GitChanged           Git moved during the run. Review the new commits, then
                        --accept-git-head SHA makes that commit the new base.
                        When the stop names one commit, SHA must be that
                        commit; HEAD stands for it.
-  FencedSiteIsPrimary  a site other than the new primary answers as
-                       primary. --fence SITE lets this resume demote it,
-                       when the message offers it. A resume without it
-                       stops again while the site is primary.
-  HeldByAnotherRun     another run holds an object. Finish that run, or
-                       start a new run with --take-over.
+  FencedSiteIsPrimary  a site other than the new primary answers as primary.
+                       --fence SITE lets this resume demote it, when the
+                       message offers it. Without it, the resume stops again
+                       while the site is primary.
+  HeldByAnotherRun     another run holds an object. Finish that run, or start
+                       a new run with --take-over.
 
-A run that another run took over, or that another run of the workload
-started after, cannot resume: its plan may no longer match the sites. Nor
-can a run whose steps are not the plan its driver composes from the
-ledger's Workload: the ledger was written outside tack.
+Resume refuses a run that another run took over or that a later run of the
+workload followed: its plan may no longer match the sites. It also refuses a
+run whose steps differ from the plan its driver composes from the ledger's
+Workload: the ledger was written outside tack.
 
 An agent never starts "tack resume" without an explicit instruction from a
 human for that run, and never passes these flags unless that instruction
@@ -286,20 +282,20 @@ SiteFailover ledger at the target site, and takes the steps in order.
 Modes:
   planned    the old primary demotes; its demotion token promotes the new one
   site-loss  the new site promotes without a token; the old primary then
-             needs a rebuild. Use it only when the old site is lost:
-             Tack cannot tell a lost site from one cut off from this
-             host. Confirm the loss and fence the old primary first.
+             needs a rebuild. Use it only when the old site is lost: Tack
+             cannot tell a lost site from one cut off from this host.
+             Confirm the loss and fence the old primary first.
 
 Confirming a site loss and fencing the old primary:
   https://github.com/takodotid/tack/blob/main/docs/runbooks/site-loss.md
 
 If Git cannot be reached (break-glass), the run still holds and switches the
 live objects, then waits with exit code 4; "tack resume" finishes it once Git
-is back. If anything unexpected happens, the run stops with exit code 3 and
-the ledger says why.
+is back. On anything unexpected, the run stops with exit code 3 and the ledger
+says why.
 
-An agent never starts "tack run" without an explicit instruction from a
-human for that run, and runs "tack plan" first.
+An agent never starts "tack run" without an explicit instruction from a human
+for that run, and runs "tack plan" first.
 ```
 
 Usage: `tack run -f WORKLOAD --to SITE [--mode planned|site-loss] [flags]`

@@ -30,7 +30,7 @@ func (l *diesBefore) UpdateStatus(ctx context.Context, sf *failoverv1.SiteFailov
 	return l.Ledger.UpdateStatus(ctx, sf)
 }
 
-// Issue #34. RFC0002 Requirement 5: a captured value that is absent or
+// RFC0002 Requirement 5: a captured value that is absent or
 // empty when a step needs it stops the run with TokenMissing, and the
 // promotion does not run. So does a capture that reads an empty field.
 func TestTokenMissing(t *testing.T) {
@@ -94,7 +94,7 @@ func mergePatchCluster(t *testing.T, c client.Client, name, patch string) {
 	}
 }
 
-// #35 row 41 (RFC0009 Requirement 10). A Wait on a captured value that
+// RFC0009 Requirement 10: a Wait on a captured value that
 // times out names the value, never prints it, nor the live value it
 // compared: tack status prints step messages, and captured values only by
 // name.

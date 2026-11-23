@@ -28,12 +28,12 @@ func (f *fixture) diesAt(sf *failoverv1.SiteFailover, step string, running bool)
 	}
 }
 
-// Issue #46, from a two-site test of v1.2.1. A planned run from a to b is
-// killed after demote-a, before the promotion. The operator promotes a
-// again by hand (docs/runbooks/no-primary-after-demotion.md, option 2). A
-// resume must stop at once with FencedSiteIsPrimary before the run's next
-// step, which keeps its state: v1.2.1 waited the whole demotion timeout
-// for a token that a no longer publishes, then stopped with StepFailed.
+// A planned run from a to b is killed after demote-a, before the promotion.
+// The operator promotes a again by hand
+// (docs/runbooks/no-primary-after-demotion.md, option 2). A resume must stop
+// at once with FencedSiteIsPrimary before the run's next step, which keeps
+// its state, and not wait the whole demotion timeout for a token that a no
+// longer publishes.
 // --fence a does not help: no step of the run would fence a again.
 func TestResumeAfterHandRecoveryStopsAfterDemotion(t *testing.T) {
 	for _, tt := range []struct {
@@ -79,7 +79,7 @@ func TestResumeAfterHandRecoveryStopsAfterDemotion(t *testing.T) {
 	}
 }
 
-// Issue #46. A planned run is killed after it promoted b; a is then
+// A planned run is killed after it promoted b; a is then
 // promoted by hand. Both are primary. A resume stops before its next
 // Failover step, and says so: no step of the run is left to fence a.
 func TestResumeAfterPromotionStopsWhenOldPrimaryIsPrimaryAgain(t *testing.T) {
@@ -103,11 +103,10 @@ func TestResumeAfterPromotionStopsWhenOldPrimaryIsPrimaryAgain(t *testing.T) {
 	}
 }
 
-// Issue #46, site loss. The run fences a, then dies before a's Pooler
+// Site loss. The run fences a, then dies before a's Pooler
 // step; a is promoted by hand. The read of the other sites runs before the
 // read before a's steps, so the first stop already says that --fence
-// cannot help: v1.2.1 first asked for --fence a, then stopped again
-// before the promotion.
+// cannot help.
 func TestSiteLossResumeAfterFenceGivesOneWayOn(t *testing.T) {
 	f := newFixture(t)
 	// The operator fenced a out of band before the run (docs/runbooks/site-loss.md).
@@ -131,7 +130,7 @@ func TestSiteLossResumeAfterFenceGivesOneWayOn(t *testing.T) {
 	}
 }
 
-// Issue #46, three sites. A planned run from a to b declares b primary at
+// Three sites. A planned run from a to b declares b primary at
 // c, then dies before b's Pooler step; c is promoted by hand. The step that
 // fences c is done, so --fence c cannot help: the resume stops, though the
 // run still scales c's Pooler later.

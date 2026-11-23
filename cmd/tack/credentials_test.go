@@ -25,10 +25,9 @@ func TestCredentialsSignalHelper(t *testing.T) {
 	main()
 }
 
-// Found in the coordinator's review of PR #68: a SIGTERM to tack's pid
-// alone left tack waiting for a credential plugin, which client-go runs
-// with no context. The signal now ends the wait, and tack exits while the
-// plugin still runs ([RFC#0007] Requirement 12).
+// A SIGTERM to tack's pid alone ends the wait for a credential plugin,
+// which client-go runs with no context, and tack exits while the plugin
+// still runs ([RFC#0007] Requirement 12).
 func TestSignalEndsWaitForCredentials(t *testing.T) {
 	dir := t.TempDir()
 	log := filepath.Join(dir, "plugin.log")

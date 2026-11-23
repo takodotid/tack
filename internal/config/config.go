@@ -75,7 +75,7 @@ func Parse(b []byte) (*Workload, error) {
 // plain YAML scalar that the decoder reads as other text: YAML 1.1 reads n,
 // on or yes as a boolean, and 010 or 1e3 as a number, which become "false",
 // "true", "8" or "1000". The site would then answer to neither --to n nor
-// the name the operator wrote (#35 row 50). A quoted name is kept as
+// the name the operator wrote ([RFC#0009] Requirement 11). A quoted name is kept as
 // written.
 func checkSiteNames(b []byte, s *failoverv1.WorkloadSpec) error {
 	var doc yaml.Node
@@ -105,8 +105,8 @@ func checkSiteNames(b []byte, s *failoverv1.WorkloadSpec) error {
 	each(child(spec, "sites"), "name", "spec.sites", func(i int) (string, bool) {
 		return at(s.Sites, i, func(x failoverv1.Site) string { return x.Name })
 	})
-	// A context named on became "true", and the error named a context
-	// true that the kubeconfig does not hold (#66).
+	// A context named on would become "true", and the error would name a context
+	// true that the kubeconfig does not hold.
 	each(child(spec, "sites"), "kubeContext", "spec.sites", func(i int) (string, bool) {
 		return at(s.Sites, i, func(x failoverv1.Site) string { return x.KubeContext })
 	})

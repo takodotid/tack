@@ -168,8 +168,7 @@ func TestRun(t *testing.T) {
 }
 
 // An entry that the build's time, owner, umask or time zone would change
-// fails make dist ([RFC#0009] Requirement 18). Found in a review (#35,
-// row 44): tar kept the build's time and owner.
+// fails make dist ([RFC#0009] Requirement 18): tar keeps the build's time and owner.
 func TestRunRefusesUnreproducibleArchives(t *testing.T) {
 	platforms := []string{"linux/amd64", "windows/amd64"}
 	if err := run(append([]string{writeDist(t, complete, tweak{}), "v9"}, platforms...), epoch); err != nil {

@@ -126,7 +126,7 @@ func (f *fixture) startWatched(w *watchedLeases, renew time.Duration) (string, e
 	return out.String(), err
 }
 
-// #65. A process that runs a run holds the run's Lease, named after the
+// A process that runs a run holds the run's Lease, named after the
 // run, in the ledger's namespace at its site, owned by the ledger: from
 // its first status write to its end, when it marks it released. tack
 // abandon and tack run --take-over read it ([RFC#0003] Requirement 28).
@@ -231,7 +231,7 @@ func TestResumeTakesOverLease(t *testing.T) {
 	}
 }
 
-// Review of #67. A Lease of the run's name is left by a deleted ledger of
+// A Lease of the run's name is left by a deleted ledger of
 // that name, which the garbage collector has not deleted yet. The run
 // takes it as its own: its ledger becomes the Lease's owner, in place of
 // the deleted one, so that the collector does not delete it mid-run and
@@ -295,7 +295,7 @@ func (f fixedLeases) Lease(context.Context, string) (*coordinationv1.Lease, erro
 	return f.l, nil
 }
 
-// #65, RFC0003 Requirement 28: when a tack process may still run a run,
+// RFC0003 Requirement 28: when a tack process may still run a run,
 // tack abandon and tack run --take-over refuse it. A Lease decides when the
 // run has one; a run without, whose ledger an older tack wrote, by its
 // ledger: Running, and written within its Running step's timeout and

@@ -111,10 +111,9 @@ func siteLines(out, site string) string {
 	return strings.Join(l, "\n")
 }
 
-// #66: no three-site scenario had run on real API servers; #27 and #30 were
-// tested on fakes. Three kind clusters, one CloudNativePG Cluster each, run
+// Three kind clusters, one CloudNativePG Cluster each, run
 // in order: a planned switchover with c following; a planned switchover
-// with c down, then a resume once c is back; and #27, a run taken over at a
+// with c down, then a resume once c is back; and a run taken over at a
 // site that was lost, which must never resume. Run them alone:
 // TACK_E2E_SITES="a b c" test/e2e/run.sh -run TestThreeSites.
 func TestThreeSites(t *testing.T) {
@@ -160,7 +159,7 @@ func TestThreeSites(t *testing.T) {
 			t.Fatalf("run with c down: exit %d, want 0 with c's steps deferred", code)
 		}
 		run := createdRun(t, out)
-		// #58 row 4: the record of what site c's checks cost a planned run.
+		// The record of what site c's checks cost a planned run.
 		t.Logf("planned run with site c down took %s; its lines of site c:\n%s", took.Round(time.Second), siteLines(out, "c"))
 		sf := latestRun(t, "a")
 		if state, _ := runStatus(sf); state != "Succeeded" || !strings.Contains(fmt.Sprint(sf["status"]), "Deferred") {

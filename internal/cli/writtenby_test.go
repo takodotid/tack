@@ -10,7 +10,7 @@ import (
 	"github.com/takodotid/tack/internal/version"
 )
 
-// #35 row 26 (RFC0003 Requirement 24). A ledger that a newer tack wrote
+// RFC0003 Requirement 24: a ledger that a newer tack wrote
 // is refused by tack resume and tack abandon of an older release, before
 // they ask the operator and with nothing changed; tack status reads it,
 // and says which tack wrote it.
@@ -18,10 +18,9 @@ func TestOlderTackRefusesNewerLedger(t *testing.T) {
 	refusesNewerLedger(t, "v1.3.0", "which is older", "Written by: tack v1.4.0, newer than this tack v1.3.0: tack resume and tack abandon refuse the run")
 }
 
-// #63. A build that names no release, such as one of go install without
+// A build that names no release, such as one of go install without
 // a version, or go build without the release's ldflags, refuses a ledger
-// that a release wrote, as an older release does. v1.4.0's dev build
-// resumed it, and its writes dropped the status fields it did not know.
+// that a release wrote, as an older release does.
 func TestDevBuildRefusesLedgerOfRelease(t *testing.T) {
 	refusesNewerLedger(t, "dev", "which names no release", "Written by: tack v1.4.0, a release, and this tack dev names none: tack resume and tack abandon refuse the run")
 }
@@ -61,7 +60,7 @@ func refusesNewerLedger(t *testing.T, tack, which, status string) {
 // RFC0003 Requirement 24: a run that takes over a run whose ledger a
 // newer tack wrote does not mark it, says so, and goes on: its own spec
 // records the take-over (Requirement 17). A build that names no release
-// does the same with a release's ledger (#63).
+// does the same with a release's ledger.
 func TestTakeOverOfNewerLedgerIsNotMarked(t *testing.T) {
 	for _, tack := range []string{"v1.3.0", "dev"} {
 		t.Run(tack, func(t *testing.T) { takeOverOfNewerLedgerIsNotMarked(t, tack) })

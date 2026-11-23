@@ -17,7 +17,7 @@ import (
 // confirmQuestion starts the question of o.confirm.
 const confirmQuestion = "Type the workload name"
 
-// #38 item 3 (RFC0003 Requirements 18 and 20). tack resume refuses a run
+// RFC0003 Requirements 18 and 20: tack resume refuses a run
 // that cannot resume before it asks the operator: without a terminal it
 // exits 1 with the reason, not 2 for the missing terminal, and with a
 // terminal it never asks. Nothing is written.
@@ -83,9 +83,9 @@ func TestResumeRefusesBeforeAsking(t *testing.T) {
 	}
 }
 
-// #38 item 3. A run that another run takes over while the operator
-// confirms is still refused after the confirmation (issue #27): the search
-// runs again, and changes nothing.
+// A run that another run takes over while the operator confirms is still
+// refused after the confirmation: the search runs again, and changes
+// nothing.
 func TestResumeSearchesAgainAfterConfirmation(t *testing.T) {
 	f := newFactory(map[string][]client.Object{
 		"a": testenv.Site("a", "a", 2),
@@ -114,7 +114,7 @@ func TestResumeSearchesAgainAfterConfirmation(t *testing.T) {
 	}
 }
 
-// #38 item 3 (RFC0007 Requirement 5). The search after the confirmation
+// RFC0007 Requirement 5: the search after the confirmation
 // reuses the site checks of the search before it: a site that does not
 // answer is checked no more often than when tack resume searched once.
 // The run is planned, so site a, its from, gets 1 check in the search for
@@ -133,7 +133,7 @@ func TestResumeSearchChecksSitesOnce(t *testing.T) {
 	}
 }
 
-// #35 row 37. tack resume refuses an --accept-git-head that is not the
+// tack resume refuses an --accept-git-head that is not the
 // commit the run's GitChanged stop named, before it asks, with the usage
 // exit code, and writes nothing.
 func TestResumeRefusesAnotherHeadBeforeAsking(t *testing.T) {
@@ -159,7 +159,7 @@ func TestResumeRefusesAnotherHeadBeforeAsking(t *testing.T) {
 	}
 }
 
-// #35 row 43. A ledger that an older Tack wrote may hold a URL's password
+// A ledger that an older Tack wrote may hold a URL's password
 // in its messages. tack status, its YAML and the error of tack resume
 // print none ([RFC#0009] Requirement 10).
 func TestOutputRedactsOlderLedgers(t *testing.T) {
@@ -187,7 +187,7 @@ func TestOutputRedactsOlderLedgers(t *testing.T) {
 	}
 }
 
-// PR #49's finding. After a stop that names no commit, --accept-git-head
+// After a stop that names no commit, --accept-git-head
 // HEAD is the branch head: tack resume shows which commit before it asks,
 // and refuses, writing nothing, when Git cannot be read.
 func TestResumeShowsTheCommitOfHEAD(t *testing.T) {

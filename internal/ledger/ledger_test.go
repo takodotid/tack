@@ -148,7 +148,7 @@ func fieldManagers(writes *[]string) client.Client {
 	})
 }
 
-// RFC0003 Requirement 25: the run's Lease names tack too (#65).
+// RFC0003 Requirement 25: the run's Lease names tack too.
 func TestLeaseWritesUseFieldManagerTack(t *testing.T) {
 	ctx := context.Background()
 	var writes []string
@@ -170,8 +170,8 @@ func TestLeaseWritesUseFieldManagerTack(t *testing.T) {
 	}
 }
 
-// PR #43's finding: ledger writes named no field manager, so the API
-// server took the client's user agent, the binary's name. Each write now
+// Ledger writes name a field manager, so the API server does not take the
+// client's user agent, the binary's name. Each write
 // names tack ([RFC#0003] Requirement 25).
 func TestLedgerWritesUseFieldManagerTack(t *testing.T) {
 	ctx := context.Background()

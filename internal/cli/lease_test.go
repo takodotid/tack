@@ -32,12 +32,11 @@ func leaseFor(sf *failoverv1.SiteFailover, by string, renewed time.Time) *coordi
 
 const otherProcess = "tack v9.9.9, process 7 on host-a"
 
-// #65. tack abandon marked a run while a tack process still ran it, and a
-// step in flight could land after the next run took over. The process
-// holds the run's Lease: abandon refuses while it is fresh, before it
-// asks and changing nothing; --force goes on, and the history records it.
-// A Lease that expired, or that its process released, lets abandon mark
-// the run.
+// A step in flight could land after the next run took over, so the
+// process that runs a run holds its Lease: abandon refuses while it is
+// fresh, before it asks and changing nothing; --force goes on, and the
+// history records it. A Lease that expired, or that its process released,
+// lets abandon mark the run.
 func TestAbandonRefusesRunWithFreshLease(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
@@ -87,7 +86,7 @@ func TestAbandonRefusesRunWithFreshLease(t *testing.T) {
 	}
 }
 
-// Review of #67. A tack process takes the run's Lease while the operator
+// A tack process takes the run's Lease while the operator
 // answers abandon's question, such as a tack resume started meanwhile: the
 // check before the question passed, and the check after it refuses, exits
 // 1 and leaves the ledger unchanged. --force goes on, and says once what it
@@ -133,7 +132,7 @@ func TestAbandonChecksLeaseAgainAfterQuestion(t *testing.T) {
 	}
 }
 
-// #65. tack run --take-over refuses a run whose Lease another process
+// tack run --take-over refuses a run whose Lease another process
 // renewed a moment ago: that process may still change the workload. It
 // refuses after the confirmation, before the ledger exists. --force goes
 // on, and the new run's history records it; --force without --take-over
@@ -190,7 +189,7 @@ func v140Ledger(t *testing.T, name string) *failoverv1.SiteFailover {
 	return &sf
 }
 
-// #65. Ledgers that v1.4.0 wrote have no Lease, and stay usable under this
+// Ledgers that v1.4.0 wrote have no Lease, and stay usable under this
 // tack: tack status lists them, tack resume finishes the stopped run and
 // holds its Lease, and tack abandon judges the Running run by its ledger:
 // it refuses while its Running step's timeout and 5 minutes have not

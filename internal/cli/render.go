@@ -373,7 +373,7 @@ func printStatus(w io.Writer, sf *failoverv1.SiteFailover) {
 		fmt.Fprintf(w, "Captured: %s\n", strings.Join(sorted(keys), ", "))
 	}
 	if len(st.Held) > 0 {
-		// The ledger is not written when a hold is removed by hand (#59).
+		// The ledger is not written when a hold is removed by hand.
 		fmt.Fprintln(w, "Held objects, as the ledger records them:")
 		for _, h := range st.Held {
 			state := "held"
@@ -496,8 +496,7 @@ func printRuns(w io.Writer, runs []foundRun) {
 }
 
 // takers maps each run that a listed run takes over to the runs that take
-// it over, so the list reads each run's spec once, not once per run (#35
-// row 47).
+// it over, so the list reads each run's spec once, not once per run.
 func takers(runs []foundRun) map[string][]string {
 	out := map[string][]string{}
 	for _, r := range runs {

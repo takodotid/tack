@@ -26,7 +26,7 @@ func (c *SiteChecks) Client(site string) (client.Client, error) {
 // Read runs read, a read of the site's objects, and repeats it while it
 // gets no answer, or an answer 5xx or 429 (kube.Transient), with the
 // pauses of the site's checks, up to as many reads as the site gets
-// checks: 1 when Once names it, else len(Waits)+1 (#64). The site answered
+// checks: 1 when Once names it, else len(Waits)+1. The site answered
 // its check, so such a failure is a blip. Any other error, such as a 403
 // or a 404, is returned at once. A read whose tries ran out returns its
 // last error, which never counts the site as giving no answer. An

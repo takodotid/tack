@@ -70,8 +70,8 @@ func (c *credClients) Reachable(ctx context.Context, site string) error {
 	return c.Clients.Reachable(ctx, site)
 }
 
-// #58 row 6. The checks of a read start at once, and so did the sites'
-// credential plugins, whose prompts mixed. A read now obtains each site's
+// The checks of a read must not start the sites' credential plugins at
+// once: their prompts would mix. A read obtains each site's
 // credentials one at a time, in the order of the Workload, before any
 // check starts, and says when one takes a while ([RFC#0007] Requirement
 // 12).
@@ -168,13 +168,12 @@ func (c *expiring) demoted(ctx context.Context) bool {
 	return p == "pg-b"
 }
 
-// Found in the coordinator's review of PR #68: credentials that expire
-// during a run, such as while it waits for the demotion, were obtained
-// inside the next step's request, where client-go runs the credential
-// plugin with no context: a plugin that waited, such as for an identity
-// provider that is down, held the run between the demotion and the
-// promotion, with no line, and an interrupt did not end the wait. The run
-// now obtains the site's credentials before each step, with the line,
+// Credentials that expire during a run, such as while it waits for the
+// demotion, must not be obtained inside the next step's request, where
+// client-go runs the credential plugin with no context: a plugin that
+// waits, such as for an identity provider that is down, would hold the run
+// with no line, and an interrupt would not end the wait. The run
+// obtains the site's credentials before each step, with the line,
 // and stops before the step when they cannot be obtained ([RFC#0007]
 // Requirement 12).
 func TestRunObtainsCredentialsBeforeEachStep(t *testing.T) {
@@ -234,8 +233,7 @@ func TestRunObtainsCredentialsBeforeEachStep(t *testing.T) {
 
 // A check outside a read that obtains every site's credentials first, such
 // as the check before a run's first step at a site, obtains them itself,
-// apart from the check, with the line when they take a while (coordinator
-// review of PR #68: no line came from such a check).
+// apart from the check, with the line when they take a while.
 func TestCheckObtainsCredentialsWithALine(t *testing.T) {
 	defer func(d time.Duration) { engine.CredentialsWait = d }(engine.CredentialsWait)
 	engine.CredentialsWait = 20 * time.Millisecond

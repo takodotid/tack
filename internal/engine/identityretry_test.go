@@ -46,9 +46,9 @@ func (f *fixture) failIdentity(site string, errs ...error) *failingIdentity {
 
 var reset = &net.OpError{Op: "read", Net: "tcp", Err: syscall.ECONNRESET}
 
-// #38 item 5. The read of a site's cluster identity, right after the
+// The read of a site's cluster identity, right after the
 // site answered its check, gets no answer once. It is a blip: the read is
-// repeated, and the run goes on. v1.2.1 stopped with StepFailed.
+// repeated, and the run goes on.
 func TestIdentityReadRetried(t *testing.T) {
 	f := newFixture(t)
 	sf := f.plan("b", failoverv1.ModePlanned)
@@ -62,7 +62,7 @@ func TestIdentityReadRetried(t *testing.T) {
 	}
 }
 
-// #38 item 5. In a site loss, the lost site answers its check, then gives
+// In a site loss, the lost site answers its check, then gives
 // no answer to any read of its identity: its steps are deferred, as when
 // it gives no answer to the read before its steps, and the run promotes b.
 func TestIdentityReadWithoutAnswerDefersSteps(t *testing.T) {

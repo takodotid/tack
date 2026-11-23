@@ -13,9 +13,9 @@ import (
 	"github.com/takodotid/tack/internal/version"
 )
 
-// #38 item 8. A lost site behind a load balancer answers 503. An answer
-// is never counted as a lost site (#25): the site-loss plan refuses, and
-// its message names the runbook's way on. v1.2.1 gave the error alone.
+// A lost site behind a load balancer answers 503. An answer
+// is never counted as a lost site: the site-loss plan refuses, and
+// its message names the runbook's way on.
 // A planned plan refuses with the error alone: it needs every site.
 func TestSiteLossPlanRefusesSiteThatAnswers503(t *testing.T) {
 	for _, mode := range []failoverv1.Mode{failoverv1.ModeSiteLoss, failoverv1.ModePlanned} {

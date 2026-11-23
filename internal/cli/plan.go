@@ -65,16 +65,16 @@ func (p *planFlags) request(w *config.Workload, now func() string) (engine.Reque
 	}, nil
 }
 
-const planLong = `Plan prints every step and every change a run would make, in order, and
-changes nothing. It reads each reachable site and the Git repository.
+const planLong = `Plan prints every step and change a run would make, in order, and changes
+nothing. It reads each reachable site and the Git repository.
 
-The plan names the objects Tack holds, the patches and waits of the
-workload's driver, the exact Git change (file, path and value), the checks
-before and after release, and the follow-ups left for the operator. Values
-captured during the run, such as a demotion token, appear as $(name).
+It shows the objects Tack holds, the driver's patches and waits, the exact Git
+change (file, path and value), the checks before and after release, and the
+follow-ups left for the operator. Values captured during the run, such as a
+demotion token, appear as $(name).
 
-Run "tack plan" before every "tack run", and show its output to the human
-who decides.`
+Run "tack plan" before every "tack run" and show its output to the human who
+decides.`
 
 func newPlan(o *options) *cobra.Command {
 	var p planFlags
@@ -152,20 +152,20 @@ SiteFailover ledger at the target site, and takes the steps in order.
 Modes:
   planned    the old primary demotes; its demotion token promotes the new one
   site-loss  the new site promotes without a token; the old primary then
-             needs a rebuild. Use it only when the old site is lost:
-             Tack cannot tell a lost site from one cut off from this
-             host. Confirm the loss and fence the old primary first.
+             needs a rebuild. Use it only when the old site is lost: Tack
+             cannot tell a lost site from one cut off from this host.
+             Confirm the loss and fence the old primary first.
 
 Confirming a site loss and fencing the old primary:
   ` + version.DocLink("docs/runbooks/site-loss.md") + `
 
 If Git cannot be reached (break-glass), the run still holds and switches the
 live objects, then waits with exit code 4; "tack resume" finishes it once Git
-is back. If anything unexpected happens, the run stops with exit code 3 and
-the ledger says why.
+is back. On anything unexpected, the run stops with exit code 3 and the ledger
+says why.
 
-An agent never starts "tack run" without an explicit instruction from a
-human for that run, and runs "tack plan" first.`
+An agent never starts "tack run" without an explicit instruction from a human
+for that run, and runs "tack plan" first.`
 }
 
 func newRun(o *options) *cobra.Command {

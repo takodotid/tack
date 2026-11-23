@@ -10,10 +10,9 @@ import (
 	failoverv1 "github.com/takodotid/tack/api/v1"
 )
 
-// #38 item 4. The fake client kept a SiteFailover's status on create, but
-// the API server drops it: its status subresource ignores status on
-// create. Tests that needed the real behaviour modelled it themselves. The
-// fake drops it, in the store and in the object the create returns, and a
+// The API server drops a SiteFailover's status on create: its status
+// subresource ignores status on create. The fake drops it too, in the store
+// and in the object the create returns, and a
 // status write after the create keeps it.
 func TestCreateDropsStatus(t *testing.T) {
 	ctx := context.Background()

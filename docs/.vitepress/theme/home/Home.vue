@@ -87,8 +87,8 @@ onBeforeUnmount(() => {
                         <a class="sh-button" :href="withBase('/guide/concepts')">How a run works</a>
                     </p>
                     <p class="sh-supports">
-                        Today Tack supports CloudNativePG, deployed by Flux kustomize-controller, and nothing else.
-                        <a :href="withBase('/limitations')">Limitations</a> has the rest.
+                        Tack supports CloudNativePG deployed by Flux kustomize-controller.
+                        See <a :href="withBase('/limitations')">Limitations</a>.
                     </p>
                 </div>
 
@@ -113,8 +113,7 @@ onBeforeUnmount(() => {
                 <div class="sh-chapter-head">
                     <h2>A run moves the primary in four phases.</h2>
                     <p>
-                        Each step is written to the ledger before it starts and after it ends. A run that stops resumes from its ledger,
-                        never from memory.
+                        Each step is written to the ledger before it starts and after it ends. A stopped run resumes from its ledger.
                     </p>
                     <p><a :href="withBase('/guide/concepts')">Concepts</a> has every step.</p>
                 </div>
@@ -144,7 +143,7 @@ onBeforeUnmount(() => {
                 <div class="sh-chapter-head">
                     <h2>Anything unexpected stops the run, with a reason.</h2>
                     <p>
-                        A stopped run exits with code 3, and one that waits for Git with code 4. Its objects stay held until the operator decides, and
+                        A stopped run exits with code 3, and one that waits for Git with code 4. Its objects stay held until the operator decides.
                         <code>tack resume</code> goes on from the ledger.
                     </p>
                 </div>

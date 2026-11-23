@@ -53,7 +53,7 @@ func TestSiteLossRecordsWritesDownAsEstimate(t *testing.T) {
 	}
 }
 
-// #75 row 1: a step that runs again keeps its earlier attempts.
+// A step that runs again keeps its earlier attempts.
 func TestStepKeepsEarlierAttempts(t *testing.T) {
 	f := newFixture(t)
 	f.flux.Fail["Hold"] = errors.New("hold refused")

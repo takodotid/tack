@@ -15,7 +15,7 @@ import (
 // checkPlan composes the run's plan again from its ledger, and refuses a
 // run whose steps differ from it ([RFC#0003] Requirement 21). Anyone who
 // can write a ledger could otherwise make tack resume run any patch with
-// the operator's credentials (#35 row 11).
+// the operator's credentials.
 //
 // The plan is composed from the Workload snapshot and the request in the
 // spec, the driver's steps, objects and Git changes, which depend on them
@@ -66,7 +66,7 @@ func planDiff(got, want []failoverv1.Step) string {
 // planWayOn returns the way on of a run whose steps checkPlan refuses.
 func planWayOn() string {
 	return "The ledger was written outside tack, or by a tack that plans differently: do not resume it. Check who may write sitefailovers (" +
-		version.DocLink("docs/operations.md#who-may-write-ledgers") + "), then abandon the run (tack abandon) and plan again, or start a new run with --take-over"
+		version.DocLink("docs/permissions.md#who-may-write-ledgers") + "), then abandon the run (tack abandon) and plan again, or start a new run with --take-over"
 }
 
 // replan composes the run's plan from its ledger, as MakePlan composed it.

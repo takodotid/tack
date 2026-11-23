@@ -99,7 +99,7 @@ func (l *flakyLedger) UpdateStatus(ctx context.Context, sf *failoverv1.SiteFailo
 // noAnswer is the error of a request that got no answer.
 var noAnswer = &url.Error{Op: "Put", URL: "https://site-b:6443/apis/failover.tako.id/v1/namespaces/tack-system/sitefailovers/run-1/status", Err: syscall.ECONNRESET}
 
-// #35 row 32 (RFC0003 Requirement 5). A ledger write that gets no answer,
+// RFC0003 Requirement 5. A ledger write that gets no answer,
 // or a 503, is repeated with the same resourceVersion, and the run goes
 // on. One whose answer was lost after it landed conflicts on the repeat:
 // the ledger holds the status sent, so the run goes on too.
@@ -131,7 +131,7 @@ func TestLedgerWriteRetried(t *testing.T) {
 	}
 }
 
-// #35 row 32. A write the API server refuses for a reason other than a
+// A write the API server refuses for a reason other than a
 // conflict ends the run at once, without a repeat, and its message names
 // the reason, not another tack process.
 func TestLedgerWriteRefused(t *testing.T) {

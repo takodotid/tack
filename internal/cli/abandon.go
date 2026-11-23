@@ -20,28 +20,26 @@ import (
 
 func abandonLong() string {
 	return `Abandon marks a run that must never go on, such as one whose old primary
-was promoted again by hand: it records status.abandoned in the run's
-ledger. tack resume then refuses the run, and a new run of the workload no
-longer waits for it.
+was promoted again by hand. It records status.abandoned in the run's ledger.
+tack resume then refuses the run, and a new run of the workload no longer
+waits for it.
 
-Abandon changes nothing else. A hold the run left on an object stays:
-remove the holds once Git equals live, or start the next run with
---take-over RUN, which takes them over. Abandon lists the holds as the run's
-ledger records them, and does not read the objects: a hold removed by hand
-is still listed. The runbook:
+Abandon changes nothing else. A hold the run left on an object stays: remove
+the holds once Git equals live, or start the next run with --take-over RUN.
+Abandon lists the holds from the run's ledger and does not read the objects,
+so a hold removed by hand is still listed. The runbook:
   ` + version.DocLink("docs/runbooks/abandon-run.md") + `
 
-kubectl get sfo shows when the run was abandoned in its Abandoned column,
-from the CRD of tack v1.4.0 on. Its State column keeps the run's last
-state, such as Stopped. tack status lists the run as Abandoned.
+kubectl get sfo shows when the run was abandoned in its Abandoned column
+(CRD of tack v1.4.0 or later). Its State column keeps the run's last state,
+such as Stopped. tack status lists the run as Abandoned.
 
-Abandon does not stop a tack process that runs the run: check first that
-none does. A step that runs, such as a promotion, still changes the
-workload. Abandon refuses while the run's lease says that a tack process
-runs it, or, for a run without a lease, while the run is Running and its
-ledger was written within its step's timeout and 5 minutes; --force goes on
-all the same. Only tack v1.3.0 and later honour the mark: an older tack
-resumes the run, and drops the mark.
+Abandon does not stop a tack process that runs the run: check first that none
+does. A running step, such as a promotion, still changes the workload.
+Abandon refuses while the run's lease says a tack process runs it, or, for a
+run without a lease, while the run is Running and its ledger was written
+within its step's timeout and 5 minutes. --force goes on anyway. Only tack
+v1.3.0 and later honour the mark; an older tack resumes the run and drops it.
 
 An agent never starts "tack abandon" without an explicit instruction from a
 human for that run.`
@@ -100,7 +98,7 @@ func newAbandon(o *options) *cobra.Command {
 				return err
 			}
 			// The list is the ledger's: abandon reads no object of the
-			// workload, and a hold removed by hand stays in it (#59).
+			// workload, and a hold removed by hand stays in it.
 			held := stillHeld(sf)
 			if len(held) > 0 {
 				fmt.Fprintln(out, "The ledger records these objects as held by the run, and not released:")
@@ -109,8 +107,8 @@ func newAbandon(o *options) *cobra.Command {
 				}
 				fmt.Fprintf(out, "Abandon does not read the objects: a hold removed by hand is still listed. A hold still on an object stays after the run is abandoned: remove it once Git equals live (%s), or start the next run with --take-over %s.\n", version.DocLink("docs/runbooks/abandon-run.md"), sf.Name)
 			}
-			// A process that runs the run holds its lease (#65): abandon
-			// checks it before it asks, and again after.
+			// A process that runs the run holds its lease: abandon checks
+			// it before it asks, and again after.
 			store, _ := env.Ledger.(engine.Leaser)
 			var said bytes.Buffer
 			if err := o.checkLive(ctx, io.MultiWriter(progress, &said), store, sf, force); err != nil {

@@ -280,7 +280,7 @@ func TestPositionsThatDoNotCompare(t *testing.T) {
 		t.Errorf("refused when b's position cannot be read: %v", err)
 	}
 	notes := strings.Join(Driver{}.Notes(w, topo, req), "\n")
-	for _, want := range []string{"warning: site b: the WAL position could not be read", "pods/proxy", "docs/operations.md#permissions"} {
+	for _, want := range []string{"warning: site b: the WAL position could not be read", "pods/proxy", "docs/permissions.md"} {
 		if !strings.Contains(notes, want) {
 			t.Errorf("notes %q do not say %q", notes, want)
 		}
@@ -335,7 +335,7 @@ func TestSiteLossSaysTheLastReplayedCommit(t *testing.T) {
 	}
 }
 
-// #94: the replay time, its age by Tack's clock, and what is printed
+// The replay time, its age by Tack's clock, and what is printed
 // without it.
 func TestReplayTime(t *testing.T) {
 	defer func(f func() time.Time) { now = f }(now)
@@ -402,7 +402,7 @@ func TestReplayTime(t *testing.T) {
 	}
 }
 
-// #94: the e2e's copy of the query is deploy/cnpg/replay-time.yaml, and
+// The e2e's copy of the query is deploy/cnpg/replay-time.yaml, and
 // the metric it makes is the one Tack reads: cnpg_<query>_<column>.
 func TestReplayTimeQuery(t *testing.T) {
 	read := func(path string) *corev1.ConfigMap {

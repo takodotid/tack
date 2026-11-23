@@ -781,7 +781,6 @@ func TestGitErrorsAreRedacted(t *testing.T) {
 
 // BranchHead fetches the branch; Contains tells a descendant of a commit
 // from an older or unrelated commit, fetching what the clone lacks.
-// Issue #29.
 func TestBranchHeadAndContains(t *testing.T) {
 	isolate(t)
 	ctx := context.Background()
@@ -826,8 +825,7 @@ func TestBranchHeadAndContains(t *testing.T) {
 
 // RFC0006 Requirement 2: Tack runs no client-side hook. A hooks path in the
 // operator's global configuration names hooks that leave a mark, and a
-// prepare-commit-msg hook that drops the trailer, as one did in a probe of
-// the production-readiness review (#35, row 13): a resumed run then could
+// prepare-commit-msg hook that drops the trailer: a resumed run then could
 // not adopt its own commit.
 func TestCommitRunsNoHooks(t *testing.T) {
 	if runtime.GOOS == "windows" {
@@ -877,7 +875,7 @@ func TestCommitRunsNoHooks(t *testing.T) {
 	}
 }
 
-// #35 row 11 (RFC0006 Requirement 15). The ledger records where each Git
+// RFC0006 Requirement 15. The ledger records where each Git
 // change is written, and anyone who may write a ledger could point it
 // elsewhere: a value or a removal into any file. The commit refuses a
 // change that is not where the Workload's mapping, or the manifest that
@@ -924,12 +922,12 @@ func TestCommitRefusesAnotherTarget(t *testing.T) {
 	}
 }
 
-// PR #42's finding (RFC0006 Requirement 2). The operator's global
+// RFC0006 Requirement 2. The operator's global
 // configuration is read on purpose, for credential helpers and ssh, but a
 // core.fsmonitor there ran a program in every clone of Tack's, and a
 // protocol.ext.allow there let a Workload's Git URL of the form ext::CMD
 // run CMD. A ledger's Workload snapshot, and so its URL, is as easy to
-// write as the ledger (#35 row 11). Neither runs; neither does automatic
+// write as the ledger. Neither runs; neither does automatic
 // gc or maintenance.
 func TestGitRunsNoProgramOfTheGlobalConfig(t *testing.T) {
 	if runtime.GOOS == "windows" {

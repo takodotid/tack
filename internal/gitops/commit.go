@@ -116,7 +116,7 @@ func (r *Repo) Commit(ctx context.Context, w *failoverv1.WorkloadSpec, req engin
 // the Workload's mapping puts its field, or, without a mapping, not the
 // field's path in a document of commit that defines the change's object
 // ([RFC#0006] Requirement 15). The ledger records them, and anyone who may
-// write a ledger could point a removal or a value at any file (#35 row 11).
+// write a ledger could point a removal or a value at any file.
 func (r *Repo) checkTarget(ctx context.Context, c *clone, commit string, g *failoverv1.GitSpec, ch *failoverv1.GitChange) error {
 	refuse := func(format string, a ...any) error {
 		return fmt.Errorf("%s: the run would write %s%s at %s, but %s. The ledger's Git step does not match its Workload: do not resume the run, see %s",

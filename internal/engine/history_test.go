@@ -42,9 +42,9 @@ func (f *fixture) hasEvent(site, prefix string) bool {
 	})
 }
 
-// #35 row 29. A resume cleared the run's reason and message, so an earlier
-// stop disappeared, and no ledger recorded who ran a process, with which
-// version and flags. Each state change now appends an entry to
+// A resume must keep the run's reason and message, so that an earlier stop
+// stays visible, and the ledger records who ran a process, with which
+// version and flags. Each state change appends an entry to
 // status.history, and each entry and step sends an Event ([RFC#0003]
 // Requirements 22 and 23).
 func TestHistoryRecordsEachStateChange(t *testing.T) {
@@ -254,10 +254,9 @@ func TestAbandonedAfterCreateRecordsHistory(t *testing.T) {
 	}
 }
 
-// #66. A step's message from outside Tack, such as Flux's, has no bound,
-// and the ledger kept it whole, as it kept the run's message that quotes
-// it. Each is cut to MaxMessage bytes in the ledger; the progress line
-// keeps the whole message.
+// A step's message from outside Tack, such as Flux's, has no bound, and the
+// run's message quotes it. Each is cut to MaxMessage bytes in the ledger;
+// the progress line keeps the whole message.
 func TestLongMessagesAreCut(t *testing.T) {
 	f := newFixture(t)
 	long := "Flux says: " + strings.Repeat("ö", 10<<10)

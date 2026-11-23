@@ -53,7 +53,7 @@ func status(code int) http.HandlerFunc {
 	}
 }
 
-// Only a check that gets no answer counts toward a lost site. Issue #25.
+// Only a check that gets no answer counts toward a lost site.
 func TestReachableKinds(t *testing.T) {
 	// Nothing listens on port 1, and it is below the kernel's ephemeral port
 	// range, so no server of a test is given it. The port of a listener that
@@ -128,7 +128,7 @@ func TestReachableKinds(t *testing.T) {
 	}
 }
 
-// #35 row 32. Transient tells a ledger write to repeat: no answer, 5xx or
+// Transient tells a ledger write to repeat: no answer, 5xx or
 // 429. A refusal, a conflict or a certificate Tack does not trust is final.
 func TestTransient(t *testing.T) {
 	gr := schema.GroupResource{Group: "failover.tako.id", Resource: "sitefailovers"}
@@ -233,9 +233,9 @@ func pluginEvents(t *testing.T, log string, ends int) []string {
 	}
 }
 
-// #58 row 6, observed on kind: a credential plugin that waited for the
-// operator ran inside the check's request, whose 5 s covered the wait, and
-// the check counted as no answer: a live site could read as lost (#25).
+// A credential plugin that waits for the
+// operator runs inside the check's request, whose 5 s would cover the wait, and
+// the check would count as no answer: a live site could read as lost.
 // Its credentials are now obtained before the check, with no time limit
 // ([RFC#0007] Requirement 12).
 func TestCredentialsTakeNothingOfTheCheck(t *testing.T) {
@@ -251,7 +251,7 @@ func TestCredentialsTakeNothingOfTheCheck(t *testing.T) {
 }
 
 // Two credential plugins never run at once: one may prompt on the terminal
-// while the other does, and their prompts mixed on kind (#58 row 6).
+// while the other does, and their prompts would mix.
 func TestCredentialPluginsRunOneAtATime(t *testing.T) {
 	server := httptest.NewTLSServer(status(http.StatusOK))
 	t.Cleanup(server.Close)
@@ -303,10 +303,10 @@ func TestCredentialsThatFailAreKept(t *testing.T) {
 	}
 }
 
-// Found in the coordinator's review of PR #68: client-go runs the
-// credential plugin with no context, and Credentials waited for it
-// whatever its ctx did: a ctx of 1 s returned after the plugin's 8 s, and
-// a SIGTERM did not end tack. The end of ctx now ends the wait. The plugin
+// client-go runs the
+// credential plugin with no context, and Credentials must not wait for it
+// whatever its ctx does: a ctx of 1 s returns before the plugin's 8 s, and
+// a SIGTERM ends tack. The end of ctx ends the wait. The plugin
 // runs on until it ends, and the interrupt is not kept as credentials that
 // cannot be obtained ([RFC#0007] Requirement 12).
 func TestCredentialsWaitEndsWithTheContext(t *testing.T) {
@@ -332,11 +332,10 @@ func TestCredentialsWaitEndsWithTheContext(t *testing.T) {
 	}
 }
 
-// Found in the coordinator's review of PR #68: a site waited for the turn
-// behind another site's plugin whatever its ctx did, also a site with no
-// plugin (7.7 s behind a plugin of 8 s). A site whose context has no
-// credential plugin does not wait for the turn; a site with one waits,
-// until its plugin may run or its ctx ends.
+// A site must not wait for the turn behind another site's plugin whatever
+// its ctx does, also a site with no plugin (7.7 s behind a plugin of 8 s).
+// A site whose context has no credential plugin does not wait for the turn;
+// a site with one waits, until its plugin may run or its ctx ends.
 func TestOnlyPluginsWaitForTheTurn(t *testing.T) {
 	server := httptest.NewTLSServer(status(http.StatusOK))
 	t.Cleanup(server.Close)

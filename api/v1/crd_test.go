@@ -66,9 +66,8 @@ func TestCRDVersions(t *testing.T) {
 	}
 }
 
-// #35 row 49. kubectl get sfo showed a run's state, but not why it
-// stopped or waits. Every version lists the Reason after the State
-// ([RFC#0003] Requirement 15).
+// kubectl get sfo shows why a run stopped or waits. Every version lists the
+// Reason after the State ([RFC#0003] Requirement 15).
 func TestCRDPrintsReason(t *testing.T) {
 	for _, v := range readCRD(t).Spec.Versions {
 		var names []string
@@ -82,10 +81,9 @@ func TestCRDPrintsReason(t *testing.T) {
 	}
 }
 
-// #59 item 3. kubectl get sfo showed an abandoned run as Stopped, its last
-// state, with nothing that said it was abandoned. Every version lists the
-// columns of [RFC#0003] Requirement 15 in order, the Abandoned column next to
-// the State and Reason it qualifies, as PR #60 proposed.
+// kubectl get sfo shows an abandoned run as abandoned, not only as Stopped.
+// Every version lists the columns of [RFC#0003] Requirement 15 in order, the
+// Abandoned column next to the State and Reason it qualifies.
 func TestCRDPrintsAbandoned(t *testing.T) {
 	want := "Workload string .spec.workload.name, Mode string .spec.mode, From string .spec.from, " +
 		"To string .spec.to, State string .status.state, Reason string .status.reason, " +
@@ -102,11 +100,9 @@ func TestCRDPrintsAbandoned(t *testing.T) {
 	}
 }
 
-// #66. kubectl get sfo showed a run that another run took over in its last
-// state, such as Stopped, with nothing that said it was taken over; tack
-// status lists it as TakenOver. Every version prints status.supersededBy in
-// a last column, TakenOverBy, so Phase and Age keep the places that v1.4.0
-// gave them.
+// kubectl get sfo shows that another run took a run over; tack status lists
+// it as TakenOver. Every version prints status.supersededBy in a last column,
+// TakenOverBy, so Phase and Age keep their places.
 func TestCRDPrintsTakenOverLast(t *testing.T) {
 	for _, v := range readCRD(t).Spec.Versions {
 		cols := v.AdditionalPrinterColumns
@@ -141,7 +137,7 @@ func TestCRDKnowsEveryStepType(t *testing.T) {
 	}
 }
 
-// #94, RFC0004 Requirement 15: every version's schema keeps
+// RFC0004 Requirement 15: every version's schema keeps
 // status.fork.lastCommit. A CRD without it drops the field from every
 // status write, without an error.
 func TestCRDKeepsTheForkLastCommit(t *testing.T) {

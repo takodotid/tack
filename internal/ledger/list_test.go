@@ -92,8 +92,8 @@ func ledgers(base *failoverv1.SiteFailover, workload string, n int) []client.Obj
 	return out
 }
 
-// #35 row 47. A search listed every ledger of the workload in one
-// request. It now reads them in pages of ListPage, each with the same
+// A search reads the ledgers of the workload
+// in pages of ListPage, each with the same
 // namespace and selector, and returns them all, newest first
 // ([RFC#0003] Requirement 26).
 func TestListInPages(t *testing.T) {
@@ -179,7 +179,7 @@ func TestListPageError(t *testing.T) {
 }
 
 // BenchmarkList measures a search's list of n ledgers of a workload at one
-// site (#35 row 47): the requests, the largest answer and all answers, in
+// site: the requests, the largest answer and all answers, in
 // bytes of JSON. Each ledger is the planned run of the v1.2.1 testdata, as
 // that run left it. Run it with -benchtime=1x.
 func BenchmarkList(b *testing.B) {

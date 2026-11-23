@@ -77,7 +77,7 @@ func verifyThenRelease(t *testing.T) *fixture {
 	return f
 }
 
-// #35 row 16 (RFC0005 Requirement 8). A resume checks Git against live
+// RFC0005 Requirement 8: a resume checks Git against live
 // again before it releases a site, in its own process: the check of an
 // earlier process may be hours old. The ledger records the check again.
 func TestReleaseChecksGitInItsOwnProcess(t *testing.T) {

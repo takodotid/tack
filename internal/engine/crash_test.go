@@ -49,7 +49,7 @@ func (l *interruptedAtCreate) UpdateStatus(ctx context.Context, sf *failoverv1.S
 	return l.Ledger.UpdateStatus(ctx, sf)
 }
 
-// Issue #28. A site-loss run dies between the ledger's create and its first
+// A site-loss run dies between the ledger's create and its first
 // status write. The API server drops status on create, so the ledger has no
 // state, no start and no Rebuild follow-up. A resume must not promote b
 // and end without the follow-up.
@@ -72,7 +72,7 @@ func TestResumeRefusesLedgerThatNeverStarted(t *testing.T) {
 	}
 }
 
-// Issue #28. A site-loss run is interrupted right after the ledger's
+// A site-loss run is interrupted right after the ledger's
 // create. The first status write must still land: the ledger then has its
 // start and its Rebuild follow-up.
 func TestInterruptAfterCreateKeepsFollowUps(t *testing.T) {

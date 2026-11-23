@@ -217,30 +217,30 @@ func (s *search) pick(name string) (foundRun, error) {
 
 const resumeLong = `Resume continues a run from its ledger, never from memory: it takes the
 remaining steps of the plan the run recorded when it started, with the
-workload configuration it recorded then.
+workload configuration recorded then.
 
 A step that was started but not recorded as done runs again; every step is
 safe to repeat. Steps deferred because their site was unreachable run once
 the site is back.
 
-When the run stopped, the ledger's reason says what the operator must
-decide. Each decision has its own flag:
+When the run stopped, the ledger's reason says what the operator must decide.
+Each decision has its own flag:
 
   GitChanged           Git moved during the run. Review the new commits, then
                        --accept-git-head SHA makes that commit the new base.
                        When the stop names one commit, SHA must be that
                        commit; HEAD stands for it.
-  FencedSiteIsPrimary  a site other than the new primary answers as
-                       primary. --fence SITE lets this resume demote it,
-                       when the message offers it. A resume without it
-                       stops again while the site is primary.
-  HeldByAnotherRun     another run holds an object. Finish that run, or
-                       start a new run with --take-over.
+  FencedSiteIsPrimary  a site other than the new primary answers as primary.
+                       --fence SITE lets this resume demote it, when the
+                       message offers it. Without it, the resume stops again
+                       while the site is primary.
+  HeldByAnotherRun     another run holds an object. Finish that run, or start
+                       a new run with --take-over.
 
-A run that another run took over, or that another run of the workload
-started after, cannot resume: its plan may no longer match the sites. Nor
-can a run whose steps are not the plan its driver composes from the
-ledger's Workload: the ledger was written outside tack.
+Resume refuses a run that another run took over or that a later run of the
+workload followed: its plan may no longer match the sites. It also refuses a
+run whose steps differ from the plan its driver composes from the ledger's
+Workload: the ledger was written outside tack.
 
 An agent never starts "tack resume" without an explicit instruction from a
 human for that run, and never passes these flags unless that instruction
@@ -401,8 +401,7 @@ func newStatus(o *options) *cobra.Command {
 }
 
 // redacted returns a copy of a ledger whose Git URL and messages hold no
-// URL's user or password, and name captured values. A ledger written
-// before Tack refused or cleaned them may hold one (#35 row 43).
+// URL's user or password, and name captured values.
 func redacted(sf *failoverv1.SiteFailover) *failoverv1.SiteFailover {
 	out := sf.DeepCopy()
 	g := &out.Spec.Workload.Spec.Git

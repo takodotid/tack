@@ -103,7 +103,7 @@ func TestSharedArchiveThroughThePlugin(t *testing.T) {
 	}
 }
 
-// #74 row 1: a plan notes a target whose archiving fails now.
+// A plan notes a target whose archiving fails now.
 func TestTargetArchivingFails(t *testing.T) {
 	objects := map[string][]client.Object{}
 	for _, s := range []string{"a", "b", "c"} {

@@ -114,7 +114,7 @@ func setup() error {
 		return fmt.Errorf("build tack: %w", err)
 	}
 	// go build records the module version that Git gives, which the binary
-	// takes as its own (#63): the checks of what it records compare with it.
+	// takes as its own: the checks of what it records compare with it.
 	out, err := exec.Command(tackBin, "--version").Output()
 	if err != nil {
 		return fmt.Errorf("tack --version: %w", err)
@@ -451,7 +451,7 @@ func TestPlannedSwitchover(t *testing.T) {
 			t.Errorf("plan lacks %q", want)
 		}
 	}
-	// #75 row 2: a client writes all through the switchover, to whichever site takes writes. Every write that a
+	// A client writes all through the switchover, to whichever site takes writes. Every write that a
 	// site acknowledged must be at the new primary after it.
 	psql(t, "a", "create table if not exists writes (n int primary key, at timestamptz default clock_timestamp())")
 	stop, acked := writeAll(t)
@@ -531,7 +531,6 @@ func assertRecorded(t *testing.T, run, out string) {
 // A site whose check fails with a refused credential, or whose context is
 // missing from the kubeconfig, is not a lost site. A site-loss plan away
 // from the primary at b is refused, not accepted with b read as lost.
-// Issue #25.
 func TestSiteLossPlanRefusesSiteThatCannotBeChecked(t *testing.T) {
 	src, err := os.ReadFile(kubeconfig)
 	if err != nil {
@@ -603,7 +602,7 @@ func TestPlanDuringBlip(t *testing.T) {
 
 // A run dies as it starts promote-a; the operator promotes b again by hand
 // (docs/runbooks/no-primary-after-demotion.md, option 2), and leaves the
-// holds. A resume stops before promote-a while b is primary (issue #45).
+// holds. A resume stops before promote-a while b is primary.
 // The next run takes the stale run over, dies right after promoting site
 // a, and resumes from its ledger.
 func TestInterruptedRunResumes(t *testing.T) {
@@ -678,7 +677,7 @@ func TestGitChangedDuringRun(t *testing.T) {
 	if code != exitStopped || !strings.Contains(out, "GitChanged") {
 		t.Fatalf("resume exit %d, want %d with GitChanged", code, exitStopped)
 	}
-	// Issue #29: the process dies once the run's commit is pushed, and a
+	// The process dies once the run's commit is pushed, and a
 	// commit lands on top of it before Flux applies it.
 	_, code = tack(t, []string{"TACK_FAULT=reconcile-git-a:before"}, "resume", run, "-f", workload, "--yes", "--accept-git-head", other)
 	if code != exitFault {
@@ -713,7 +712,7 @@ func TestGitChangedDuringRun(t *testing.T) {
 	if got := stepState(latestRun(t, "b"), "verify-noop-a"); got != "Succeeded" {
 		t.Errorf("verify-noop-a is %q", got)
 	}
-	// #35 row 29: each stop stays in the history, with the head each
+	// Each stop stays in the history, with the head each
 	// resume accepted. The processes that the faults ended recorded no end.
 	history := strings.TrimSpace(kubectl(t, "b", "-n", ledgerNS, "get", "sitefailover", run, "-o", `jsonpath={range .status.history[*]}{.state}/{.reason}/{.flags[*]};{end}`))
 	want := "Running//--yes;Running//--yes;Stopped/GitChanged/--yes;Running//--accept-git-head=" + other + " --yes;Running//--yes;Stopped/GitChanged/--yes;Running//--accept-git-head=" + later + " --yes;Succeeded//--accept-git-head=" + later + " --yes;"
@@ -723,7 +722,7 @@ func TestGitChangedDuringRun(t *testing.T) {
 }
 
 func TestSiteLossBreakGlassAndReturn(t *testing.T) {
-	// #94: site a's Cluster has Tack's replay-time query. A commit at b reaches a; the plan shows a's last
+	// Site a's Cluster has Tack's replay-time query. A commit at b reaches a; the plan shows a's last
 	// replayed commit at or after it. CloudNativePG reruns the query at most every 30 seconds.
 	mark := psql(t, "b", "insert into marks values ('before-site-loss-' || clock_timestamp()); select floor(extract(epoch from clock_timestamp()))::bigint")
 	// psql prints each statement's result: the time is on the last line.
@@ -758,7 +757,7 @@ func TestSiteLossBreakGlassAndReturn(t *testing.T) {
 	if !strings.Contains(out, "If site b still runs, it stays primary") || !strings.Contains(out, version.DocLink("docs/runbooks/site-loss.md")) {
 		t.Error("the site-loss plan lacks the note on a site cut off from this host (issue #26)")
 	}
-	// #94: the RPO note says when site a's last replayed commit was. Nothing else writes, so it is the commit at b, or later.
+	// The RPO note says when site a's last replayed commit was. Nothing else writes, so it is the commit at b, or later.
 	if m := regexp.MustCompile(`Its last replayed commit is from (\S+), by the old primary's clock`).FindStringSubmatch(out); m == nil {
 		t.Errorf("the site-loss plan does not say when site a's last replayed commit was:\n%s", out)
 	} else if at, err := time.Parse(time.RFC3339, m[1]); err != nil || at.Unix() < committed {
@@ -772,7 +771,7 @@ func TestSiteLossBreakGlassAndReturn(t *testing.T) {
 	})
 	psql(t, "a", "insert into marks values ('during-site-loss')")
 	run := runName(latestRun(t, "a"))
-	// #94: the ledger keeps the last replayed commit's time, read at record-position-a, through the CRD.
+	// The ledger keeps the last replayed commit's time, read at record-position-a, through the CRD.
 	if lc := strings.TrimSpace(kubectl(t, "a", "-n", ledgerNS, "get", "sitefailover", run, "-o", "jsonpath={.status.fork.lastCommit}")); lc == "" {
 		t.Error("the ledger has no status.fork.lastCommit")
 	} else if at, err := time.Parse(time.RFC3339, lc); err != nil || at.Unix() < committed {
@@ -808,7 +807,7 @@ func TestSiteLossBreakGlassAndReturn(t *testing.T) {
 	}
 	assertUnchanged()
 
-	// Issue #23: a second resume without --fence stops again, and still
+	// A second resume without --fence stops again, and still
 	// changes nothing at site b.
 	out, code = tack(t, nil, "resume", run, "-f", workload, "--yes")
 	if code != exitStopped || !strings.Contains(out, "FencedSiteIsPrimary") {
@@ -850,7 +849,7 @@ func TestSiteLossBreakGlassAndReturn(t *testing.T) {
 	}
 	// [RFC#0004] Requirement 15 on CloudNativePG: the fork point, read from a's instance around its promotion,
 	// and b's archive, recorded once b answered.
-	// #94: with site a's replay-time query, the line holds the last replayed commit's time.
+	// With site a's replay-time query, the line holds the last replayed commit's time.
 	fork := regexp.MustCompile(`(?m)^Fork: site a's new history leaves the old one at [0-9A-F]+/[0-9A-F]+ on timeline ([0-9]+) or just after; its last replayed commit is from [0-9TZ:.-]+, by the old primary's clock; new timeline ([0-9]+); promoted by `).FindStringSubmatch(out)
 	if fork == nil || fork[1] == fork[2] {
 		t.Errorf("status lacks the fork point, or its timelines do not differ:\n%s", out)
@@ -1033,10 +1032,10 @@ func routeTo(site, member string) string {
 }
 
 // TestTakeOver: a run dies right after it created its ledger; it cannot
-// resume (issue #28). A second run takes it over and dies at its first
+// resume. A second run takes it over and dies at its first
 // step. Resumed with a kubeconfig whose context for site a reaches cluster
-// b, it stops before it acts there (issue #32). A third run takes it over
-// and records it; the second run cannot resume (issue #27).
+// b, it stops before it acts there. A third run takes it over
+// and records it; the second run cannot resume.
 func TestTakeOver(t *testing.T) {
 	_, code := tack(t, []string{"TACK_FAULT=create-ledger:after"}, "run", "-f", workload, "--to", "b", "--yes")
 	if code != exitFault {
@@ -1052,7 +1051,7 @@ func TestTakeOver(t *testing.T) {
 	}
 
 	// When this run is planned in the same second as the run it takes
-	// over, it gets that run's name with -2 appended (issue #37). Two
+	// over, it gets that run's name with -2 appended. Two
 	// ledgers can then share a creation second, so the names come from
 	// tack's output.
 	out, code = tack(t, []string{"TACK_FAULT=hold-a-cluster-pg-a:before"}, "run", "-f", workload, "--to", "b", "--take-over", runName(never), "--yes")
@@ -1095,7 +1094,7 @@ func TestTakeOver(t *testing.T) {
 		t.Errorf("%s: status.supersededBy %q, want %s", old, got, run)
 	}
 	// The table, as an operator reads it: the last column names the run
-	// that took it over (#66).
+	// that took it over.
 	if crdFrom == "" {
 		if lines := strings.Split(strings.TrimSpace(kubectl(t, "b", "-n", ledgerNS, "get", "sfo", old)), "\n"); len(lines) != 2 ||
 			!strings.HasSuffix(lines[0], "TAKENOVERBY") || !strings.HasSuffix(lines[1], " "+run) {
@@ -1110,7 +1109,7 @@ func TestTakeOver(t *testing.T) {
 	assertPrimary(t, "b", "a")
 }
 
-// #35 row 19 (RFC0005 Requirement 8). A commit pushed after the run's
+// RFC0005 Requirement 8. A commit pushed after the run's
 // commit sets the Pooler's instances at site a, a field the run changed,
 // to another value. Once the operator accepts that head, the server-side
 // render and diff before release stops the run with GitDiffersFromLive,
@@ -1173,9 +1172,9 @@ func TestGitDiffersFromLive(t *testing.T) {
 	}
 }
 
-// #59, observed in a two-site test of v1.3.0: with a site down, tack status
-// left out its runs and exited 0, and kubectl get sfo showed an abandoned
-// run as Stopped. Pausing a site's node stands in for a site that gives no
+// With a site down, tack status
+// shows its runs and exits 0, and kubectl get sfo shows an abandoned
+// run as abandoned. Pausing a site's node stands in for a site that gives no
 // answer. A run dies before its first step, with its ledger at b and no
 // hold. With b down, tack status and tack abandon name b. With a down,
 // tack status lists the run and names a, tack abandon marks the run, and
@@ -1221,7 +1220,7 @@ func TestUnreachableSiteDuringStatusAbandonAndGet(t *testing.T) {
 		}
 	}
 
-	// #65: the process was killed a moment ago, and its Lease still holds:
+	// The process was killed a moment ago, and its Lease still holds:
 	// abandon refuses, names the process, and changes nothing.
 	out, code := tack(t, nil, "abandon", run, "-f", workload, "--yes")
 	if code != 1 {
@@ -1292,7 +1291,7 @@ func TestUnreachableSiteDuringStatusAbandonAndGet(t *testing.T) {
 	up()
 }
 
-// #58 row 1. Every run of the e2e is finished by now: tack prune deletes the
+// Every run of the e2e is finished by now: tack prune deletes the
 // ledgers of old runs that succeeded, through the API servers'
 // preconditions, and keeps the newest and every abandoned or taken-over run
 // ([RFC#0003] Requirement 27). It runs as the ServiceAccount operator,
@@ -1320,7 +1319,7 @@ func TestPrune(t *testing.T) {
 	}
 	// TestRebuildAndSwitchBack created b's member again, minutes after the
 	// site-loss run started: its follow-up Rebuild no longer keeps it
-	// ([RFC#0003] Requirement 27, #66).
+	// ([RFC#0003] Requirement 27).
 	if strings.Contains(out, "keep: follow-up Rebuild") {
 		t.Errorf("prune kept a run for its follow-up Rebuild, though b's member was rebuilt:\n%s", out)
 	}

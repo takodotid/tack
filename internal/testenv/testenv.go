@@ -160,7 +160,7 @@ const User = "operator@example.com"
 // answers a SelfSubjectReview with User, as an API server does, without
 // storing it. Like an API server, it drops a SiteFailover's status on
 // create, in the store and in the object it returns: the status
-// subresource ignores it (#38 item 4). Objects seeded with objs keep
+// subresource ignores it. Objects seeded with objs keep
 // theirs: they stand for ledgers written before.
 func NewClient(objs ...client.Object) client.Client {
 	objs = withPods(objs)
@@ -201,7 +201,7 @@ func NewClient(objs ...client.Object) client.Client {
 
 // unknownPrimary refuses, as CloudNativePG's webhook does, a patch that
 // makes a Cluster declare a primary that its spec.externalClusters do not
-// name. The text is the one observed on kind (#66). A Cluster without
+// name. The text is the one CloudNativePG's webhook gives. A Cluster without
 // spec.externalClusters is not checked.
 func unknownPrimary(ctx context.Context, c client.Client, o client.Object, p client.Patch) error {
 	gvk := o.GetObjectKind().GroupVersionKind()

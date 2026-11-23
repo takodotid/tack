@@ -10,7 +10,7 @@ import (
 	"github.com/takodotid/tack/internal/version"
 )
 
-// Issue #46, from PR #48. A planned run from a to b dies after
+// A planned run from a to b dies after
 // capture-token, before promote-b. a is promoted again by hand, then
 // demoted again by hand: it is a replica, with the token of its second
 // demotion. The read of the other sites passes. A resume must not promote

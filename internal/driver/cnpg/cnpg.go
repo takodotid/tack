@@ -470,8 +470,7 @@ func (d Driver) Steps(w *failoverv1.WorkloadSpec, r driver.Request) ([]failoverv
 }
 
 // Demotion implements driver.Driver: demote-<from> in a planned run,
-// fence-<from> in a site loss, declare-<site> at a third site. The IDs are
-// unchanged since v1.0.0.
+// fence-<from> in a site loss, declare-<site> at a third site.
 func (Driver) Demotion(r driver.Request, site string) string {
 	switch {
 	case site == r.To:

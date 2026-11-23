@@ -1,0 +1,10 @@
+# AGENTS.md, Writing: no history. Git is the archive.
+extends: existence
+message: "'%s' is history. Say what is true now, and leave the issue to git."
+level: error
+ignorecase: true
+nonword: true
+tokens:
+  - '\(#\d+\)'
+  - '#\d+,? (?:row|item) \d+'
+  - 'found in (?:a )?review'

@@ -358,7 +358,7 @@ func positionNotes(w *failoverv1.WorkloadSpec, t *driver.Topology, r driver.Requ
 		return nil
 	}
 	var notes []string
-	perms := version.DocLink("docs/operations.md#permissions")
+	perms := version.DocLink("docs/permissions.md")
 	for _, s := range t.Sites {
 		if s.Reachable && s.Position != nil && s.Position.Error != "" {
 			what := "it is not compared with the other sites"

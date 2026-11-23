@@ -151,20 +151,11 @@ components:
 
 **Creative North Star: "Sister Ships"**
 
-The docs wear a ship's livery. The hull's colour fills the masthead and the home page's opening. Below the waterline, the page is superstructure white, with the deck as the second plane, a black band, and the funnel's buff for the one action. Tack and Strait are sister ships: they share every rule and every name here, and differ only in the hull and the tints that follow it. Tack's hull is red.
+The docs wear a ship's livery. The hull's colour fills the masthead and the home page's opening. Below the waterline, the page is superstructure white, with the deck as the second plane, a black band, and the funnel's buff for the one action. Tack and Strait are sister ships: they share every rule and name here, and differ only in the hull and its tints. Tack's hull is red.
 
-Colour comes in whole planes, not in accents. Type is one family, Archivo, used across its width axis: wide for the name, a little wide for headings, normal for reading, narrow for markings. Code sits on the black hull in both themes.
+Colour comes in whole planes, not in accents. Type is one family, Archivo, across its width axis: wide for the name, a little wide for headings, normal for reading, narrow for markings, as stencilled on plate. Code sits on the black hull in both themes.
 
-At night the planes turn dark and the ink turns light. The hull, the funnel's buff and the ground of code stay as they are.
-
-**Key Characteristics:**
-
-- Whole planes of colour: hull, white, deck, black band, buff.
-- One action colour, the funnel's buff, with ink text on it.
-- One family across its width axis; IBM Plex Mono for code.
-- Heavy headings; short labels in narrow capitals, as stencilled on plate.
-- One radius of 3px for controls and code. Tables and callouts are square.
-- Plain English: the answer first, in short sentences.
+At night the planes turn dark and the ink light. The hull, buff and the ground of code stay as they are.
 
 ## Colors
 
@@ -197,11 +188,11 @@ Text on buff is always `#1a1512`, in both themes.
 
 ### Named Rules
 
-**The One Action Rule.** Buff is the only action colour. Text on it is ink. There is no second accent.
+**The One Action Rule.** Buff is the only action colour. There is no second accent.
 
 **The Plane Rule.** A colour fills a whole region or marks one thing. There is no gradient, no glow and no blur.
 
-**The Red Means Danger Rule.** The state red is for danger only. Warnings are orange. Every state also carries its word or an icon, so it reads without colour. The hull's red is livery, never a state.
+**The Red Means Danger Rule.** The state red is for danger only. Warnings are orange. The hull's red is livery, never a state. Every state also carries its word or an icon, so it reads without colour.
 
 **The Black Hull Rule.** A block of code sits on the black hull in both themes.
 
@@ -229,7 +220,7 @@ Text on buff is always `#1a1512`, in both themes.
 
 ## Layout
 
-VitePress's documentation layout: the masthead, the sidebar with the guide, operations and reference groups, the page, and its outline.
+VitePress's documentation layout: masthead, sidebar, page and outline.
 
 | Part | Rule |
 |---|---|
@@ -249,7 +240,7 @@ Flat. Depth comes from the planes and from lines.
 | `0 24px 48px -12px` in ink at 55% | The plan sheet on the home page's opening, and nothing else in the theme's own parts. |
 | `0 10px 28px` in ink at 18% | What VitePress floats: menus and the search box. |
 
-There is no other shadow, and no blur behind the masthead.
+There is no other shadow.
 
 ## Motion
 
@@ -312,55 +303,43 @@ The wordmark, lettered wide. Nav links and sidebar groups are markings. The acti
 
 ## Contrast
 
-Every text pair meets WCAG AA: 4.5:1 for text, 3:1 for a mark that is not text. Computed with the WCAG 2 formula from the tokens.
+Every pair meets WCAG AA, computed with the WCAG 2 formula from the tokens: 4.5:1 for text, 3:1 for a mark that is not text. The one exception is a nav link on hover: `buff` on `hull`, 3.67:1. At rest that text reads at 6.62:1.
 
-| Use | Pair | Needs | Day | Night |
-|---|---|---|---|---|
-| Text | `ink` on `plane` | 4.5:1 | 17.32 | 16.24 |
-| Text on the deck | `ink` on `deck` | 4.5:1 | 15.36 | 15.06 |
-| Secondary text | `soft-ink` on `plane` | 4.5:1 | 6.86 | 8.61 |
-| Secondary text on the deck | `soft-ink` on `deck` | 4.5:1 | 6.08 | 7.98 |
-| Links | `link` on `plane` | 4.5:1 | 6.68 | 8.85 |
-| Links on the deck, the current page | `link` on `deck` | 4.5:1 | 5.92 | 8.20 |
-| Link hover | `link-hover` on `plane` | 4.5:1 | 9.47 | 11.67 |
-| Text on the hull | `on-hull` on `hull` | 4.5:1 | 6.62 | 6.62 |
-| Secondary text on the hull | `on-hull-soft` on `hull` | 4.5:1 | 5.00 | 5.00 |
-| Text in the search box | `on-hull` on `hull-deep` | 4.5:1 | 9.39 | 9.39 |
-| Text on buff | `#1a1512` on `buff` | 4.5:1 | 9.51 | 9.51 |
-| Text on a hovered primary button | `#1a1512` on `buff-deep` | 4.5:1 | 7.66 | 7.66 |
-| Code | `code-text` on `code-bg` | 4.5:1 | 15.12 | 16.50 |
-| Comments in code, the footer | `code-soft` on `code-bg` | 4.5:1 | 6.86 | 7.49 |
-| Keywords in code | `code-accent` on `code-bg` | 4.5:1 | 9.51 | 10.38 |
-| A table's head | `on-hull` on `band` | 4.5:1 | 17.17 | 12.29 |
-| Secondary text on the band | `band-soft` on `band` | 4.5:1 | 10.05 | 9.30 |
-| Stop reasons on the band | `buff` on `band` | 4.5:1 | 9.51 | 6.81 |
-| A tip's title | `tip` on `deck` | 4.5:1 | 5.30 | 8.45 |
-| A warning's title | `warning` on `deck` | 4.5:1 | 4.53 | 8.28 |
-| A danger's title | `danger` on `deck` | 4.5:1 | 5.54 | 7.59 |
-| A state on the home page | `tip` or `warning` on `plane` | 4.5:1 | 5.98, 5.11 | 9.11, 8.92 |
-| The active nav item's bar | `buff` on `hull` | 3:1 | 3.67 | 3.67 |
-
-One pair is below 4.5:1: a nav link on hover is `buff` on `hull`, 3.67:1. It is a hover state of text that reads at 6.62:1 at rest.
+| Use | Pair | Day | Night |
+|---|---|---|---|
+| Text | `ink` on `plane` | 17.32 | 16.24 |
+| Text on the deck | `ink` on `deck` | 15.36 | 15.06 |
+| Secondary text | `soft-ink` on `plane` | 6.86 | 8.61 |
+| Secondary text on the deck | `soft-ink` on `deck` | 6.08 | 7.98 |
+| Links | `link` on `plane` | 6.68 | 8.85 |
+| Links on the deck, the current page | `link` on `deck` | 5.92 | 8.20 |
+| Link hover | `link-hover` on `plane` | 9.47 | 11.67 |
+| Text on the hull | `on-hull` on `hull` | 6.62 | 6.62 |
+| Secondary text on the hull | `on-hull-soft` on `hull` | 5.00 | 5.00 |
+| Text in the search box | `on-hull` on `hull-deep` | 9.39 | 9.39 |
+| Text on buff | `#1a1512` on `buff` | 9.51 | 9.51 |
+| Text on a hovered primary button | `#1a1512` on `buff-deep` | 7.66 | 7.66 |
+| Code | `code-text` on `code-bg` | 15.12 | 16.50 |
+| Comments in code, the footer | `code-soft` on `code-bg` | 6.86 | 7.49 |
+| Keywords in code | `code-accent` on `code-bg` | 9.51 | 10.38 |
+| A table's head | `on-hull` on `band` | 17.17 | 12.29 |
+| Secondary text on the band | `band-soft` on `band` | 10.05 | 9.30 |
+| Stop reasons on the band | `buff` on `band` | 9.51 | 6.81 |
+| A tip's title | `tip` on `deck` | 5.30 | 8.45 |
+| A warning's title | `warning` on `deck` | 4.53 | 8.28 |
+| A danger's title | `danger` on `deck` | 5.54 | 7.59 |
+| A state on the home page | `tip` or `warning` on `plane` | 5.98, 5.11 | 9.11, 8.92 |
+| The active nav item's bar, 3:1 | `buff` on `hull` | 3.67 | 3.67 |
 
 ## Do's and Don'ts
 
 ### Do:
 
 - **Do** take every colour, face and radius from `docs/.vitepress/theme/tokens.css`, by its role.
-- **Do** fill whole planes with colour, and keep buff for the one action.
-- **Do** put ink text on buff, and `on-hull` text on the hull and the band.
-- **Do** give every state a word or an icon as well as its colour.
-- **Do** keep markings short, and headings in sentence case.
-- **Do** keep a table to the page at every width, and check a new page at 390px and at 1280px.
+- **Do** check a new page at 390px and at 1280px.
 - **Do** write the answer first, in short sentences of everyday English.
 
 ### Don't:
 
-- **Don't** add a second accent colour or a second display family.
-- **Don't** add a gradient, a glow or a blur, or a shadow beyond the two listed.
-- **Don't** use the state red for anything but danger, or the hull's red for a state.
 - **Don't** set text in `line`, or in buff on the hull at rest.
-- **Don't** put a thick border on a rounded corner.
-- **Don't** set a marking over a heading as decoration.
-- **Don't** load a font from another host.
 - **Don't** use em-dashes in any copy.

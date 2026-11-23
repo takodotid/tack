@@ -151,7 +151,7 @@ func TestClassify(t *testing.T) {
 			t.Fatalf("%+v", fs)
 		}
 	})
-	// #35 row 39 (RFC0005 Requirement 8): a path found in neither Git nor
+	// RFC0005 Requirement 8: a path found in neither Git nor
 	// live stops the run with GitDiffersFromLive.
 	t.Run("path that resolves nowhere", func(t *testing.T) {
 		g := git.DeepCopy()
@@ -421,7 +421,7 @@ func TestVerifyNoop(t *testing.T) {
 	}
 }
 
-// #35 row 18 (RFC0005 Requirement 10). The check after release needs each
+// RFC0005 Requirement 10. The check after release needs each
 // Kustomization Ready with reason ReconciliationSucceeded. A reconcile in
 // flight is waited on, up to the timeout; Ready=Unknown, or True with
 // another reason, then fails the step.
@@ -449,9 +449,9 @@ func TestVerifyNoopNeedsReady(t *testing.T) {
 	}
 }
 
-// PR #42's finding (RFC0005 Requirement 10). A suspended Kustomization
-// keeps the Ready condition of its last reconcile, and applies nothing:
-// the check after release passed on it. It now fails at once, naming
+// RFC0005 Requirement 10. A suspended Kustomization
+// keeps the Ready condition of its last reconcile, and applies nothing, so
+// the check after release fails at once on it, naming
 // spec.suspend, without waiting out the timeout.
 func TestVerifyNoopRefusesSuspendedKustomization(t *testing.T) {
 	ctx := context.Background()

@@ -83,7 +83,7 @@ const CommandTimeout = 2 * time.Minute
 // keepalives 15 s apart.
 //
 // noPrograms turns off what the operator's configuration could make git
-// run that access does not need (PR #42): a file system monitor, the ext::
+// run that access does not need: a file system monitor, the ext::
 // transport, whose URL is a command, and automatic gc and maintenance.
 // The empty hooks path is set beside them. Credential helpers, askpass,
 // the ssh command, proxies and commit signing stay as configured.

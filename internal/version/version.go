@@ -113,7 +113,7 @@ func order(v string) ([4]int, bool) {
 // Requirement 24). A version names a release tag, or a build after one as
 // git describe or Go names it; a build after a release is newer than the
 // release and older than the next. A version that names neither, such as
-// dev or v1.3.0-rc.1, is older than every one that does (#63): a tack of
+// dev or v1.3.0-rc.1, is older than every one that does: a tack of
 // such a build cannot tell which fields a release's ledger holds. Of two
 // such versions, neither is newer.
 func Newer(a, b string) bool {

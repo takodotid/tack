@@ -45,7 +45,7 @@ func TestDocLink(t *testing.T) {
 
 // A ledger records the version of the tack that last wrote it, and an
 // older release refuses to write it ([RFC#0003] Requirement 24). A version
-// that names no release is older than every one that does (#63), and of
+// that names no release is older than every one that does, and of
 // two such versions neither is newer.
 func TestNewer(t *testing.T) {
 	for _, c := range []struct {
@@ -97,7 +97,7 @@ func TestNewer(t *testing.T) {
 	}
 }
 
-// #63. A build without the release's ldflags, such as one of go install,
+// A build without the release's ldflags, such as one of go install,
 // takes the version that Go recorded for the module when it names a
 // release or a build after one, and stays dev otherwise.
 func TestFromModule(t *testing.T) {
@@ -122,7 +122,7 @@ func TestFromModule(t *testing.T) {
 	}
 }
 
-// #63. The version a binary takes: -X's, or else Go's record of the
+// The version a binary takes: -X's, or else Go's record of the
 // module version when it names a release or a build after one.
 func TestResolve(t *testing.T) {
 	built := func(v string) func() (*debug.BuildInfo, bool) {

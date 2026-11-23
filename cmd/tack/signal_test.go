@@ -28,7 +28,7 @@ func TestSignalHelper(t *testing.T) {
 	os.Exit(0)
 }
 
-// #35 row 38. The first SIGINT, SIGTERM or SIGHUP cancels the run, which
+// The first SIGINT, SIGTERM or SIGHUP cancels the run, which
 // then records why it stopped. The second ends tack at once, while it
 // still records.
 func TestSecondSignalEndsTack(t *testing.T) {

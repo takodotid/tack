@@ -62,7 +62,7 @@ func (p *pushedOver) Commit(ctx context.Context, w *failoverv1.WorkloadSpec, req
 
 var pushed = "d" + strings.Repeat("0", 39)
 
-// Issue #29. A commit lands on top of the run's commit before Flux at the
+// A commit lands on top of the run's commit before Flux at the
 // sites applied it. The run must not wait for a commit Flux never applies:
 // it stops before the release with GitChanged, and once the operator
 // accepts the new head, it releases with the check after release.
@@ -94,7 +94,7 @@ func TestPushOnTopOfRunsCommit(t *testing.T) {
 	}
 }
 
-// Issue #29. A commit lands on top of the run's commit after the check
+// A commit lands on top of the run's commit after the check
 // before release at site a. The release at a must still end with the
 // check after release, and site b stops before its release.
 func TestPushAfterCheckBeforeRelease(t *testing.T) {

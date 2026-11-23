@@ -51,11 +51,10 @@ func (c *slowChecks) Reachable(ctx context.Context, site string) error {
 	return err
 }
 
-// #58 row 4. In a planned run, the check before the first step of a site
-// that is down took its 3 checks when the run reached that step, so each
-// such site added its time one after another. The checks of every site
-// whose steps are deferrable now start at once with the run; each site
-// still gets 3, and its steps are deferred as before.
+// In a planned run, the checks of every site whose steps are deferrable
+// start at once with the run, not when the run reaches the first step of
+// each site: otherwise each site that is down adds its time one after
+// another. Each site still gets 3 checks, and its steps are deferred.
 func TestChecksOfDeferrableSitesStartWithTheRun(t *testing.T) {
 	sites := []string{"a", "b", "c", "d"}
 	w := workloadN(t, sites)
