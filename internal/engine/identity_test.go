@@ -33,7 +33,7 @@ func resourceVersion(t *testing.T, c client.Client, kind, name string) string {
 	return u.GetResourceVersion()
 }
 
-// Issue #32. A run stops at its first step; it is resumed with a
+// A run stops at its first step; it is resumed with a
 // kubeconfig whose context for site a reaches another cluster. The resume
 // must stop before it acts at site a, and change nothing there.
 func TestResumeStopsOnAnotherCluster(t *testing.T) {

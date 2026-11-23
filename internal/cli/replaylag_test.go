@@ -47,7 +47,7 @@ func TestReplayLagPrinted(t *testing.T) {
 	}
 }
 
-// #94: with Tack's replay-time query, the replay column holds the last
+// With Tack's replay-time query, the replay column holds the last
 // replayed commit's time, in RFC 3339 to the millisecond, and its age.
 func TestReplayTimePrinted(t *testing.T) {
 	zero := time.Duration(0)

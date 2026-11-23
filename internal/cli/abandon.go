@@ -20,28 +20,26 @@ import (
 
 func abandonLong() string {
 	return `Abandon marks a run that must never go on, such as one whose old primary
-was promoted again by hand: it records status.abandoned in the run's
-ledger. tack resume then refuses the run, and a new run of the workload no
-longer waits for it.
+was promoted again by hand. It records status.abandoned in the run's ledger.
+tack resume then refuses the run, and a new run of the workload no longer
+waits for it.
 
-Abandon changes nothing else. A hold the run left on an object stays:
-remove the holds once Git equals live, or start the next run with
---take-over RUN, which takes them over. Abandon lists the holds as the run's
-ledger records them, and does not read the objects: a hold removed by hand
-is still listed. The runbook:
+Abandon changes nothing else. A hold the run left on an object stays: remove
+the holds once Git equals live, or start the next run with --take-over RUN.
+Abandon lists the holds from the run's ledger and does not read the objects,
+so a hold removed by hand is still listed. The runbook:
   ` + version.DocLink("docs/runbooks/abandon-run.md") + `
 
-kubectl get sfo shows when the run was abandoned in its Abandoned column,
-from the CRD of tack v1.4.0 on. Its State column keeps the run's last
-state, such as Stopped. tack status lists the run as Abandoned.
+kubectl get sfo shows when the run was abandoned in its Abandoned column
+(CRD of tack v1.4.0 or later). Its State column keeps the run's last state,
+such as Stopped. tack status lists the run as Abandoned.
 
-Abandon does not stop a tack process that runs the run: check first that
-none does. A step that runs, such as a promotion, still changes the
-workload. Abandon refuses while the run's lease says that a tack process
-runs it, or, for a run without a lease, while the run is Running and its
-ledger was written within its step's timeout and 5 minutes; --force goes on
-all the same. Only tack v1.3.0 and later honour the mark: an older tack
-resumes the run, and drops the mark.
+Abandon does not stop a tack process that runs the run: check first that none
+does. A running step, such as a promotion, still changes the workload.
+Abandon refuses while the run's lease says a tack process runs it, or, for a
+run without a lease, while the run is Running and its ledger was written
+within its step's timeout and 5 minutes. --force goes on anyway. Only tack
+v1.3.0 and later honour the mark; an older tack resumes the run and drops it.
 
 An agent never starts "tack abandon" without an explicit instruction from a
 human for that run.`
@@ -94,23 +92,23 @@ func newAbandon(o *options) *cobra.Command {
 				return nil
 			}
 			if sf.Status.State == failoverv1.RunSucceeded && !hasDeferred(sf) {
-				return fmt.Errorf("run %s succeeded, and no step of it is left: there is nothing to abandon", sf.Name)
+				return fmt.Errorf("run %s succeeded with no step left: nothing to abandon", sf.Name)
 			}
 			if err := engine.CheckWriter(sf); err != nil {
 				return err
 			}
 			// The list is the ledger's: abandon reads no object of the
-			// workload, and a hold removed by hand stays in it (#59).
+			// workload, and a hold removed by hand stays in it.
 			held := stillHeld(sf)
 			if len(held) > 0 {
 				fmt.Fprintln(out, "The ledger records these objects as held by the run, and not released:")
 				for _, h := range held {
 					fmt.Fprintf(out, "  %s at site %s\n", ref(h.Object), h.Site)
 				}
-				fmt.Fprintf(out, "Abandon does not read the objects: a hold removed by hand is still listed. A hold still on an object stays after the run is abandoned: remove it once Git equals live (%s), or start the next run with --take-over %s.\n", version.DocLink("docs/runbooks/abandon-run.md"), sf.Name)
+				fmt.Fprintf(out, "Abandon does not read the objects: a hold removed by hand is still listed. A hold still on an object stays after abandon: remove it once Git equals live (%s), or start the next run with --take-over %s.\n", version.DocLink("docs/runbooks/abandon-run.md"), sf.Name)
 			}
-			// A process that runs the run holds its lease (#65): abandon
-			// checks it before it asks, and again after.
+			// A process that runs the run holds its lease: abandon checks
+			// it before it asks, and again after.
 			store, _ := env.Ledger.(engine.Leaser)
 			var said bytes.Buffer
 			if err := o.checkLive(ctx, io.MultiWriter(progress, &said), store, sf, force); err != nil {
@@ -146,7 +144,7 @@ func newAbandon(o *options) *cobra.Command {
 			engine.Stamp(&sf.Status)
 			if err := env.Ledger.UpdateStatus(ctx, sf); err != nil {
 				if apierrors.IsConflict(err) {
-					return fmt.Errorf("the ledger of run %s changed since it was read, so another tack process may be running it. Nothing was changed: check, then abandon it again: %w", sf.Name, err)
+					return fmt.Errorf("the ledger of run %s changed since it was read; another tack process may be running it. Nothing was changed. Check, then abandon again: %w", sf.Name, err)
 				}
 				return fmt.Errorf("write the ledger of run %s: %w", sf.Name, err)
 			}
@@ -155,7 +153,7 @@ func newAbandon(o *options) *cobra.Command {
 				return fmt.Errorf("read the ledger of run %s back: %w", sf.Name, err)
 			}
 			if back.Status.Abandoned == nil {
-				return errors.New("the ledger's site dropped status.abandoned, so its CRD is older than this tack: apply this version's CRD there, then abandon the run again")
+				return errors.New("the ledger's site dropped status.abandoned: its CRD is older than this tack. Apply this version's CRD there, then abandon again")
 			}
 			if rec, ok := env.Ledger.(engine.Recorder); ok && len(back.Status.History) > 0 {
 				env.EventOn(ctx, rec, back, true, "Run"+string(failoverv1.HistoryAbandoned), engine.EntryText(back.Status.History[len(back.Status.History)-1]))
@@ -195,9 +193,9 @@ func (o *options) checkLive(ctx context.Context, progress io.Writer, store engin
 	case err == nil:
 		return nil
 	case !force:
-		return fmt.Errorf("%w. --force goes on all the same. Nothing was changed", err)
+		return fmt.Errorf("%w. Nothing was changed; --force goes on anyway", err)
 	}
-	fmt.Fprintf(progress, "  note      --force: going on, although %v\n", strings.TrimPrefix(err.Error(), engine.ErrMayRun.Error()+": "))
+	fmt.Fprintf(progress, "  note      --force: going on although %v\n", strings.TrimPrefix(err.Error(), engine.ErrMayRun.Error()+": "))
 	return nil
 }
 

@@ -17,7 +17,7 @@ import (
 	"github.com/takodotid/tack/internal/testenv"
 )
 
-// #75 row 1, [RFC#0003] Requirement 29: a planned run records when writes
+// [RFC#0003] Requirement 29: a planned run records when writes
 // stopped, at the start of the old Pooler's scale to 0, and when they came
 // back, at the end of the new Pooler's wait.
 func TestPlannedRunRecordsWritesDown(t *testing.T) {
@@ -53,7 +53,7 @@ func TestSiteLossRecordsWritesDownAsEstimate(t *testing.T) {
 	}
 }
 
-// #75 row 1: a step that runs again keeps its earlier attempts.
+// A step that runs again keeps its earlier attempts.
 func TestStepKeepsEarlierAttempts(t *testing.T) {
 	f := newFixture(t)
 	f.flux.Fail["Hold"] = errors.New("hold refused")
@@ -78,7 +78,7 @@ func (stalled) Progress(context.Context, *failoverv1.WorkloadSpec, kube.Clients,
 	return "site b's replay at 0/3000000, short of 0/3000060 that the demotion token needs", true
 }
 
-// #75 row 2, [RFC#0004] Requirement 18: the wait for a planned promotion
+// [RFC#0004] Requirement 18: the wait for a planned promotion
 // stops before its timeout when replay stands still short of the token.
 func TestPromotionWaitStopsWhenReplayStalls(t *testing.T) {
 	f := newFixture(t)

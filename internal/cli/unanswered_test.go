@@ -41,12 +41,10 @@ func yamlDocs(t *testing.T, s string) []failoverv1.SiteFailover {
 	return out
 }
 
-// #59, observed in a two-site test of v1.3.0: with one site unreachable
-// after its 3 checks, tack status exited 0 and left out that site's runs,
-// with no line naming the site; with both sites down, it printed an empty
-// table and exited 0. It lists what it read, names each site that gave no
-// answer with its error, and exits 1. -o yaml names them as comments after
-// the ledgers, and still parses.
+// With one site unreachable after its 3 checks, tack status lists what it
+// read, names each site that gave no answer with its error, and exits 1;
+// with both sites down, it prints an empty table and exits 1. -o yaml
+// names them as comments after the ledgers, and still parses.
 func TestStatusNamesSitesThatGaveNoAnswer(t *testing.T) {
 	const noAnswerA = "site a: no answer to 3 checks over 0s: site a is unreachable: connection refused"
 	const noAnswerB = "site b: no answer to 3 checks over 0s: site b is unreachable: connection refused"
@@ -122,9 +120,9 @@ func TestStatusNamesSitesThatGaveNoAnswer(t *testing.T) {
 	}
 }
 
-// #59: tack status RUN, tack resume RUN and tack abandon RUN said only
-// "not found at any reachable site" for a run whose site gave no answer.
-// The error names each site that gave no answer, with its error.
+// For a run whose site gave no answer, the error of tack status RUN, tack
+// resume RUN and tack abandon RUN names each site that gave no answer,
+// with its error.
 func TestNamedRunNotFoundNamesSites(t *testing.T) {
 	const want = `run "pg-main-at-a" not found at any reachable site; site a gave no answer, so its runs were not read: no answer to 3 checks over 0s: site a is unreachable: connection refused`
 	for _, cmd := range [][]string{
@@ -145,10 +143,10 @@ func TestNamedRunNotFoundNamesSites(t *testing.T) {
 	}
 }
 
-// #59: the searches of tack plan, tack run and tack resume went on
-// without a site that gave no answer, as RFC0003 Requirements 8 and 18
-// say, with no line after its retries; tack plan -o yaml prints no note.
-// Each names the site on a progress line, once per process.
+// The searches of tack plan, tack run and tack resume go on without a
+// site that gave no answer, as RFC0003 Requirements 8 and 18 say; tack
+// plan -o yaml prints no note. Each names the site on a progress line,
+// once per process.
 func TestSearchesNameSitesLeftOut(t *testing.T) {
 	const lineA = "  not read  the runs at site a: "
 	t.Run("plan -o yaml", func(t *testing.T) {

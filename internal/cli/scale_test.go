@@ -29,10 +29,9 @@ func finishedRuns(n int) []foundRun {
 	return runs
 }
 
-// #35 row 47. tack status -f read every run's spec for each run it
-// listed: 2.8 s for 10,000 runs on the test host, 28 ms for 1,000. It now
-// reads each spec once. The bound is far above the linear list's time,
-// and below the old one's; ten times more with the race detector.
+// tack status -f reads each run's spec once, so its time grows linearly
+// with the runs. The bound is far above the linear list's time, and below
+// a quadratic one's; ten times more with the race detector.
 func TestStatusListIsLinear(t *testing.T) {
 	runs := finishedRuns(10000)
 	// A run another run's spec.takeOvers names, and a run whose own spec
@@ -69,7 +68,7 @@ func TestStatusListIsLinear(t *testing.T) {
 }
 
 // BenchmarkStatusList measures what tack status -f does with the runs its
-// search found: the list it prints (#35 row 47).
+// search found: the list it prints.
 func BenchmarkStatusList(b *testing.B) {
 	for _, n := range []int{100, 1000, 10000} {
 		b.Run(fmt.Sprintf("runs=%d", n), func(b *testing.B) {

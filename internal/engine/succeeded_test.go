@@ -56,7 +56,7 @@ func succeededWithADown(t *testing.T) *fixture {
 	return f
 }
 
-// #35 row 31. A resume of a run that succeeded with deferred steps, while
+// A resume of a run that succeeded with deferred steps, while
 // their site is still down, never records the run Running: a process that
 // dies during it must not leave a finished run Running, which blocks
 // every new run of the workload.
@@ -78,7 +78,7 @@ func TestResumeSucceededRunKeepsItsState(t *testing.T) {
 	}
 }
 
-// #35 row 31. Once site a is back, the run is recorded Running with its
+// Once site a is back, the run is recorded Running with its
 // first deferred step, in one write, and not before. A process that dies
 // at that write leaves the run Succeeded.
 func TestResumeSucceededRunRunsWithItsFirstStep(t *testing.T) {

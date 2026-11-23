@@ -40,7 +40,7 @@ func (f *fixture) ledgerNamed(site, name string) *failoverv1.SiteFailover {
 	return sf
 }
 
-// Issue #37. A run planned in the same second as a run that succeeded gets
+// A run planned in the same second as a run that succeeded gets
 // the same name. It takes the next free name instead of failing, and its
 // commit names it.
 func TestRunNameTaken(t *testing.T) {
@@ -128,7 +128,7 @@ func TestRunNamesAllTaken(t *testing.T) {
 	}
 }
 
-// #35 row 35 (RFC0003 Requirement 7). A name taken by an abandoned run,
+// RFC0003 Requirement 7: a name taken by an abandoned run,
 // such as one that lost a race of two tack processes, is free for the
 // next name: the abandoned run never goes on.
 func TestRunNameTakenByAbandonedRun(t *testing.T) {

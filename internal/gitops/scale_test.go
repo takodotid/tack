@@ -80,7 +80,7 @@ func size(b *testing.B, dir string, skip string) int64 {
 }
 
 // BenchmarkFirstFetch measures the fetch that each tack process makes
-// first, of the branch's whole history (#35 row 47), on a repository of
+// first, of the branch's whole history, on a repository of
 // 5,000 releases over 200 manifests: the bytes it stores, which a fetch
 // over the network transfers, against the files of the branch's head.
 // The process's later fetches bring only new commits. Run it with

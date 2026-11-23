@@ -60,7 +60,7 @@ func releaseThenDie(t *testing.T) *fixture {
 	return f
 }
 
-// #35 row 36 (RFC0005 Requirement 9). The resume finds no hold on the
+// RFC0005 Requirement 9: the resume finds no hold on the
 // object. It keeps the generation the ledger recorded while the run held
 // the object, so the check after release stops on the change Flux made in
 // between, instead of taking it as the baseline.

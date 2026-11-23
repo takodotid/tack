@@ -301,7 +301,7 @@ func CheckLive(ctx context.Context, store Leaser, sf *failoverv1.SiteFailover, n
 	if step != nil {
 		in = "in step " + step.ID
 	}
-	return note, fmt.Errorf("%w: run %s is Running with no lease that tells, and its ledger was last written at %s by tack %s: a tack process may still run it, %s, until %s. Check that no tack process runs it, then wait until then: tack abandon does not stop one, and its step in flight can land after a new run starts",
+	return note, fmt.Errorf("%w: run %s is Running with no lease that tells, and its ledger was last written at %s by tack %s: a tack process may still run it, %s, until %s. Check that no tack process runs it, then wait until then: tack abandon does not stop it, and its step in flight can land after a new run starts",
 		ErrMayRun, sf.Name, last.UTC().Format(time.RFC3339), orUnknown(sf.Status.WrittenBy), in, until.UTC().Format(time.RFC3339))
 }
 

@@ -21,7 +21,7 @@ func (g *countingGit) Resolve(ctx context.Context, w *failoverv1.WorkloadSpec, c
 	return g.Git.Resolve(ctx, w, changes)
 }
 
-// #35 row 12. A plan reads Git once, before the operator can confirm: an
+// A plan reads Git once, before the operator can confirm: an
 // optional removal with a mapping needs no fetch of its own.
 func TestPlanFetchesGitOnce(t *testing.T) {
 	f := newFixture(t)

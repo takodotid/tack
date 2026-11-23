@@ -24,9 +24,9 @@ func operate(t *testing.T, f *testFactory) {
 	go (&testenv.Operator{Clients: f.clients, Sites: []string{"a", "b"}}).Run(ctx)
 }
 
-// #35 row 29. Progress lines had no time, so an incident's timeline could
-// not be rebuilt from a terminal's log. Each now starts with the time in
-// UTC ([RFC#0009] Requirement 27); the plan and the prompt do not.
+// Each progress line starts with the time in UTC ([RFC#0009] Requirement
+// 27), so an incident's timeline can be rebuilt from a terminal's log; the
+// plan and the prompt do not.
 func TestProgressLinesAreStamped(t *testing.T) {
 	f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": testenv.Site("b", "a", 0)})
 	operate(t, f)
@@ -56,10 +56,9 @@ func TestProgressLinesAreStamped(t *testing.T) {
 	}
 }
 
-// #35 row 29. tack status RUN left out each step's times and attempts,
-// and the run's earlier stops. It now prints each phase's and step's start
-// and end, each step's attempts, and the history ([RFC#0009] Requirement
-// 28).
+// tack status RUN prints each phase's and step's start and end, each
+// step's attempts, the run's earlier stops, and the history ([RFC#0009]
+// Requirement 28).
 func TestStatusShowsTimesAndHistory(t *testing.T) {
 	f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": testenv.Site("b", "a", 0)}, "a")
 	operate(t, f)

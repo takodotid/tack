@@ -47,8 +47,8 @@ func runsAt(t *testing.T, f *testFactory, site string) []string {
 	return names
 }
 
-// #58 row 1 (#35 row 47). Ledgers were never deleted, and every search for
-// runs reads all of them. tack prune deletes only runs that succeeded with
+// Every search for runs reads all ledgers, so tack prune deletes only runs
+// that succeeded with
 // no Deferred step, past the newest --keep that succeeded, and keeps every
 // run that a rule of [RFC#0003] Requirement 27 keeps. An abandoned run,
 // here the newest, does not count among the --keep: it is kept anyway.
@@ -259,7 +259,7 @@ func TestPruneStopsAtFirstError(t *testing.T) {
 	}
 }
 
-// #63. A tack whose version names no release, such as dev, keeps every run
+// A tack whose version names no release, such as dev, keeps every run
 // that a release wrote: it cannot tell which status fields those ledgers
 // hold. A run that such a build wrote, or a release before v1.3.0, which
 // recorded no version, it may delete.
@@ -292,7 +292,7 @@ func TestPruneByDevBuildKeepsRunsOfReleases(t *testing.T) {
 	}
 }
 
-// #66. prune ordered the runs that succeeded by metadata.creationTimestamp
+// prune does not order the runs that succeeded by metadata.creationTimestamp
 // alone, which the API server of each ledger's site sets, to the second: a
 // run of another site created a few seconds before the newest, by its
 // site's clock, may be the newest. prune deletes such a run only when
@@ -349,15 +349,12 @@ func TestPruneOrdersRunsByTheClocks(t *testing.T) {
 	}
 }
 
-// #66. prune kept every run with a follow-up Rebuild, since it read no
-// member, and the operator deleted such a run by hand. It now reads the
-// member of the Rebuild's site, as tack plan does for [RFC#0003]
-// Requirement 14, and deletes the run once the member was created again
-// 10 s or more after the run's ledger. Anything it cannot tell keeps the
-// run. The coordinator's review of PR #68 found that prune compared with
-// the run's start, from the clock of the host that ran it: a host clock
-// behind made a member created before the run look rebuilt. Both times
-// now come from API servers.
+// prune reads the member of the Rebuild's site, as tack plan does for
+// [RFC#0003] Requirement 14, and deletes a run with a follow-up Rebuild
+// once the member was created again 10 s or more after the run's ledger.
+// Anything it cannot tell keeps the run. Both times come from API
+// servers, not from the clock of the host that ran prune: a host clock
+// behind would make a member created before the run look rebuilt.
 func TestPruneDeletesRunWhoseRebuildIsDone(t *testing.T) {
 	started := fixedNow.Add(-3 * time.Hour)
 	forbidden := func(c client.WithWatch) client.WithWatch {

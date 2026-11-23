@@ -47,7 +47,7 @@ func droppingConnect(t *testing.T) string {
 	return fmt.Sprintf("https://127.0.0.1:%d/gitops.git", port)
 }
 
-// PR #49's finding (RFC0006 Limitations). git has no connect timeout for
+// RFC0006 Limitations. git has no connect timeout for
 // HTTP, and libcurl's low-speed check starts after the connect: a fetch
 // from a host that drops the TCP connect runs until the command's
 // deadline, then counts as unreachable.

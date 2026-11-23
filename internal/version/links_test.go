@@ -106,7 +106,7 @@ func literals(t *testing.T) (lits []literal, bad []token.Position) {
 
 // A message, note or help line names a doc by DocLink, never by its path
 // in the repository: an operator who runs a released tack has no
-// checkout (#51).
+// checkout.
 func TestNoBareDocPaths(t *testing.T) {
 	lits, _ := literals(t)
 	for _, l := range lits {

@@ -133,7 +133,7 @@ func (l *loseAfter) Reconcile(ctx context.Context, site string, ks []failoverv1.
 	return rev, notes, err
 }
 
-// Issue #27. run-1, a site loss from a to b, holds b and c, then stops at
+// run-1, a site loss from a to b, holds b and c, then stops at
 // promote-b: site b is lost too. run-2 takes run-1 over and promotes c.
 // When b comes back, a resume of run-1 must not promote b: c is the
 // primary.
@@ -279,7 +279,7 @@ func TestPatchNeedsTheRunsHold(t *testing.T) {
 	if !errors.Is(err, engine.ErrStopped) || sf.Status.Reason != failoverv1.ReasonStepFailed || !strings.Contains(sf.Status.Message, "no longer held by this run") {
 		t.Fatalf("err %v, reason %s: %s", err, sf.Status.Reason, sf.Status.Message)
 	}
-	// Issue #45: holding the object again resumes a plan that a recovery by
+	// Holding the object again resumes a plan that a recovery by
 	// hand may have made stale. The message says so before it says how.
 	stale, again := strings.Index(sf.Status.Message, "the run's plan may be stale"), strings.Index(sf.Status.Message, "annotate it again")
 	if stale < 0 || again < stale || !strings.Contains(sf.Status.Message, version.DocLink("docs/runbooks/abandon-run.md")) {

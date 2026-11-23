@@ -49,9 +49,9 @@ lint: tools-go
 	helm lint --strict deploy/helm/tack
 	hack/release/pinned.sh
 
-## prose: lints every tracked Markdown file and Vue template with vale, by the rules of .vale.ini; needs vale
+## prose: lints every tracked Markdown file and Vue template with vale, by the rules of .vale.ini, and Go comments for history; needs vale
 prose:
-	git ls-files -z '*.md' '*.vue' | xargs -0 vale
+	git ls-files -z '*.md' '*.vue' '*.go' | xargs -0 vale
 
 ## generate: deepcopy code and the CRD, from api/, and the chart's copy of the CRD
 generate: tools-go

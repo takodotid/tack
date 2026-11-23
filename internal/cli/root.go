@@ -64,7 +64,7 @@ planned switchover, or a failover after a site is lost. It acts through the
 workload's own API, keeps GitOps in step, and records every step in a
 SiteFailover ledger in the new primary's cluster.
 
-A run takes four phases, each step recorded before it starts and after it ends:
+A run has four phases. Each step is recorded before it starts and after it ends:
 
   Hold             annotate only the objects the run changes with
                    kustomize.toolkit.fluxcd.io/reconcile: disabled, so Flux
@@ -75,7 +75,7 @@ A run takes four phases, each step recorded before it starts and after it ends:
   Release          check that Git equals live, remove the annotations, and
                    check that Flux changed nothing
 
-The operator starts every run. Tack never decides to fail over by itself.
+Only the operator starts a run. Tack never decides to fail over by itself.
 
 Rules for AI agents:
   - An agent never starts "tack run" or "tack resume" without an explicit

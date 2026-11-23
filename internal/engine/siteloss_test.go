@@ -11,7 +11,7 @@ import (
 	"github.com/takodotid/tack/internal/version"
 )
 
-// Issue #26. Tack cannot tell a lost site from one cut off from the
+// Tack cannot tell a lost site from one cut off from the
 // operator's host. Every site-loss plan says so, and names the runbook.
 func TestSiteLossPlanNotesRunbook(t *testing.T) {
 	f := newFixture(t)

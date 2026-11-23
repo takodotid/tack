@@ -88,7 +88,7 @@ func (r *runner) hold(ctx context.Context, s *failoverv1.Step) (string, error) {
 // the object ([RFC#0005] Requirement 9). A process that dies after the
 // removal, before it records the release, leaves that generation: the
 // next process finds no hold, and keeps it, so the check after release
-// sees what Flux changed in between (#35 row 36).
+// sees what Flux changed in between.
 func (r *runner) release(ctx context.Context, s *failoverv1.Step) (string, error) {
 	recorded := false
 	gen, err := r.Flux.Release(ctx, s.Site, s.Release.Object, r.sf.Name, func(gen int64) error {
@@ -393,7 +393,7 @@ func (r *runner) patch(ctx context.Context, s *failoverv1.Step) (string, error) 
 // object's hold no longer names the run: another run took it over, or the
 // hold is gone and Flux could apply Git over the patch. A hold removed by
 // hand may come with a recovery by hand, after which the plan no longer
-// fits the sites (issue #45).
+// fits the sites.
 func (r *runner) checkHeld(ctx context.Context, site string, obj failoverv1.ObjectRef) error {
 	planned := false
 	for _, s := range r.sf.Spec.Steps {
@@ -457,7 +457,7 @@ func (r *runner) wait(ctx context.Context, s *failoverv1.Step) (string, error) {
 			case !behind || p != progress:
 				progress, since = p, r.now()
 			case r.now().Sub(since) >= s.Wait.Stall.Duration:
-				return "", fmt.Errorf("stopped before the timeout: %s, has not moved for %s, and the wait needs more: %s. Check that WAL still reaches site %s. The change made stays: the workload goes on once it catches up, and a resume waits again",
+				return "", fmt.Errorf("stopped before the timeout: %s, has not moved for %s, and the wait needs more: %s. Check that WAL still reaches site %s. The change stays: the workload goes on once it catches up, and a resume waits again",
 					p, s.Wait.Stall.Duration, last, s.Site)
 			}
 		}
@@ -696,7 +696,7 @@ func (r *runner) hideCaptured(msg string) string { return HideCaptured(r.sf.Stat
 // Clean is the one filter of a message that Tack records or prints: it
 // hides the user and password of every URL (redact.Text), and names each
 // captured value instead of printing it. A message from outside Tack, such
-// as Flux's, Strait's, git's or an API server's, may hold either (#35 row
+// as Flux's, Strait's, git's or an API server's, may hold either.
 // 43). Every ledger write cleans the status's messages with it.
 func Clean(captured map[string]string, msg string) string {
 	return HideCaptured(captured, redact.Text(msg))
@@ -716,7 +716,7 @@ var ErrNewerLedger = errors.New("a newer tack wrote the ledger")
 // CheckWriter refuses a ledger that a newer release of tack wrote last
 // ([RFC#0003] Requirement 24): this tack's writes would drop the status
 // fields that it does not know. A tack whose version names no release,
-// such as dev, refuses a ledger that a release wrote (#63); a ledger whose
+// such as dev, refuses a ledger that a release wrote; a ledger whose
 // writer names no release is not refused (version.Newer).
 func CheckWriter(sf *failoverv1.SiteFailover) error {
 	by := sf.Status.WrittenBy
@@ -724,17 +724,17 @@ func CheckWriter(sf *failoverv1.SiteFailover) error {
 	case !version.Newer(by, version.Version):
 		return nil
 	case !version.Named(version.Version):
-		return fmt.Errorf("%w: run %s was last written by tack %s, and this tack is %s, which names no release, so it cannot tell which status fields that ledger holds: its writes could drop them. Nothing was changed: use tack %s or later",
+		return fmt.Errorf("%w: run %s was last written by tack %s, and this tack is %s, which names no release, so it cannot tell which status fields that ledger holds. Nothing was changed: use tack %s or later",
 			ErrNewerLedger, sf.Name, by, version.Version, by)
 	}
-	return fmt.Errorf("%w: run %s was last written by tack %s, and this tack is %s, which is older: its writes would drop the status fields that it does not know. Nothing was changed: use tack %s or later",
+	return fmt.Errorf("%w: run %s was last written by tack %s, and this tack is %s, which is older and would drop status fields it does not know. Nothing was changed: use tack %s or later",
 		ErrNewerLedger, sf.Name, by, version.Version, by)
 }
 
 // MaxMessage is the most bytes of the run's message and of each step's in
 // the ledger ([RFC#0003] Requirement 4): a message from outside Tack, such
 // as Flux's, has no bound, and a ledger must stay well within what the API
-// server stores (#66). The progress line keeps the whole message.
+// server stores. The progress line keeps the whole message.
 const MaxMessage = 8 << 10
 
 // CleanStatus cleans every message of a status: the run's and each

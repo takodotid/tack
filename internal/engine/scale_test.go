@@ -96,7 +96,7 @@ func worstLedger(tb testing.TB, n int) (ran, worst *failoverv1.SiteFailover) {
 }
 
 // BenchmarkLedgerBytes measures the JSON size of the ledger of a run on 2
-// and on 10 sites (#35 row 47), the size of each item of a list of
+// and on 10 sites, the size of each item of a list of
 // ledgers: run-bytes as the run left it, bytes with a full history. Run it
 // with -benchtime=1x.
 func BenchmarkLedgerBytes(b *testing.B) {
@@ -134,7 +134,7 @@ func runsN(n int) []failoverv1.SiteFailover {
 
 // BenchmarkActiveRunSearch measures what the search for active runs does
 // with the runs it found, as checkStarted and tack run's check do: Ended
-// for each run (#35 row 47).
+// for each run.
 func BenchmarkActiveRunSearch(b *testing.B) {
 	for _, n := range []int{100, 1000, 10000} {
 		b.Run(fmt.Sprintf("runs=%d", n), func(b *testing.B) {

@@ -32,9 +32,9 @@ func (c *cancelOnRead) Reachable(ctx context.Context, site string) error {
 	return c.Clients.Reachable(ctx, site)
 }
 
-// #35 row 34. Ctrl-C during the read before a site's steps is not a site
+// Ctrl-C during the read before a site's steps is not a site
 // that gave no answer: the run stops before the step, which keeps its
-// state, and nothing at the site runs. It was recorded Deferred.
+// state, and nothing at the site runs.
 func TestInterruptDuringReadBeforeStepsKeepsStep(t *testing.T) {
 	f := newFixture(t)
 	f.clients.SetDown("a", true)
@@ -62,10 +62,9 @@ func TestInterruptDuringReadBeforeStepsKeepsStep(t *testing.T) {
 	}
 }
 
-// PR #49's finding. Ctrl-C during the check before a site's first step
-// recorded that step Failed with "context canceled", though it never
-// started. The run now stops before the step, which keeps its state
-// ([RFC#0007] Requirement 5).
+// Ctrl-C during the check before a site's first step must not record
+// that step Failed with "context canceled", as it never started. The run
+// stops before the step, which keeps its state ([RFC#0007] Requirement 5).
 func TestInterruptDuringCheckBeforeStepKeepsStep(t *testing.T) {
 	f := newFixture(t)
 	plan := f.plan("b", failoverv1.ModePlanned)

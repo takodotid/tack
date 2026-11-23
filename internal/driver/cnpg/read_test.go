@@ -30,7 +30,7 @@ func cluster(replica map[string]any, isPrimary bool, phase string, inProgress bo
 	return u
 }
 
-// #35 row 42 (RFC0004 Requirement 3): the roles, in the rule's order, and
+// RFC0004 Requirement 3: the roles, in the rule's order, and
 // health.
 func TestRead(t *testing.T) {
 	for _, tt := range []struct {
@@ -51,7 +51,7 @@ func TestRead(t *testing.T) {
 		{name: "self names another member", replica: map[string]any{"self": "site-a", "primary": "pg-a"}, phase: PhaseHealthy, role: driver.RoleReplica, healthy: true},
 		{name: "enabled true", replica: map[string]any{"enabled": true, "primary": "pg-a"}, isPrimary: true, phase: PhaseHealthy, role: driver.RoleUnknown, healthy: true},
 		{name: "enabled false", replica: map[string]any{"enabled": false}, isPrimary: true, phase: PhaseHealthy, role: driver.RoleUnknown, healthy: true},
-		// #35 row 33, not changed: a Cluster that declares itself primary
+		// A Cluster that declares itself primary
 		// while no instance reports isPrimary reads Unknown.
 		{name: "declares itself primary, no instance isPrimary", replica: map[string]any{"primary": "pg-a"}, phase: PhaseHealthy, role: driver.RoleUnknown, healthy: true},
 		{name: "no spec.replica, no instance isPrimary", phase: PhaseHealthy, role: driver.RoleUnknown, healthy: true},

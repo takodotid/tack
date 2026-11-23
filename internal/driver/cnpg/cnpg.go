@@ -318,8 +318,8 @@ func check(t *driver.Topology, r driver.Request) error {
 		}
 		if a := ahead(t, r); len(a) > 0 && !r.AcceptBehind {
 			s := a[0]
-			return fmt.Errorf("site %s holds WAL past site %s: %s. Promoting %s loses the writes that %s holds, and site %s must then be rebuilt. Promote the most caught-up site instead (--to %s), or pass --accept-behind to tack plan and tack run to promote %s anyway",
-				s.Name, r.To, aheadOf(&s, toSt), r.To, s.Name, s.Name, best(t, a), r.To)
+			return fmt.Errorf("site %s holds WAL past site %s: %s. Promoting %s loses the writes at site %s, which then needs a rebuild. Promote the most caught-up site (--to %s), or pass --accept-behind to tack plan and tack run to promote %s anyway",
+				s.Name, r.To, aheadOf(&s, toSt), r.To, s.Name, best(t, a), r.To)
 		}
 	default:
 		return fmt.Errorf("unknown mode %q", r.Mode)
@@ -470,8 +470,7 @@ func (d Driver) Steps(w *failoverv1.WorkloadSpec, r driver.Request) ([]failoverv
 }
 
 // Demotion implements driver.Driver: demote-<from> in a planned run,
-// fence-<from> in a site loss, declare-<site> at a third site. The IDs are
-// unchanged since v1.0.0.
+// fence-<from> in a site loss, declare-<site> at a third site.
 func (Driver) Demotion(r driver.Request, site string) string {
 	switch {
 	case site == r.To:

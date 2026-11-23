@@ -21,10 +21,9 @@ import (
 	"github.com/takodotid/tack/internal/testenv"
 )
 
-// #35 row 48: sites were checked one after another, so each site that did
-// not answer added its checks to every read. Each read now checks its
-// sites at once ([RFC#0007] Requirement 10). testenv.AtOnce fails a first
-// check that runs alone.
+// Each read checks its sites at once ([RFC#0007] Requirement 10), so a
+// site that does not answer adds no time to the others. testenv.AtOnce
+// fails a first check that runs alone.
 
 // The plan's read checks every site at once, and each once: its search
 // for runs and the read after the confirmation reuse the checks.
@@ -47,7 +46,7 @@ func TestPlanChecksSitesAtOnce(t *testing.T) {
 	}
 }
 
-// #64, at three sites: in a resume of a site-loss run whose lost site a
+// At three sites: in a resume of a site-loss run whose lost site a
 // came back still primary, the read before a's steps reads a only, and
 // stops the run with FencedSiteIsPrimary before them, a unchanged.
 func TestThreeSiteResumeStopsWhenLostSiteIsPrimary(t *testing.T) {
@@ -243,7 +242,7 @@ func TestChecksAtOncePrintInSiteOrder(t *testing.T) {
 	checks := &engine.SiteChecks{Clients: c, Waits: []time.Duration{time.Millisecond, time.Millisecond}, Out: out, Now: c.now}
 	// b and c answered when their last check was called; their lines
 	// are printed once their checks end, which Note waits for. Under
-	// load, a answered before that (PR #67, and CI's race job here).
+	// load, a answered before that.
 	c.done = func() { checks.Note("b"); checks.Note("c") }
 	ctx := context.Background()
 	end := engine.CheckAhead(ctx, checks, threeSites)

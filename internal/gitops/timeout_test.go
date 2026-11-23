@@ -37,7 +37,7 @@ func stalled(t *testing.T) string {
 	return "http://" + l.Addr().String() + "/gitops.git"
 }
 
-// #35 row 12 (RFC0006 Requirement 3). A fetch from a remote that never
+// RFC0006 Requirement 3. A fetch from a remote that never
 // answers ends at the command's deadline, and counts as unreachable: the
 // Git step waits with GitUnreachable instead of hanging.
 func TestFetchFromStalledRemoteIsUnreachable(t *testing.T) {
@@ -90,7 +90,7 @@ func fakeSSH(t *testing.T) string {
 	return log
 }
 
-// #35 row 12. Over ssh, Tack sets a connect timeout and keepalives,
+// Over ssh, Tack sets a connect timeout and keepalives,
 // unless the operator chose the ssh command, whose options Tack does not
 // know.
 func TestSSHTimeouts(t *testing.T) {
@@ -136,7 +136,7 @@ func TestSSHTimeouts(t *testing.T) {
 	}
 }
 
-// #35 row 12 (RFC0006 Requirement 3). Every git command carries the HTTP
+// RFC0006 Requirement 3. Every git command carries the HTTP
 // low-speed limit: a transfer that stalls ends before the deadline.
 func TestGitCarriesLowSpeedLimit(t *testing.T) {
 	if _, err := os.Stat("/bin/sh"); err != nil {

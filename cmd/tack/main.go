@@ -64,8 +64,8 @@ func (f factory) Env(_ context.Context, kubeconfig string, spec *failoverv1.Work
 // signalContext returns a context that the first SIGINT, SIGTERM or
 // SIGHUP cancels: the run then records why it stopped, in a ledger write
 // that outlives the cancel. The handler is released at once, so a second
-// signal ends tack with the default action, also during that write
-// (#35 row 38). SIGHUP comes from a terminal or SSH session that ended.
+// signal ends tack with the default action, also during that write.
+// SIGHUP comes from a terminal or SSH session that ended.
 func signalContext() (context.Context, context.CancelFunc) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	go func() {

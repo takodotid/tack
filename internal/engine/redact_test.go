@@ -31,9 +31,9 @@ func (f urlFlux) VerifyNoop(context.Context, string, []failoverv1.HeldObject, []
 	return "", errors.New("Kustomization flux-system/a is not Ready: kustomize build failed: fetch " + secretURL + ": 403")
 }
 
-// #35 row 43. Flux's and Strait's messages went into the ledger and the
-// output without redaction. Every ledger write and progress line now
-// passes through redact.Text ([RFC#0009] Requirement 10).
+// Flux's and Strait's messages pass through redact.Text before they
+// reach the ledger and the output: every ledger write and progress line
+// ([RFC#0009] Requirement 10).
 func TestOutsideMessagesAreRedacted(t *testing.T) {
 	f := newFixture(t)
 	var out bytes.Buffer

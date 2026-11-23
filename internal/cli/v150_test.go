@@ -48,12 +48,11 @@ func v150Ledger(t *testing.T, file string) *failoverv1.SiteFailover {
 	return &sf
 }
 
-// #58, #66. Ledgers that v1.5.0 wrote stay usable under this tack: tack
-// status lists them, and tack prune decides on them by the rules of
-// [RFC#0003] Requirement 27. Under v1.5.0, prune kept the site-loss run for
-// its follow-up Rebuild whatever b's member was; it now deletes it once
-// that member was created again 10 s or more after the run started, and
-// keeps it otherwise.
+// Ledgers that v1.5.0 wrote stay usable under this tack: tack status
+// lists them, and tack prune decides on them by the rules of [RFC#0003]
+// Requirement 27. It deletes the site-loss run once b's member was
+// created again 10 s or more after the run started, and keeps it
+// otherwise.
 func TestLedgersOfV150(t *testing.T) {
 	defer func(v string) { version.Version = v }(version.Version)
 	version.Version = "v1.5.0-1-g0000000"

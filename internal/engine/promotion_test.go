@@ -79,7 +79,7 @@ func heldBy(fl *testenv.Flux, run string) []string {
 	return out
 }
 
-// Issue #45. A planned run from a to b dies after demote-a, before
+// A planned run from a to b dies after demote-a, before
 // promote-b. The operator promotes a again by hand and removes the holds
 // (docs/runbooks/no-primary-after-demotion.md, option 2). A resume must
 // not promote b while a is primary: not with the holds put back, as the
@@ -127,7 +127,7 @@ func TestResumeAfterHandRecoveryStopsBeforePromotion(t *testing.T) {
 	}
 }
 
-// Issue #45. A site that declares itself primary stops the run before the
+// A site that declares itself primary stops the run before the
 // promotion, before its instance reports isPrimary: CloudNativePG
 // promotes such a Cluster at once.
 func TestResumeStopsBeforePromotionWhenSiteDeclaresItself(t *testing.T) {
@@ -145,7 +145,7 @@ func TestResumeStopsBeforePromotionWhenSiteDeclaresItself(t *testing.T) {
 	}
 }
 
-// Issue #45, site loss. The run fences a, then dies before promote-b. The
+// Site loss. The run fences a, then dies before promote-b. The
 // operator promotes a again by hand. Every step at a is done, so no read
 // before a's steps runs. A resume must not promote b, with or without
 // --fence a: no step of the run would fence a again.
@@ -256,7 +256,7 @@ func (s *sites3) promoteByHand(site string) {
 	}
 }
 
-// Issue #45, three sites. A planned run from a to b holds c, then dies
+// Three sites. A planned run from a to b holds c, then dies
 // before promote-b; c is promoted by hand. The run declares b primary at
 // c only after the promotion. A resume without --fence c stops before the
 // promotion; with --fence c, the operator accepts that b and c are both
@@ -301,7 +301,7 @@ func TestResumeStopsBeforePromotionWhenThirdSiteIsPrimary(t *testing.T) {
 	}
 }
 
-// #46 (PR #48's comment). With --fence c for a third site that is primary,
+// With --fence c for a third site that is primary,
 // b and c are both primary from the promotion until the run declares b at
 // c, and c may take writes that b lacks. The run records the follow-up
 // Rebuild for c, once, so a later planned run to c is refused until it is

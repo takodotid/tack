@@ -60,8 +60,7 @@ func (c *orderClients) Reachable(_ context.Context, site string) error {
 
 func (c *orderClients) Client(string) (client.Client, error) { return nil, errors.New("no client") }
 
-// Found in the coordinator's review of PR #68: no test failed without the
-// pass that obtains the sites' credentials in a run's read that checks its
+// The pass that obtains the sites' credentials in a run's read that checks its
 // sites at once, such as the read before the first Failover step. With it,
 // the credentials of each site that the read checks come one at a time,
 // in the order of the Workload, before any check; the site the read skips
@@ -97,7 +96,7 @@ func TestRunChecksObtainCredentialsFirst(t *testing.T) {
 }
 
 // The checks that start with a run, of the sites whose steps are
-// deferrable (#58 row 4), start at once: their credentials come first, one
+// deferrable, start at once: their credentials come first, one
 // at a time, in the order of the steps ([RFC#0007] Requirement 12).
 func TestDeferrableChecksObtainCredentialsFirst(t *testing.T) {
 	cc := &orderClients{slow: map[string]time.Duration{"c": 200 * time.Millisecond}, got: map[string]bool{}}

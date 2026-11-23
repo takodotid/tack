@@ -289,7 +289,7 @@ func TestRelease(t *testing.T) {
 	})
 }
 
-// #35 row 36 (RFC0005 Requirement 9). Release records the generation
+// RFC0005 Requirement 9. Release records the generation
 // while the run holds the object, before the update that removes the
 // hold. A failed record keeps the hold. An object that is no longer held
 // is not recorded.

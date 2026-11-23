@@ -10,11 +10,11 @@ import (
 
 const completionLong = `Completion prints a script that completes tack's commands, flags and
 values in a shell: the values of --mode and --output, Workload files for
---file, and the site names of the Workload file given with --file for
---to, --from and --fence. Completion reads that file only: it never
-contacts a cluster or Git.
+--file, and the site names of the Workload file given with --file for --to,
+--from and --fence. It reads that file only and never contacts a cluster or
+Git.
 
-Load it in the current shell, or install it as each shell's docs say:
+Load it in the current shell, or install it as the shell's docs say:
 
   bash:        source <(tack completion bash)
   zsh:         source <(tack completion zsh)

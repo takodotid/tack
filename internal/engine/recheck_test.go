@@ -23,12 +23,12 @@ func poolerInstances(t *testing.T, f *fixture, site string) any {
 	return field(u.Object, "spec", "instances")
 }
 
-// #46 (PR #48's comment). The read after the confirmation of tack run
-// (RFC0009 Requirement 13) did not run in tack resume. A planned run that
+// The read after the confirmation of tack run
+// (RFC0009 Requirement 13) also runs in tack resume. A planned run that
 // stopped in Hold, before any Failover step, then resumed after the
 // operator switched the primary by hand, scaled a's Pooler to 0 and
 // demoted a, a replica, then waited for a token a never published. Before
-// its first Failover step, the run now reads the sites again, and stops
+// its first Failover step, the run reads the sites again, and stops
 // when the driver no longer allows the run.
 func TestResumeStopsBeforeFailoverWhenTheSitesChanged(t *testing.T) {
 	f := stopsInHoldOnOther(t)

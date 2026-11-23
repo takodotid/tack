@@ -50,9 +50,9 @@ func (b *blippingList) List(ctx context.Context, list client.ObjectList, opts ..
 	return b.Client.List(ctx, list, opts...)
 }
 
-// #64. A search for runs lists the ledgers at each site that answered its
+// A search for runs lists the ledgers at each site that answered its
 // check. A 503 on that list, once, is a blip: the list is repeated, and
-// tack status lists the site's runs. v1.4.0 failed the search.
+// tack status lists the site's runs.
 func TestSearchRepeatsListAfterBlip(t *testing.T) {
 	var lists *blippingLists
 	f := &wrapFactory{testFactory: newFactory(statusObjects()), wrap: func(c *testenv.Clients) kube.Clients {

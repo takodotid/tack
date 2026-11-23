@@ -43,7 +43,7 @@ func noFailoverStep(t *testing.T, f *fixture, sf *failoverv1.SiteFailover) {
 	}
 }
 
-// #35 row 37. Once the operator accepted a head in Hold, Hold accepted any
+// Once the operator accepted a head in Hold, Hold accepted any
 // revision at the other sites. A site whose Flux applied yet another
 // commit, which the operator never saw, must stop the run again.
 func TestHoldComparesWithAcceptedHead(t *testing.T) {
@@ -58,7 +58,7 @@ func TestHoldComparesWithAcceptedHead(t *testing.T) {
 	noFailoverStep(t, f, sf)
 }
 
-// #35 row 37. --accept-git-head must name the commit the stop named. Any
+// --accept-git-head must name the commit the stop named. Any
 // other commit is refused before anything is written; HEAD stands for the
 // named commit, and becomes the base.
 func TestAcceptGitHeadMustNameTheStoppedHead(t *testing.T) {
@@ -82,7 +82,7 @@ func TestAcceptGitHeadMustNameTheStoppedHead(t *testing.T) {
 	}
 }
 
-// #35 row 37. The Git step's stop names the branch head: the same rule
+// The Git step's stop names the branch head: the same rule
 // holds there, and an abbreviated commit names it too.
 func TestAcceptGitHeadAtTheGitStep(t *testing.T) {
 	f := newFixture(t)
@@ -126,11 +126,11 @@ func TestAcceptGitHeadWithoutChangedRevision(t *testing.T) {
 	noFailoverStep(t, f, sf)
 }
 
-// PR #49's finding. After a stop that names no commit, such as FluxChanged,
-// the runbook's way on is --accept-git-head HEAD, and the ledger stored
-// "HEAD" as the release revision. The check before the next release then
-// stopped with GitChanged: "HEAD" names no commit. HEAD now stands for
-// the branch head, read when the resume starts ([RFC#0006] Requirement 10).
+// After a stop that names no commit, such as FluxChanged, the runbook's way
+// on is --accept-git-head HEAD. HEAD stands for the branch head, read when
+// the resume starts, and is not stored as the release revision: the check
+// before the next release must not stop with GitChanged ([RFC#0006]
+// Requirement 10).
 func TestAcceptGitHeadHEADWithoutNamedCommit(t *testing.T) {
 	f := releaseThenDie(t)
 	sf, err := f.resume("b", engine.Options{})

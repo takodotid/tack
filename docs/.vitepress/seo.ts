@@ -90,7 +90,7 @@ export class Seo {
         return group?.text && first && first !== path ? { name: group.text, link: first } : undefined;
     }
 
-    /** The tags a page adds to its head for search engines and link previews. There is no preview image yet. */
+    /** The tags a page adds to its head for search engines and link previews. */
     static head(page: PageData, site: Site): HeadConfig[] {
         if (page.isNotFound) return [["meta", { name: "robots", content: "noindex" }]];
 

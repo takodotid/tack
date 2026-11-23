@@ -22,11 +22,10 @@ func setVersion(t *testing.T, v string) {
 	t.Cleanup(func() { version.Version = old })
 }
 
-// #35 row 26. The ledger did not record which tack wrote it, and a status
-// write replaces the whole status, so an older tack that resumed a ledger
-// dropped the status fields a newer one added. Every write now records
-// status.writtenBy, and an older release refuses the ledger before it
-// asks the operator, changing nothing ([RFC#0003] Requirement 24).
+// Every write records status.writtenBy, since a status write replaces the
+// whole status and an older tack that resumed a ledger would drop the
+// status fields a newer one added. An older release refuses the ledger
+// before it asks the operator, changing nothing ([RFC#0003] Requirement 24).
 func TestResumeRefusesLedgerOfNewerTack(t *testing.T) {
 	for _, tt := range []struct {
 		tack, writtenBy string
@@ -41,7 +40,7 @@ func TestResumeRefusesLedgerOfNewerTack(t *testing.T) {
 		{tack: "v1.3.0", writtenBy: "v1.3.0"},
 		{tack: "v1.3.1", writtenBy: "v1.3.0"},
 		{tack: "v1.3.0", writtenBy: ""},
-		// #63: a build that names no release, such as one without the
+		// A build that names no release, such as one without the
 		// release's ldflags, stops on a ledger that a release wrote.
 		{tack: "dev", writtenBy: "v1.4.0", refused: true, which: "which names no release"},
 		{tack: "dev", writtenBy: "v1.0.0", refused: true, which: "which names no release"},

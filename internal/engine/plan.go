@@ -84,8 +84,8 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 	if err != nil {
 		if req.Mode == failoverv1.ModeSiteLoss && kube.Retryable(err) && !kube.IsUnreachable(err) {
 			// An answer 5xx or 429 is an answer, also from a load balancer
-			// in front of a lost site: Tack does not count the site as lost
-			// (#38 item 8). The runbook has the way on.
+			// in front of a lost site: Tack does not count the site as lost.
+			// The runbook has the way on.
 			return nil, fmt.Errorf("%w. A site whose API answers, even with an error, is not counted as lost. If the site is lost and something in front of it still answers, such as a load balancer, see %s", err, version.DocLink("docs/runbooks/site-loss.md#when-tack-refuses-the-lost-site"))
 		}
 		return nil, err
@@ -130,7 +130,7 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 		if !s.Reachable {
 			// Its runs were not read either: the search shares the
 			// plan's checks ([RFC#0009] Requirement 2).
-			notes = append(notes, fmt.Sprintf("%s; the steps at site %s wait for it to come back, and the runs whose ledgers are there were not read", s.Error, s.Name))
+			notes = append(notes, fmt.Sprintf("%s; the steps at site %s wait for it, and the runs whose ledgers are there were not read", s.Error, s.Name))
 			continue
 		}
 		if note := checks.Note(s.Name); note != "" {
@@ -139,7 +139,7 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 		if what := asPrimary(s); what != "" && deferrable(req.Request, s.Name) {
 			// The driver did not refuse it; the read before its steps
 			// stops the run there ([RFC#0007] Requirement 6).
-			notes = append(notes, fmt.Sprintf("site %s %s (%s): the run stops before its first step there, and changes nothing at it, until the operator checks it and resumes the run with --fence %s",
+			notes = append(notes, fmt.Sprintf("site %s %s (%s): the run stops before its first step there and changes nothing at it, until the operator checks it and resumes with --fence %s",
 				s.Name, what, s.Summary, s.Name))
 		}
 		fp, err := e.fingerprint(ctx, s.Name)
@@ -174,7 +174,7 @@ func (e *Env) MakePlan(ctx context.Context, req Request) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	// One Resolve, so the plan fetches Git once (#35 row 12).
+	// One Resolve, so the plan fetches Git once.
 	var required []driver.FieldChange
 	for _, c := range changes {
 		if c.Optional && !e.Git.HasMapping(req.Spec, c) {
@@ -260,7 +260,7 @@ func (e *Env) Recheck(ctx context.Context, p *Plan) error {
 		}
 		for _, r := range runs {
 			// A run abandoned before it recorded its start ran no step,
-			// so the sites are as the plan read them (PR #49).
+			// so the sites are as the plan read them.
 			if !p.runs[r.Name] && !(r.Status.State == "" && r.Status.Abandoned != nil) {
 				return stale("run %s of the workload started after the plan was made", r.Name)
 			}
@@ -541,7 +541,7 @@ func commitMessage(workload, from, to string, mode failoverv1.Mode, run string) 
 // fingerprint reads the fingerprint of a site's cluster. The site has just
 // answered its check, so a read that gets no answer, or a 5xx or 429, is a
 // blip: it is repeated with the pauses of the site's checks, up to 3 reads
-// in all (#38 item 5). A read whose last try got no answer returns a
+// in all. A read whose last try got no answer returns a
 // kube.UnreachableError.
 func (e *Env) fingerprint(ctx context.Context, site string) (string, error) {
 	c, err := e.Clients.Client(site)

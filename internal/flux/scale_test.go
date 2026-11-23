@@ -36,7 +36,7 @@ func bigCheckout(b *testing.B, size int) string {
 }
 
 // BenchmarkRender measures the render of one Kustomization of a checkout
-// of 10 MB and of 100 MB (#35 row 47): VerifyGit renders each
+// of 10 MB and of 100 MB: VerifyGit renders each
 // Kustomization that applies a held object, at each site, and each render
 // copies the checkout. copy is the copy alone.
 func BenchmarkRender(b *testing.B) {

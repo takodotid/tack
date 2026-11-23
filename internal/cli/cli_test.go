@@ -279,8 +279,7 @@ func TestRunSearchRetried(t *testing.T) {
 
 // The search for a named run checks a site again when the run was not
 // found elsewhere, and only then. The search for every run checks each
-// site up to 3 times; a site that still gives no answer fails the list
-// (#59).
+// site up to 3 times; a site that still gives no answer fails the list.
 func TestStatusSearchRetried(t *testing.T) {
 	objects := func() map[string][]client.Object {
 		return map[string][]client.Object{
@@ -387,7 +386,7 @@ func TestPlanDeprecatedWorkload(t *testing.T) {
 }
 
 // A site whose check fails with a refused credential is not lost: the
-// search for runs fails instead of leaving its runs out. Issue #25.
+// search for runs fails instead of leaving its runs out.
 func TestSearchFailsOnRefusedCredential(t *testing.T) {
 	f := newFactory(map[string][]client.Object{
 		"a": testenv.Site("a", "b", 0),
@@ -430,7 +429,7 @@ func stoppedRun(t *testing.T, name string) *failoverv1.SiteFailover {
 }
 
 // tack resume with --context finds the run at one site, but searches every
-// site of the run's Workload snapshot for a newer run. Issue #27.
+// site of the run's Workload snapshot for a newer run.
 func TestResumeContextSearchesEverySite(t *testing.T) {
 	older := stoppedRun(t, "pg-main-older")
 	newer := siteLossRun("a", fixedNow)
@@ -452,7 +451,7 @@ func TestResumeContextSearchesEverySite(t *testing.T) {
 
 // A run started with --take-over records the run it took over, and marks
 // that run's ledger. The old run then cannot resume, and no longer blocks
-// a new run. Issue #27.
+// a new run.
 func TestTakeOverIsRecorded(t *testing.T) {
 	f := newFactory(map[string][]client.Object{
 		"a": testenv.Site("a", "a", 2),
@@ -487,7 +486,7 @@ func TestTakeOverIsRecorded(t *testing.T) {
 	}
 }
 
-// Issue #37. A run that takes over a run planned in the same second gets
+// A run that takes over a run planned in the same second gets
 // the next free name: the run it takes over never recorded its start, and
 // holds the name. The e2e's TestTakeOver hits this on a fast machine.
 func TestTakeOverInTheSameSecond(t *testing.T) {
@@ -512,7 +511,6 @@ func TestTakeOverInTheSameSecond(t *testing.T) {
 
 // A run that never recorded its start still counts for the check of a
 // member left to rebuild: its ledger's creation stands in for its start.
-// Issue #28.
 func TestPlanRebuildCheckWithoutStart(t *testing.T) {
 	earlier := siteLossRun("a", fixedNow.Add(-time.Hour))
 	earlier.CreationTimestamp, earlier.Status.StartedAt = metav1.NewTime(fixedNow.Add(-time.Hour)), nil
@@ -527,7 +525,7 @@ func TestPlanRebuildCheckWithoutStart(t *testing.T) {
 }
 
 // A ledger that never recorded its start cannot resume, and a new run is
-// told to take it over. Issue #28.
+// told to take it over.
 func TestRunNeverStarted(t *testing.T) {
 	never := stoppedRun(t, "pg-main-earlier")
 	never.Status = failoverv1.SiteFailoverStatus{}
@@ -576,7 +574,7 @@ func mergePatch(t *testing.T, c client.Client, kind, name, patch string) {
 	}
 }
 
-// Issue #30. While the operator confirms a planned switchover from a to b,
+// While the operator confirms a planned switchover from a to b,
 // another run makes the same switch and succeeds. The confirmed plan must
 // not run: it would capture a's leftover demotion token and write a used
 // token back to b.
@@ -626,9 +624,9 @@ func TestRunRefusesPlanAfterAnotherRun(t *testing.T) {
 	}
 }
 
-// PR #49's finding. A run that lost the race of #35 row 35 while the
-// operator confirmed ran no step and changed nothing: its ledger holds
-// only status.abandoned. It does not make the plan stale.
+// A run that lost a race while the operator confirmed ran no step and
+// changed nothing: its ledger holds only status.abandoned. It does not
+// make the plan stale.
 func TestRunIgnoresAbandonedRunAtConfirmation(t *testing.T) {
 	f := newFactory(map[string][]client.Object{"a": testenv.Site("a", "a", 2), "b": testenv.Site("b", "a", 0)})
 	f.flux.Fail["Hold"] = errors.New("stop at the first hold")
@@ -677,7 +675,7 @@ func TestRunRefusesPlanOnAnotherCluster(t *testing.T) {
 }
 
 // A ledger written before Tack refused a credential in the Git URL prints
-// it redacted in YAML. Issue #31.
+// it redacted in YAML.
 func TestYAMLRedactsGitURL(t *testing.T) {
 	old := stoppedRun(t, "pg-main-earlier")
 	old.Spec.Workload.Spec.Git.URL = "https://user:FAKE-TOKEN-123@git.example.com/gitops.git"
@@ -696,9 +694,8 @@ func TestYAMLRedactsGitURL(t *testing.T) {
 	}
 }
 
-// #35 row 41 (RFC0009 Requirement 10). A ledger whose messages an older
-// Tack wrote with a captured value in them: the text of tack status names
-// the value.
+// RFC0009 Requirement 10: a ledger whose messages an older Tack wrote with
+// a captured value in them. The text of tack status names the value.
 func TestStatusHidesCapturedValues(t *testing.T) {
 	const token = "eyJsc24iOiIwLzMwMDAwMDAifQ=="
 	old := stoppedRun(t, "pg-main-earlier")
@@ -717,7 +714,7 @@ func TestStatusHidesCapturedValues(t *testing.T) {
 	}
 }
 
-// #35 row 22 (RFC0009 Requirement 4). tack resume asks like tack run.
+// RFC0009 Requirement 4: tack resume asks like tack run.
 // Without a terminal and without --yes it refuses, and a wrong name
 // changes nothing: no cluster write, no Flux call, the ledger as it was.
 func TestResumeNeedsConfirmation(t *testing.T) {
@@ -756,7 +753,7 @@ func TestResumeNeedsConfirmation(t *testing.T) {
 	}
 }
 
-// #35 row 52 (RFC0003 Requirement 8, RFC0009 Requirement 5). tack run
+// RFC0003 Requirement 8, RFC0009 Requirement 5: tack run
 // refuses while another run of the workload is not Succeeded, except a run
 // another run took over, by its status or by the other run's spec, and the
 // run it names with --take-over, which it records.
@@ -824,7 +821,7 @@ func TestRunSearchForOtherRuns(t *testing.T) {
 	}
 }
 
-// #35 row 54 (RFC0003 Requirement 6). The Workload file changes after a run
+// RFC0003 Requirement 6: the Workload file changes after a run
 // stopped: another Pooler size at b and another Git URL. tack resume with
 // the new file finds the run, then runs the ledger's plan with the
 // ledger's Workload: it does not plan again.
@@ -870,7 +867,7 @@ func TestResumeIgnoresChangedWorkloadFile(t *testing.T) {
 	}
 }
 
-// #35 row 35. tack status shows an abandoned run: the list as Abandoned,
+// tack status shows an abandoned run: the list as Abandoned,
 // and the run with when and why.
 func TestStatusShowsAbandonedRun(t *testing.T) {
 	r := stoppedRun(t, "pg-main-earlier")
@@ -887,10 +884,9 @@ func TestStatusShowsAbandonedRun(t *testing.T) {
 	}
 }
 
-// #38 item 2. Two stopped runs each hold an object of the workload. A new
+// Two stopped runs each hold an object of the workload. A new
 // run names both with --take-over: it starts, takes over the holds of
 // each, records both in its spec, and marks both ledgers taken over.
-// v1.2.1 took one value: the other run refused the new one.
 func TestTakeOverTwoRuns(t *testing.T) {
 	one, two := stoppedRun(t, "pg-main-one"), stoppedRun(t, "pg-main-two")
 	f := newFactory(map[string][]client.Object{
@@ -929,7 +925,7 @@ func TestTakeOverTwoRuns(t *testing.T) {
 
 // The plan refuses a switch to a primary that a site's Cluster does not
 // name among its external clusters, before the ledger exists and before
-// any step (observed on kind: CloudNativePG refused the step).
+// any step, as CloudNativePG refuses that step.
 func TestRunRefusesPrimaryNotAmongExternalClusters(t *testing.T) {
 	a := testenv.Cluster("a", "a", true, nil)
 	a.Object["spec"].(map[string]any)["externalClusters"] = []any{map[string]any{"name": "pg-a"}}
@@ -946,9 +942,9 @@ func TestRunRefusesPrimaryNotAmongExternalClusters(t *testing.T) {
 }
 
 // A site-loss plan does not refuse it: Git, the way to add the new primary
-// to the list, may have gone with the lost site (coordinator review of PR
-// #68). The plan warns, and names the step where the run stops. The run
-// promotes b, and stops there, as CloudNativePG refuses the step: c keeps
+// to the list, may have gone with the lost site. The plan warns, and names
+// the step where the run stops. The run promotes b, and stops there, as
+// CloudNativePG refuses the step: c keeps
 // declaring a, and holds no primary.
 func TestSiteLossWarnsOfPrimaryNotAmongExternalClusters(t *testing.T) {
 	c := testenv.Cluster("c", "a", false, nil)

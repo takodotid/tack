@@ -22,36 +22,34 @@ import (
 )
 
 func pruneLong() string {
-	return `Prune deletes the ledgers of old runs of a workload, which every search
-for runs reads at every site. It deletes only a run that succeeded with no
+	return `Prune deletes the ledgers of old runs of a workload; every search for runs
+reads them at every site. It deletes only a run that succeeded with no
 Deferred step, and keeps:
 
-  - the newest --keep runs that succeeded, so the record of the last
-    switch stays. Where the clocks of two sites' API servers cannot order
-    two runs, created less than 10s apart, prune keeps both;
-  - every abandoned run, and every run that another run took over: delete
-    one by hand, as the link below shows;
-  - every run with a follow-up Rebuild whose member was not created again
-    10s or more after the run's ledger was created, as the Workload file
-    names the member at that site, or whose member cannot be read: a
-    planned run onto that member needs it;
-  - every run whose spec records that it took over a run that is kept and
-    is not marked as taken over: without it, that run would block new runs;
+  - the newest --keep runs that succeeded. Runs created less than 10s apart
+    cannot be ordered by the clocks of two sites' API servers: prune keeps
+    both;
+  - every abandoned run, and every run that another run took over: delete one
+    by hand, as the link below shows;
+  - every run with a follow-up Rebuild whose member was not created again 10s
+    or more after the run's ledger was created, as the Workload file names
+    the member at that site, or whose member cannot be read;
+  - every run whose spec records that it took over a run that is kept and is
+    not marked as taken over;
   - every run that a newer tack than this one last wrote.
 
-Prune acts only when every site of the workload answers and every run of
-the workload is finished: succeeded with no Deferred step, abandoned or
-taken over. It lists each run with what it does to it, asks for the
-workload's name, searches again, and stops, deleting nothing, when anything
-changed. It then deletes the ledgers one at a time, by name, oldest first,
-each only while it is the object that was read, and stops at the first
-error. It changes nothing else.
+Prune acts only when every site of the workload answers and every run of the
+workload is finished: succeeded with no Deferred step, abandoned or taken
+over. It lists each run with what it does to it, asks for the workload's
+name, searches again, and deletes nothing if anything changed. It then
+deletes the ledgers one at a time, by name, oldest first, each only while it
+is the object that was read, and stops at the first error.
 
-Prune needs delete on sitefailovers in the ledger namespace at each site,
-row 16 of the permissions table, and get on the workload's objects, row 7,
-when a run has a follow-up Rebuild. The rules, and how to delete a kept
-run by hand:
-  ` + version.DocLink("docs/operations.md#old-ledgers") + `
+Prune needs delete on sitefailovers in the ledger namespace at each site (row
+16 of the permissions table), and, when a run has a follow-up Rebuild, get on
+the workload's objects (row 7). The rules, and how to delete a kept run by
+hand:
+  ` + version.DocLink("docs/old-ledgers.md") + `
 
 An agent never starts "tack prune" without an explicit instruction from a
 human for that workload.`
@@ -105,7 +103,7 @@ func newPrune(o *options) *cobra.Command {
 				return err
 			}
 			if d := p.differs(again); d != "" {
-				return fmt.Errorf("the runs changed since they were listed: %s. Nothing was deleted: prune again", d)
+				return fmt.Errorf("the runs changed since they were listed: %s. Nothing was deleted; prune again", d)
 			}
 			for i, r := range del {
 				cl, err := checks.Client(r.site)
@@ -130,7 +128,7 @@ func newPrune(o *options) *cobra.Command {
 
 // deleted is the error of a delete that failed after done deletes.
 func deleted(done, of int, err error) error {
-	return fmt.Errorf("%w. Deleted %d of %s; the others stay: prune again once the cause is fixed", err, done, ledgers(of))
+	return fmt.Errorf("%w. Deleted %d of %s; the others stay. Fix the cause, then prune again", err, done, ledgers(of))
 }
 
 // ledgers counts ledgers: "1 ledger", "2 ledgers".

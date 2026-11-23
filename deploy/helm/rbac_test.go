@@ -25,7 +25,7 @@ const (
 	chart     = "tack"
 	release   = "tack"
 	ledgerNS  = "tack-system"
-	tableDoc  = "../../docs/operations.md"
+	tableDoc  = "../../docs/permissions.md"
 	tableHead = "| # | Resource | Verbs | Namespace | Commands | For |"
 	// namedFact is the table's fact on resourceNames, which the test checks word for word.
 	namedFact = "| `resourceNames` | Rows 3, 7 to 13 and 20 can name their objects."
@@ -137,7 +137,7 @@ var (
 	nameRE     = regexp.MustCompile("^name `([^`]+)`$")
 )
 
-// table reads the permissions table of docs/operations.md. It fails on a row it does not understand, and unless
+// table reads the permissions table of docs/permissions.md. It fails on a row it does not understand, and unless
 // the rows are numbered 1, 2, 3 and on.
 func table(t *testing.T) []row {
 	t.Helper()
@@ -372,7 +372,7 @@ func sorted(gs []grant) []grant {
 }
 
 // TestRolesMatchPermissionsTable: with rbac.create, the chart's roles grant exactly the rows of the permissions
-// table in docs/operations.md, each in its scope, and name the objects of each row that can name them, so the two
+// table in docs/permissions.md, each in its scope, and name the objects of each row that can name them, so the two
 // cannot drift apart ([RFC#0009] Requirement 29).
 func TestRolesMatchPermissionsTable(t *testing.T) {
 	got := sorted(rendered(t, render(t, values)))
@@ -472,16 +472,16 @@ func TestChartLints(t *testing.T) {
 	}
 }
 
-// TestNotesNameTheWriteCheck (#62): each install and upgrade prints the check of who may write ledgers, with a link at
+// TestNotesNameTheWriteCheck: each install and upgrade prints the check of who may write ledgers, with a link at
 // the chart's release tag, or at main for a chart that is not of a release ([RFC#0009] Requirement 29). The roles
 // only grant access, so they cannot keep a GitOps controller from writing ledgers: only that check finds it.
 func TestNotesNameTheWriteCheck(t *testing.T) {
-	const anchor = "docs/operations.md#who-may-write-ledgers"
+	const anchor = "docs/permissions.md#who-may-write-ledgers"
 	doc, err := os.ReadFile(tableDoc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(doc), "\n### Who may write ledgers\n") {
+	if !strings.Contains(string(doc), "\n## Who may write ledgers\n") {
 		t.Fatalf("%s has no heading for %s", tableDoc, anchor)
 	}
 	packaged := t.TempDir()
@@ -505,8 +505,8 @@ func TestNotesNameTheWriteCheck(t *testing.T) {
 	}
 }
 
-// #66. crds.keep kept its earlier value across helm upgrade without values, so a release once set to false stayed
-// false, and helm uninstall would then delete the CRD and every ledger. Each install and upgrade prints the values in
+// crds.keep keeps its earlier value across helm upgrade without values, and a release once set to false would stay
+// false, so helm uninstall would delete the CRD and every ledger. Each install and upgrade prints the values in
 // force, and warns while crds.keep is false ([RFC#0009] Requirement 29).
 func TestNotesPrintCRDValues(t *testing.T) {
 	const warning = "WARNING: crds.keep is false, so helm uninstall, or an upgrade with crds.install=false, deletes the CRD and every ledger at this site"

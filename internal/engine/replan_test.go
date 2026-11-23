@@ -56,7 +56,7 @@ func loadLedger(t *testing.T, file string) *failoverv1.SiteFailover {
 	return &sf
 }
 
-// #35 row 11. Anyone who may create a ledger can plant a run, and tack
+// Anyone who may create a ledger can plant a run, and tack
 // resume ran its steps with the operator's credentials. Each ledger below
 // is a run's own plan with one change; tack resume refuses it before it
 // changes or writes anything ([RFC#0003] Requirement 21).
@@ -188,8 +188,8 @@ func TestResumeAcceptsItsOwnPlan(t *testing.T) {
 	}
 }
 
-// #35 row 50. Before v1.3.0, a site written as n in the Workload file was
-// recorded as "false". The check of site names reads the file only: a
+// Ledgers of tack before v1.3.0 record a site written as n in the Workload
+// file as "false". The check of site names reads the file only: a
 // ledger that names a site "false" still resumes, and a file that quotes
 // the name as "false" still finds it.
 func TestResumeAcceptsSiteNamedFalse(t *testing.T) {

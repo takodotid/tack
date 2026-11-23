@@ -1,5 +1,5 @@
-// What the home page says. Each line is taken from a page of the docs, which stays the authority: the plan from
-// guide/getting-started.md, the phases and modes from guide/concepts.md, the stops from runbooks/stop-reasons.md.
+// What the home page says, taken from the docs: the plan from guide/getting-started.md, the phases and modes from
+// guide/concepts.md, the stops from runbooks/stop-reasons.md.
 
 export const REPOSITORY = "https://github.com/takodotid/tack";
 
@@ -13,9 +13,9 @@ export const PLAN: Line[] = [
     { text: "" },
     { text: "Failover", kind: "head" },
     { text: "   9. demote-a  site a", kind: "step" },
-    { text: "      demote Cluster pg-a: declare pg-b primary" },
+    { text: "      demote Cluster pg-a: declare pg-b primary and drop any old token" },
     { text: "  10. wait-demoted-a  site a", kind: "step" },
-    { text: "      wait until Cluster pg-a has published its demotion token" },
+    { text: "      wait until Cluster pg-a has demoted and published its demotion token" },
     { text: "  11. capture-token  site a", kind: "step" },
     { text: "      record the demotion token of Cluster pg-a in the ledger" },
     { text: "  12. promote-b  site b", kind: "step" },
@@ -63,7 +63,7 @@ export const MODES = [
     {
         name: "Planned",
         flag: "--mode planned",
-        when: "Both sites answer. This is the default.",
+        when: "Both sites answer. The default.",
         happens: "The old primary demotes and hands its token to the new one. No write is lost.",
         link: "/guide/concepts#two-modes",
         linkText: "The two modes",

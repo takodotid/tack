@@ -280,7 +280,7 @@ func TestPositionsThatDoNotCompare(t *testing.T) {
 		t.Errorf("refused when b's position cannot be read: %v", err)
 	}
 	notes := strings.Join(Driver{}.Notes(w, topo, req), "\n")
-	for _, want := range []string{"warning: site b: the WAL position could not be read", "pods/proxy", "docs/operations.md#permissions"} {
+	for _, want := range []string{"warning: site b: the WAL position could not be read", "pods/proxy", "docs/permissions.md"} {
 		if !strings.Contains(notes, want) {
 			t.Errorf("notes %q do not say %q", notes, want)
 		}
@@ -306,7 +306,7 @@ func TestSiteLossNotes(t *testing.T) {
 	notes := strings.Join(Driver{}.Notes(w, topo, driver.Request{From: "a", To: "b", Mode: failoverv1.ModeSiteLoss}), "\n")
 	for _, want := range []string{
 		"replication between sites is asynchronous. Site b reaches 0/3000060",
-		"this run loses them (the RPO)",
+		"are lost (the RPO)",
 		"warning: site b: Cluster sets spec.replica.minApplyDelay 1h",
 		"warning: site b: WAL replay is paused",
 	} {
@@ -335,7 +335,7 @@ func TestSiteLossSaysTheLastReplayedCommit(t *testing.T) {
 	}
 }
 
-// #94: the replay time, its age by Tack's clock, and what is printed
+// The replay time, its age by Tack's clock, and what is printed
 // without it.
 func TestReplayTime(t *testing.T) {
 	defer func(f func() time.Time) { now = f }(now)
@@ -360,7 +360,7 @@ func TestReplayTime(t *testing.T) {
 	if p.LastCommit == nil || !p.LastCommit.Equal(at.Add(500*time.Millisecond)) || p.CommitAge != time.Hour-time.Second || p.CommitNote != "" || p.ReplayLag == nil {
 		t.Errorf("site b: %+v", p)
 	}
-	if n := notesTo("b"); !strings.Contains(n, "Its last replayed commit is from 2026-11-13T09:00:00.5Z, by the old primary's clock (59m59s before this plan, by Tack's clock). The writes that the old primary committed after it are lost, and so may be a few committed just before it, under concurrent writes. The writes that the old primary took after that are not in it") || strings.Contains(n, "at least") {
+	if n := notesTo("b"); !strings.Contains(n, "Its last replayed commit is from 2026-11-13T09:00:00.5Z, by the old primary's clock (59m59s before this plan, by Tack's clock). The writes that the old primary committed after it are lost, and so may be a few committed just before it, under concurrent writes. The old primary's later writes are lost (the RPO)") || strings.Contains(n, "at least") {
 		t.Errorf("notes %q", n)
 	}
 
@@ -402,7 +402,7 @@ func TestReplayTime(t *testing.T) {
 	}
 }
 
-// #94: the e2e's copy of the query is deploy/cnpg/replay-time.yaml, and
+// The e2e's copy of the query is deploy/cnpg/replay-time.yaml, and
 // the metric it makes is the one Tack reads: cnpg_<query>_<column>.
 func TestReplayTimeQuery(t *testing.T) {
 	read := func(path string) *corev1.ConfigMap {

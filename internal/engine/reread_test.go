@@ -91,12 +91,11 @@ func (f *fixture) resumeWith(clients *failingClients, opts engine.Options) (*fai
 
 var unavailable = apierrors.NewServiceUnavailable("the server is currently unable to handle the request")
 
-// #64. A planned run is killed before the promotion, the window with no
+// A planned run is killed before the promotion, the window with no
 // writable primary. The resume's read of site a before the promotion
 // fails once, after a answered its check: a connection reset, a 503 or a
 // 429. The read is repeated with the pauses of a's checks, and the run
-// promotes b. v1.4.0 stopped with StepFailed, and the window lasted until
-// an operator resumed again.
+// promotes b.
 func TestReadBeforePromotionRepeatedAfterBlip(t *testing.T) {
 	for name, blip := range map[string]error{
 		"connection reset": reset,
@@ -126,7 +125,7 @@ func TestReadBeforePromotionRepeatedAfterBlip(t *testing.T) {
 	}
 }
 
-// #64. The read of a before the promotion fails on each of its 3 tries: the
+// The read of a before the promotion fails on each of its 3 tries: the
 // run stops with StepFailed before the promotion, which keeps its state,
 // and b is unchanged. A repeat that runs out never counts the site as
 // giving no answer, which would let the promotion go on ([RFC#0007]
@@ -153,7 +152,7 @@ func TestReadBeforePromotionThatKeepsFailingStops(t *testing.T) {
 	}
 }
 
-// #64. A read that the API server refuses, such as a 403, or answers that
+// A read that the API server refuses, such as a 403, or answers that
 // the object is gone is not a blip: it is not repeated, and the run stops
 // at once.
 func TestReadRefusedIsNotRepeated(t *testing.T) {
@@ -170,7 +169,7 @@ func TestReadRefusedIsNotRepeated(t *testing.T) {
 	}
 }
 
-// #64. In the window with no writable primary, the steps' own reads are
+// In the window with no writable primary, the steps' own reads are
 // repeated too: the capture of a's demotion token, and the compare of it
 // with its source before the promotion, each fail once after a's checks
 // and reads before them passed. The run promotes b with the token.
@@ -221,7 +220,7 @@ func (f *flakyHolds) HeldBy(ctx context.Context, site string, obj failoverv1.Obj
 	return f.Flux.HeldBy(ctx, site, obj)
 }
 
-// #64. The check of the hold right before the promotion's patch reads the
+// The check of the hold right before the promotion's patch reads the
 // object through Flux, and fails once: it is repeated, and the run
 // promotes b.
 func TestHoldReadBeforePatchRepeatedAfterBlip(t *testing.T) {
@@ -239,7 +238,7 @@ func TestHoldReadBeforePatchRepeatedAfterBlip(t *testing.T) {
 	}
 }
 
-// #64. An interrupt during the pause of a repeated read stops the run
+// An interrupt during the pause of a repeated read stops the run
 // before the step, which keeps its state, as an interrupt during a check
 // does.
 func TestInterruptDuringReadRepeatKeepsStep(t *testing.T) {
@@ -276,11 +275,10 @@ func (f *fixture) lostSiteBack() {
 	f.clients.SetDown("a", false)
 }
 
-// #64, RFC0007 Requirement 6: the read before a site's steps reads that
+// RFC0007 Requirement 6: the read before a site's steps reads that
 // site only, since it does not use the state of any other. In a resume
 // after a site loss, a comes back, and only a's steps are left: b gets no
-// check and no read. v1.4.0 checked and read b in the read before a's
-// steps.
+// check and no read.
 func TestReadBeforeStepsReadsOnlyItsSite(t *testing.T) {
 	f := newFixture(t)
 	f.lostSiteBack()
@@ -301,10 +299,9 @@ func TestReadBeforeStepsReadsOnlyItsSite(t *testing.T) {
 	}
 }
 
-// #64. A read error at a site that a step does not need does not stop it:
+// A read error at a site that a step does not need does not stop it:
 // b's Cluster refuses every read, and the resume still holds and fences a,
-// the site that came back. v1.4.0 stopped before a's steps with StepFailed
-// on b's error.
+// the site that came back.
 func TestReadBeforeStepsIgnoresErrorAtAnotherSite(t *testing.T) {
 	f := newFixture(t)
 	f.lostSiteBack()

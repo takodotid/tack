@@ -37,7 +37,7 @@ func at(t *metav1.Time) string {
 	return t.UTC().Format(time.RFC3339)
 }
 
-// #35 row 17 (RFC0003 Requirements 4 and 12). A step that ends Failed gets
+// RFC0003 Requirements 4 and 12: a step that ends Failed gets
 // finishedAt, after its startedAt and with its attempt.
 func TestFailedStepFinishes(t *testing.T) {
 	f := newFixture(t)
@@ -109,11 +109,11 @@ func TestDeferredStepsFinishTheirPhases(t *testing.T) {
 	}
 }
 
-// PR #42's finding (RFC0003 Requirement 12). v1.2.0 ended a phase only
-// after a step of it succeeded, so a site-loss run whose lost site's steps
-// came last in a phase left that phase unfinished. The ledger below is
-// such a run, as v1.2.0 wrote it: b lost, Hold, PromoteToGitOps and
-// Release unfinished. A resume while b stays down ends them.
+// RFC0003 Requirement 12: ledgers of v1.2.0 ended a phase only after a
+// step of it succeeded, so a site-loss run whose lost site's steps came
+// last in a phase left that phase unfinished. The ledger below is such a
+// run: b lost, Hold, PromoteToGitOps and Release unfinished. A resume
+// while b stays down ends them.
 func TestResumeEndsPhasesLeftUnfinished(t *testing.T) {
 	f := newFixture(t)
 	f.clients.SetDown("b", true)

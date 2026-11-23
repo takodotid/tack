@@ -28,6 +28,8 @@ const sidebar: DefaultTheme.SidebarItem[] = [
         text: "Operations",
         items: [
             { text: "Running Tack", link: "/operations" },
+            { text: "Old ledgers", link: "/old-ledgers" },
+            { text: "Permissions", link: "/permissions" },
             { text: "Data loss and downtime", link: "/wal-rpo-rto" },
             { text: "Fail over after a site loss", link: "/runbooks/site-loss" },
             { text: "Recover the old primary's writes", link: "/runbooks/recover-old-primary-writes" },
@@ -200,7 +202,7 @@ export default defineConfig({
     themeConfig: {
         nav: [
             { text: "Guide", link: "/guide/introduction", activeMatch: "^/guide/" },
-            { text: "Operations", link: "/operations", activeMatch: "^/(operations|wal-rpo-rto|runbooks/)" },
+            { text: "Operations", link: "/operations", activeMatch: "^/(operations|old-ledgers|permissions|wal-rpo-rto|runbooks/)" },
             { text: "Reference", link: "/reference/cli", activeMatch: "^/(reference/|workload)" },
             { text: "Limitations", link: "/limitations" },
             { text: "Releases", link: `${REPOSITORY}/releases` },

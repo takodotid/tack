@@ -160,7 +160,7 @@ func jobsJSON(jobs []string, conclusions map[string]string) string {
 }
 
 // The release starts only for a signed tag vX.Y.Z on main whose ci run on main succeeded in every job ([RFC#0009]
-// Requirement 19). Found in a review (#33): any v* tag published a release.
+// Requirement 19): any v* tag would otherwise publish a release.
 func TestGate(t *testing.T) {
 	const (
 		repo   = "o/r"
@@ -349,8 +349,7 @@ func TestPinned(t *testing.T) {
 }
 
 // install.sh refuses a download whose SHA-256 is not the one pinned, and installs nothing ([RFC#0009] Requirement 25).
-// Found in a review (#35, rows 25 and 46): the release's helm was the latest one, and the e2e checked its tools
-// against checksums fetched from the same place.
+// The release's helm is the pinned one, and the e2e checks its tools against checksums pinned in the repository.
 func TestInstallChecksSHA256(t *testing.T) {
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64" {
 		t.Skip("install.sh pins Linux on amd64 and arm64 only")
@@ -417,7 +416,7 @@ func TestInstallRefusesTwoVersions(t *testing.T) {
 	}
 }
 
-// #66. Renovate did not update the tools' pins. renovate.json's custom managers read every line of install.sh: the
+// Renovate updates the tools' pins. renovate.json's custom managers read every line of install.sh: the
 // version of each, and the SHA-256 of kind, flux, cosign and vale, whose downloads are GitHub release assets. kubectl and
 // helm have their SHA-256 copied by hand: no manager reads it, so Renovate never writes something else there.
 func TestRenovateReadsEveryPin(t *testing.T) {

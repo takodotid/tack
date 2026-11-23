@@ -28,7 +28,7 @@ func (f *fixture) lostSiteReturnsAfterCommit(rev func(commit string) string) *fa
 	return sf
 }
 
-// #35 row 14 (RFC0007 Design). A lost site comes back after the run's
+// RFC0007 Design: a lost site comes back after the run's
 // commit, and Flux there applied that commit, which fences it. The resume
 // holds and releases the site: the run's own commit is not a Git change.
 func TestLostSiteReturnsAfterCommit(t *testing.T) {

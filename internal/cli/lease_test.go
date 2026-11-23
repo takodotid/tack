@@ -32,12 +32,11 @@ func leaseFor(sf *failoverv1.SiteFailover, by string, renewed time.Time) *coordi
 
 const otherProcess = "tack v9.9.9, process 7 on host-a"
 
-// #65. tack abandon marked a run while a tack process still ran it, and a
-// step in flight could land after the next run took over. The process
-// holds the run's Lease: abandon refuses while it is fresh, before it
-// asks and changing nothing; --force goes on, and the history records it.
-// A Lease that expired, or that its process released, lets abandon mark
-// the run.
+// A step in flight could land after the next run took over, so the
+// process that runs a run holds its Lease: abandon refuses while it is
+// fresh, before it asks and changing nothing; --force goes on, and the
+// history records it. A Lease that expired, or that its process released,
+// lets abandon mark the run.
 func TestAbandonRefusesRunWithFreshLease(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
@@ -67,7 +66,7 @@ func TestAbandonRefusesRunWithFreshLease(t *testing.T) {
 			got := ledgerAt(t, f, "b", sf.Name)
 			if tt.refused {
 				if code != ExitError || !strings.Contains(out, "a tack process may still run the run: run pg-main-earlier is run by "+otherProcess+", whose lease on it was renewed at 2026-10-27T10:14:55Z and holds until 2026-10-27T10:15:35Z") ||
-					!strings.Contains(out, "--force goes on all the same. Nothing was changed") || strings.Contains(out, "Type the workload name") {
+					!strings.Contains(out, "Nothing was changed; --force goes on anyway") || strings.Contains(out, "Type the workload name") {
 					t.Fatalf("exit %d, want %d with the refusal before the question:\n%s", code, ExitError, out)
 				}
 				if got.Status.Abandoned != nil || got.ResourceVersion != sf.ResourceVersion {
@@ -79,7 +78,7 @@ func TestAbandonRefusesRunWithFreshLease(t *testing.T) {
 				t.Fatalf("exit %d, abandoned %v:\n%s", code, got.Status.Abandoned, out)
 			}
 			flags := got.Status.History[len(got.Status.History)-1].Flags
-			notes := strings.Count(out, "  note      --force: going on, although run pg-main-earlier is run by "+otherProcess)
+			notes := strings.Count(out, "  note      --force: going on although run pg-main-earlier is run by "+otherProcess)
 			if tt.force != slices.Contains(flags, "--force") || tt.force != (notes == 1) || notes > 1 || strings.Contains(out, "all the same\n") {
 				t.Errorf("--force %v: history flags %v:\n%s", tt.force, flags, out)
 			}
@@ -87,7 +86,7 @@ func TestAbandonRefusesRunWithFreshLease(t *testing.T) {
 	}
 }
 
-// Review of #67. A tack process takes the run's Lease while the operator
+// A tack process takes the run's Lease while the operator
 // answers abandon's question, such as a tack resume started meanwhile: the
 // check before the question passed, and the check after it refuses, exits
 // 1 and leaves the ledger unchanged. --force goes on, and says once what it
@@ -115,7 +114,7 @@ func TestAbandonChecksLeaseAgainAfterQuestion(t *testing.T) {
 			after := out[question:]
 			if !force {
 				if code != ExitError || !strings.Contains(after, "a tack process may still run the run: run pg-main-earlier is run by "+otherProcess+", whose lease on it was renewed at 2026-10-27T10:14:59Z") ||
-					!strings.Contains(after, "--force goes on all the same. Nothing was changed") {
+					!strings.Contains(after, "Nothing was changed; --force goes on anyway") {
 					t.Fatalf("exit %d, want %d with the refusal after the question:\n%s", code, ExitError, out)
 				}
 				if got.Status.Abandoned != nil || got.ResourceVersion != sf.ResourceVersion {
@@ -126,14 +125,14 @@ func TestAbandonChecksLeaseAgainAfterQuestion(t *testing.T) {
 			if code != ExitOK || got.Status.Abandoned == nil {
 				t.Fatalf("exit %d, abandoned %v:\n%s", code, got.Status.Abandoned, out)
 			}
-			if n := strings.Count(out, "  note      --force: going on, although run pg-main-earlier is run by "+otherProcess); n != 1 || !strings.Contains(after, "--force: going on") {
+			if n := strings.Count(out, "  note      --force: going on although run pg-main-earlier is run by "+otherProcess); n != 1 || !strings.Contains(after, "--force: going on") {
 				t.Errorf("%d notes of --force, want 1 after the question:\n%s", n, out)
 			}
 		})
 	}
 }
 
-// #65. tack run --take-over refuses a run whose Lease another process
+// tack run --take-over refuses a run whose Lease another process
 // renewed a moment ago: that process may still change the workload. It
 // refuses after the confirmation, before the ledger exists. --force goes
 // on, and the new run's history records it; --force without --take-over
@@ -190,7 +189,7 @@ func v140Ledger(t *testing.T, name string) *failoverv1.SiteFailover {
 	return &sf
 }
 
-// #65. Ledgers that v1.4.0 wrote have no Lease, and stay usable under this
+// Ledgers that v1.4.0 wrote have no Lease, and stay usable under this
 // tack: tack status lists them, tack resume finishes the stopped run and
 // holds its Lease, and tack abandon judges the Running run by its ledger:
 // it refuses while its Running step's timeout and 5 minutes have not

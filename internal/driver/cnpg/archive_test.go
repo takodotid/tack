@@ -41,7 +41,7 @@ func inTree(path, server string) map[string]any {
 	return map[string]any{"backup": map[string]any{"barmanObjectStore": store}}
 }
 
-// #74 row 2, [RFC#0004] Requirement 16: two sites that archive WAL to the
+// [RFC#0004] Requirement 16: two sites that archive WAL to the
 // same destination, the same path and server name, are refused in a
 // planned switchover, and warned of in a site loss. A shared path with
 // each Cluster's own server name is no clash.
@@ -103,7 +103,7 @@ func TestSharedArchiveThroughThePlugin(t *testing.T) {
 	}
 }
 
-// #74 row 1: a plan notes a target whose archiving fails now.
+// A plan notes a target whose archiving fails now.
 func TestTargetArchivingFails(t *testing.T) {
 	objects := map[string][]client.Object{}
 	for _, s := range []string{"a", "b", "c"} {
