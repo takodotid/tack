@@ -118,16 +118,14 @@ The ledger resource is Tack's contract with its users and with a future controll
 
 ### Keeping text lean
 
-The docs, RFCs, help texts and comments are cut to what a reader needs. Keep them that way.
-
 - **Search before adding.** Before writing a fact, `rg` for it. If a page owns it, link there.
-- **Never restore cut text.** Text removed from an earlier version is not a template. Add a sentence only for a fact that is new or missing.
-- **An edit adds a fact or removes words.** Rewording short text adds nothing.
-- **A table cell is one value or one short sentence,** about 30 words at most. More becomes a list or a section.
-- **No history anywhere:** no issue, PR or review references such as `(#35)` or `#35 row 47`, no "since v1.3.0" or "used to". Per-release notes live only in `docs/guide/upgrade.md`. `make prose` checks the references.
+- **Never grow prose back.** An edit keeps or lowers the word count of what it touches, unless it adds a new fact. Never restore cut text, or add reasons, examples or restatements to it.
+- **Effect, then action.** A table cell or a comment states the effect and what to do, in one or two sentences, about 30 words at most. The mechanism lives in the requirement or RFC it cites. More becomes a list or a section.
+- **No history anywhere:** no issue, PR or review references such as `(#35)` or `#35 row 47`, no "since v1.3.0" or "used to". Per-release notes live only in the upgrade and rollback guides. `make prose` checks the references.
 - **No line references into other projects' source.** Name the version, link the upstream docs.
 - **No meta lines:** no `This page explains`, no recap, no sentence that repeats a heading, table, code block or link text.
-- **RFC Requirements hold rules only.** Reasons go in Motivation, steps in `docs/runbooks/`.
+- **RFC Requirements hold rules only.** Reasons go in Motivation, never deleted; steps go in `docs/runbooks/`.
+- **README is a pitch and links.** It holds no commands or tables from the guides.
 
 | Fact | Owner |
 |---|---|
@@ -144,8 +142,6 @@ The docs, RFCs, help texts and comments are cut to what a reader needs. Keep the
 | per-release upgrade notes | `docs/guide/upgrade.md` |
 | contributing, the end-to-end test, reproducing a release | `docs/contributing.md` |
 | rules Tack follows | the RFC that owns the subject; docs link to it, never restate it |
-
-`README.md` is a pitch and links. It holds no commands or tables from the guides.
 
 ## Commits
 
