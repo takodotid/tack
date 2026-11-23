@@ -29,10 +29,10 @@ GIT_HOST_PORT=${TACK_E2E_GIT_PORT:-28180}
 # tag that moves changes nothing ([RFC#0009] Requirement 25). The fixtures
 # name the same images.
 KIND_NODE_IMAGE=kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
-FLUX_VERSION=v2.10.0
+FLUX_VERSION=v2.10.1
 FLUX_COMPONENTS=source-controller,kustomize-controller
-FLUX_SOURCE_IMAGE=ghcr.io/fluxcd/source-controller:v1.10.1@sha256:611b6bca3eae95bcff471414d1fb14a4ab83d7f14e609cccef2bd389c121f37e
-FLUX_KUSTOMIZE_IMAGE=ghcr.io/fluxcd/kustomize-controller:v1.10.1@sha256:37db29b25dae35b881a5e064acedb0cc954442da453a39eaa0eab7a90dbecc4e
+FLUX_SOURCE_IMAGE=ghcr.io/fluxcd/source-controller:v1.10.2@sha256:1405a9e460833df9aff920664243c0df271f42be05e0bf38db31d2b7e9ebbaab
+FLUX_KUSTOMIZE_IMAGE=ghcr.io/fluxcd/kustomize-controller:v1.10.2@sha256:e122808057ef0f6a3cb7fbd8e256b5a528d8a59f41d237f2d6664f54481c26d9
 CNPG_VERSION=1.30.1
 CNPG_MANIFEST_URL=https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$CNPG_VERSION/cnpg-$CNPG_VERSION.yaml
 CNPG_MANIFEST_SHA256=37237f145d8138256ea25ae830f87759255665ff08f8d552fdd8224a5ec032fb

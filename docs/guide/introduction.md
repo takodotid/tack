@@ -39,7 +39,7 @@ Tack changes the database only through CloudNativePG's own API, and records ever
 | GitOps | Flux kustomize-controller with a `GitRepository` source. One Git repository serves all sites. |
 | Routing check | Optional. Reads the `SiteService` status of [Strait](https://github.com/takodotid/strait) v1.0.0 or later. Strait routes clients to the primary. |
 | Platforms | Linux, macOS and Windows, amd64 and arm64. |
-| Tested with | CloudNativePG v1.30.1, Flux v2.10.0 and Kubernetes v1.37, in the end-to-end test. |
+| Tested with | CloudNativePG v1.30.1, Flux v2.10.1 and Kubernetes v1.37, in the end-to-end test. |
 
 ## Versions
 
