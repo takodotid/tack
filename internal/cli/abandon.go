@@ -92,7 +92,7 @@ func newAbandon(o *options) *cobra.Command {
 				return nil
 			}
 			if sf.Status.State == failoverv1.RunSucceeded && !hasDeferred(sf) {
-				return fmt.Errorf("run %s succeeded, and no step of it is left: there is nothing to abandon", sf.Name)
+				return fmt.Errorf("run %s succeeded with no step left: nothing to abandon", sf.Name)
 			}
 			if err := engine.CheckWriter(sf); err != nil {
 				return err
@@ -105,7 +105,7 @@ func newAbandon(o *options) *cobra.Command {
 				for _, h := range held {
 					fmt.Fprintf(out, "  %s at site %s\n", ref(h.Object), h.Site)
 				}
-				fmt.Fprintf(out, "Abandon does not read the objects: a hold removed by hand is still listed. A hold still on an object stays after the run is abandoned: remove it once Git equals live (%s), or start the next run with --take-over %s.\n", version.DocLink("docs/runbooks/abandon-run.md"), sf.Name)
+				fmt.Fprintf(out, "Abandon does not read the objects: a hold removed by hand is still listed. A hold still on an object stays after abandon: remove it once Git equals live (%s), or start the next run with --take-over %s.\n", version.DocLink("docs/runbooks/abandon-run.md"), sf.Name)
 			}
 			// A process that runs the run holds its lease: abandon checks
 			// it before it asks, and again after.
@@ -144,7 +144,7 @@ func newAbandon(o *options) *cobra.Command {
 			engine.Stamp(&sf.Status)
 			if err := env.Ledger.UpdateStatus(ctx, sf); err != nil {
 				if apierrors.IsConflict(err) {
-					return fmt.Errorf("the ledger of run %s changed since it was read, so another tack process may be running it. Nothing was changed: check, then abandon it again: %w", sf.Name, err)
+					return fmt.Errorf("the ledger of run %s changed since it was read; another tack process may be running it. Nothing was changed. Check, then abandon again: %w", sf.Name, err)
 				}
 				return fmt.Errorf("write the ledger of run %s: %w", sf.Name, err)
 			}
@@ -153,7 +153,7 @@ func newAbandon(o *options) *cobra.Command {
 				return fmt.Errorf("read the ledger of run %s back: %w", sf.Name, err)
 			}
 			if back.Status.Abandoned == nil {
-				return errors.New("the ledger's site dropped status.abandoned, so its CRD is older than this tack: apply this version's CRD there, then abandon the run again")
+				return errors.New("the ledger's site dropped status.abandoned: its CRD is older than this tack. Apply this version's CRD there, then abandon again")
 			}
 			if rec, ok := env.Ledger.(engine.Recorder); ok && len(back.Status.History) > 0 {
 				env.EventOn(ctx, rec, back, true, "Run"+string(failoverv1.HistoryAbandoned), engine.EntryText(back.Status.History[len(back.Status.History)-1]))
@@ -193,9 +193,9 @@ func (o *options) checkLive(ctx context.Context, progress io.Writer, store engin
 	case err == nil:
 		return nil
 	case !force:
-		return fmt.Errorf("%w. --force goes on all the same. Nothing was changed", err)
+		return fmt.Errorf("%w. Nothing was changed; --force goes on anyway", err)
 	}
-	fmt.Fprintf(progress, "  note      --force: going on, although %v\n", strings.TrimPrefix(err.Error(), engine.ErrMayRun.Error()+": "))
+	fmt.Fprintf(progress, "  note      --force: going on although %v\n", strings.TrimPrefix(err.Error(), engine.ErrMayRun.Error()+": "))
 	return nil
 }
 

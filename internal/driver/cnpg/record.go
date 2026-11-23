@@ -186,7 +186,7 @@ func (Driver) recordSnapshot(ctx context.Context, w *failoverv1.WorkloadSpec, cl
 	case "completed":
 	case "failed", "invalid backup definition":
 		msg, _, _ := unstructured.NestedString(b.Object, "status", "error")
-		return nil, fmt.Errorf("the Backup %s/%s is %s: %s. Fix the cause (the Cluster needs spec.backup.volumeSnapshot, and the site VolumeSnapshot support), delete the Backup, then resume: the step creates it again", b.GetNamespace(), b.GetName(), phase, orNone(msg))
+		return nil, fmt.Errorf("the Backup %s/%s is %s: %s. The Cluster needs spec.backup.volumeSnapshot, and the site VolumeSnapshot support. Delete the Backup, then resume: the step creates it again", b.GetNamespace(), b.GetName(), phase, orNone(msg))
 	default:
 		return &driver.Recorded{Message: fmt.Sprintf("Backup %s/%s is %s", b.GetNamespace(), b.GetName(), orNone(phase))}, nil
 	}
@@ -388,7 +388,7 @@ func sharedArchives(t *driver.Topology) [][2]driver.SiteState {
 
 // sharedMessage says that two sites archive to one destination.
 func sharedMessage(p [2]driver.SiteState) string {
-	return fmt.Sprintf("sites %s and %s archive WAL to the same destination, %s (Cluster %s: %s; Cluster %s: %s): both write the same WAL file names there, and a site's archive must hold only its own Cluster's history. Give each Cluster its own destination, such as its own serverName (%s)",
+	return fmt.Sprintf("sites %s and %s archive WAL to the same destination, %s (Cluster %s: %s; Cluster %s: %s): both write the same WAL file names there. Give each Cluster its own destination, such as its own serverName (%s)",
 		p[0].Name, p[1].Name, p[0].Facts[factDestination], p[0].Facts[factCluster], p[0].Facts[factArchive], p[1].Facts[factCluster], p[1].Facts[factArchive],
 		version.DocLink("docs/workload.md#wal-archives"))
 }

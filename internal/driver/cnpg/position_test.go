@@ -306,7 +306,7 @@ func TestSiteLossNotes(t *testing.T) {
 	notes := strings.Join(Driver{}.Notes(w, topo, driver.Request{From: "a", To: "b", Mode: failoverv1.ModeSiteLoss}), "\n")
 	for _, want := range []string{
 		"replication between sites is asynchronous. Site b reaches 0/3000060",
-		"this run loses them (the RPO)",
+		"are lost (the RPO)",
 		"warning: site b: Cluster sets spec.replica.minApplyDelay 1h",
 		"warning: site b: WAL replay is paused",
 	} {
@@ -360,7 +360,7 @@ func TestReplayTime(t *testing.T) {
 	if p.LastCommit == nil || !p.LastCommit.Equal(at.Add(500*time.Millisecond)) || p.CommitAge != time.Hour-time.Second || p.CommitNote != "" || p.ReplayLag == nil {
 		t.Errorf("site b: %+v", p)
 	}
-	if n := notesTo("b"); !strings.Contains(n, "Its last replayed commit is from 2026-11-13T09:00:00.5Z, by the old primary's clock (59m59s before this plan, by Tack's clock). The writes that the old primary committed after it are lost, and so may be a few committed just before it, under concurrent writes. The writes that the old primary took after that are not in it") || strings.Contains(n, "at least") {
+	if n := notesTo("b"); !strings.Contains(n, "Its last replayed commit is from 2026-11-13T09:00:00.5Z, by the old primary's clock (59m59s before this plan, by Tack's clock). The writes that the old primary committed after it are lost, and so may be a few committed just before it, under concurrent writes. The old primary's later writes are lost (the RPO)") || strings.Contains(n, "at least") {
 		t.Errorf("notes %q", n)
 	}
 

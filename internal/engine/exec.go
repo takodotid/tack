@@ -457,7 +457,7 @@ func (r *runner) wait(ctx context.Context, s *failoverv1.Step) (string, error) {
 			case !behind || p != progress:
 				progress, since = p, r.now()
 			case r.now().Sub(since) >= s.Wait.Stall.Duration:
-				return "", fmt.Errorf("stopped before the timeout: %s, has not moved for %s, and the wait needs more: %s. Check that WAL still reaches site %s. The change made stays: the workload goes on once it catches up, and a resume waits again",
+				return "", fmt.Errorf("stopped before the timeout: %s, has not moved for %s, and the wait needs more: %s. Check that WAL still reaches site %s. The change stays: the workload goes on once it catches up, and a resume waits again",
 					p, s.Wait.Stall.Duration, last, s.Site)
 			}
 		}
@@ -724,10 +724,10 @@ func CheckWriter(sf *failoverv1.SiteFailover) error {
 	case !version.Newer(by, version.Version):
 		return nil
 	case !version.Named(version.Version):
-		return fmt.Errorf("%w: run %s was last written by tack %s, and this tack is %s, which names no release, so it cannot tell which status fields that ledger holds: its writes could drop them. Nothing was changed: use tack %s or later",
+		return fmt.Errorf("%w: run %s was last written by tack %s, and this tack is %s, which names no release, so it cannot tell which status fields that ledger holds. Nothing was changed: use tack %s or later",
 			ErrNewerLedger, sf.Name, by, version.Version, by)
 	}
-	return fmt.Errorf("%w: run %s was last written by tack %s, and this tack is %s, which is older: its writes would drop the status fields that it does not know. Nothing was changed: use tack %s or later",
+	return fmt.Errorf("%w: run %s was last written by tack %s, and this tack is %s, which is older and would drop status fields it does not know. Nothing was changed: use tack %s or later",
 		ErrNewerLedger, sf.Name, by, version.Version, by)
 }
 

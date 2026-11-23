@@ -393,10 +393,10 @@ func positionNotes(w *failoverv1.WorkloadSpec, t *driver.Topology, r driver.Requ
 		return notes
 	}
 	if l, ok := reach(tp); ok {
-		notes = append(notes, fmt.Sprintf("site loss: replication between sites is asynchronous. Site %s reaches %s.%s The writes that the old primary took after that are not in it: this run loses them (the RPO), and they stay only at site %s, which the follow-up Rebuild recreates",
+		notes = append(notes, fmt.Sprintf("site loss: replication between sites is asynchronous. Site %s reaches %s.%s The old primary's later writes are lost (the RPO); they stay only at site %s, which the follow-up Rebuild recreates",
 			r.To, l, committedUpTo(tp), r.From))
 	} else {
-		notes = append(notes, fmt.Sprintf("site loss: replication between sites is asynchronous. The writes that the old primary took after the last WAL that site %s received are not in it: this run loses them (the RPO)", r.To))
+		notes = append(notes, fmt.Sprintf("site loss: replication between sites is asynchronous. The old primary's writes after the last WAL that site %s received are lost (the RPO)", r.To))
 	}
 	if tp != nil && tp.Error == "" && tp.LastCommit == nil && tp.CommitNote != "" {
 		notes = append(notes, fmt.Sprintf("site %s: %s, so the plan cannot say when its last replayed commit was", r.To, tp.CommitNote))

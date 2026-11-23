@@ -123,7 +123,7 @@ func TestAbandonWithOldCRD(t *testing.T) {
 		},
 	}))
 	out, code := run(t, f, "abandon", "pg-main-earlier", "-f", "testdata/workload.yaml", "--yes")
-	if code != ExitError || !strings.Contains(out, "apply this version's CRD there") {
+	if code != ExitError || !strings.Contains(out, "Apply this version's CRD there") {
 		t.Fatalf("abandon: exit %d:\n%s", code, out)
 	}
 }

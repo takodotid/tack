@@ -258,7 +258,7 @@ func (e *Env) CheckResume(ctx context.Context, sf *failoverv1.SiteFailover) (*Re
 		return nil, fmt.Errorf("%w: run %s was abandoned at %s: %s", ErrCannotResume, sf.Name, a.At.UTC().Format(time.RFC3339), a.Reason)
 	}
 	if sf.Status.State == "" {
-		return nil, fmt.Errorf("%w: run %s never recorded its start, so none of its steps ran and its follow-ups are not in its ledger. Plan again, and start a new run with --take-over %s",
+		return nil, fmt.Errorf("%w: run %s never recorded its start, so none of its steps ran. Plan again, and start a new run with --take-over %s",
 			ErrCannotResume, sf.Name, sf.Name)
 	}
 	res := &Resumption{env: e, sf: sf, checks: e.SiteChecks(sf.Spec.Mode, sf.Spec.To)}
@@ -320,7 +320,7 @@ func AcceptedHead(sf *failoverv1.SiteFailover, head string) (string, error) {
 	case head == AcceptHEAD || sameCommit(head, changed):
 		return changed, nil
 	}
-	return "", fmt.Errorf("--accept-git-head %s is not the commit the run stopped on: the stop named %s. Review that commit, then resume with --accept-git-head %s. Nothing was changed",
+	return "", fmt.Errorf("--accept-git-head %s is not the commit the run stopped on: the stop named %s. Review it, then resume with --accept-git-head %s. Nothing was changed",
 		head, changed, changed)
 }
 
@@ -626,7 +626,7 @@ func (r *runner) recheck(ctx context.Context) error {
 		}
 	}
 	if _, _, err := r.Driver.Plan(&r.sf.Spec.Workload.Spec, topo, req); err != nil {
-		return fmt.Errorf("the read before the first Failover step: driver %s no longer allows the run: %v. No Failover step of this run ran. When the sites are back as the plan read them, resume; else abandon the run (%s) and plan again",
+		return fmt.Errorf("the read before the first Failover step: driver %s no longer allows the run: %v. No Failover step of this run ran. Resume when the sites are back as planned, or abandon the run (%s) and plan again",
 			r.sf.Spec.Workload.Spec.Driver, err, version.DocLink("docs/runbooks/abandon-run.md"))
 	}
 	r.rechecked = true

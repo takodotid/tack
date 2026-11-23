@@ -26,7 +26,7 @@ import (
 func (e *Env) checkPlan(sf *failoverv1.SiteFailover) error {
 	want, err := e.replan(sf, false)
 	if err != nil {
-		return fmt.Errorf("%w: the steps of run %s are not what driver %s plans from the run's Workload: %v. %s",
+		return fmt.Errorf("%w: the steps of run %s differ from what driver %s plans from the run's Workload: %v. %s",
 			ErrCannotResume, sf.Name, sf.Spec.Workload.Spec.Driver, err, planWayOn())
 	}
 	diff := planDiff(sf.Spec.Steps, want)
@@ -37,7 +37,7 @@ func (e *Env) checkPlan(sf *failoverv1.SiteFailover) error {
 	if old, err := e.replan(sf, true); err == nil && planDiff(sf.Spec.Steps, old) == "" {
 		return nil
 	}
-	return fmt.Errorf("%w: the steps of run %s are not what driver %s plans from the run's Workload: %s. %s",
+	return fmt.Errorf("%w: the steps of run %s differ from what driver %s plans from the run's Workload: %s. %s",
 		ErrCannotResume, sf.Name, sf.Spec.Workload.Spec.Driver, diff, planWayOn())
 }
 

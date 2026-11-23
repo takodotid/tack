@@ -66,7 +66,7 @@ func TestAbandonRefusesRunWithFreshLease(t *testing.T) {
 			got := ledgerAt(t, f, "b", sf.Name)
 			if tt.refused {
 				if code != ExitError || !strings.Contains(out, "a tack process may still run the run: run pg-main-earlier is run by "+otherProcess+", whose lease on it was renewed at 2026-10-27T10:14:55Z and holds until 2026-10-27T10:15:35Z") ||
-					!strings.Contains(out, "--force goes on all the same. Nothing was changed") || strings.Contains(out, "Type the workload name") {
+					!strings.Contains(out, "Nothing was changed; --force goes on anyway") || strings.Contains(out, "Type the workload name") {
 					t.Fatalf("exit %d, want %d with the refusal before the question:\n%s", code, ExitError, out)
 				}
 				if got.Status.Abandoned != nil || got.ResourceVersion != sf.ResourceVersion {
@@ -78,7 +78,7 @@ func TestAbandonRefusesRunWithFreshLease(t *testing.T) {
 				t.Fatalf("exit %d, abandoned %v:\n%s", code, got.Status.Abandoned, out)
 			}
 			flags := got.Status.History[len(got.Status.History)-1].Flags
-			notes := strings.Count(out, "  note      --force: going on, although run pg-main-earlier is run by "+otherProcess)
+			notes := strings.Count(out, "  note      --force: going on although run pg-main-earlier is run by "+otherProcess)
 			if tt.force != slices.Contains(flags, "--force") || tt.force != (notes == 1) || notes > 1 || strings.Contains(out, "all the same\n") {
 				t.Errorf("--force %v: history flags %v:\n%s", tt.force, flags, out)
 			}
@@ -114,7 +114,7 @@ func TestAbandonChecksLeaseAgainAfterQuestion(t *testing.T) {
 			after := out[question:]
 			if !force {
 				if code != ExitError || !strings.Contains(after, "a tack process may still run the run: run pg-main-earlier is run by "+otherProcess+", whose lease on it was renewed at 2026-10-27T10:14:59Z") ||
-					!strings.Contains(after, "--force goes on all the same. Nothing was changed") {
+					!strings.Contains(after, "Nothing was changed; --force goes on anyway") {
 					t.Fatalf("exit %d, want %d with the refusal after the question:\n%s", code, ExitError, out)
 				}
 				if got.Status.Abandoned != nil || got.ResourceVersion != sf.ResourceVersion {
@@ -125,7 +125,7 @@ func TestAbandonChecksLeaseAgainAfterQuestion(t *testing.T) {
 			if code != ExitOK || got.Status.Abandoned == nil {
 				t.Fatalf("exit %d, abandoned %v:\n%s", code, got.Status.Abandoned, out)
 			}
-			if n := strings.Count(out, "  note      --force: going on, although run pg-main-earlier is run by "+otherProcess); n != 1 || !strings.Contains(after, "--force: going on") {
+			if n := strings.Count(out, "  note      --force: going on although run pg-main-earlier is run by "+otherProcess); n != 1 || !strings.Contains(after, "--force: going on") {
 				t.Errorf("%d notes of --force, want 1 after the question:\n%s", n, out)
 			}
 		})

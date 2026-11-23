@@ -103,7 +103,7 @@ func newPrune(o *options) *cobra.Command {
 				return err
 			}
 			if d := p.differs(again); d != "" {
-				return fmt.Errorf("the runs changed since they were listed: %s. Nothing was deleted: prune again", d)
+				return fmt.Errorf("the runs changed since they were listed: %s. Nothing was deleted; prune again", d)
 			}
 			for i, r := range del {
 				cl, err := checks.Client(r.site)
@@ -128,7 +128,7 @@ func newPrune(o *options) *cobra.Command {
 
 // deleted is the error of a delete that failed after done deletes.
 func deleted(done, of int, err error) error {
-	return fmt.Errorf("%w. Deleted %d of %s; the others stay: prune again once the cause is fixed", err, done, ledgers(of))
+	return fmt.Errorf("%w. Deleted %d of %s; the others stay. Fix the cause, then prune again", err, done, ledgers(of))
 }
 
 // ledgers counts ledgers: "1 ledger", "2 ledgers".
