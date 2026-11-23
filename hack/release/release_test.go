@@ -371,11 +371,11 @@ func TestInstallChecksSHA256(t *testing.T) {
 		want  string
 	}{
 		{nil, "kind-linux-"},
-		{[]string{"helm"}, "helm-v4.3.2-linux-"},
+		{[]string{"helm"}, "get.helm.sh/helm-"},
 		{[]string{"cosign"}, "cosign-linux-"},
 		{[]string{"vale"}, "errata-ai/vale/releases/download/"},
 		{[]string{"kubectl"}, "/kubectl does not match its pinned SHA-256"},
-		{[]string{"flux"}, "flux_2.10.0_linux_"},
+		{[]string{"flux"}, "fluxcd/flux2/releases/download/"},
 		{[]string{"zip"}, "unknown tool zip"},
 	} {
 		dest := t.TempDir()
