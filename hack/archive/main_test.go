@@ -181,7 +181,7 @@ func TestWrite(t *testing.T) {
 }
 
 // The same files give the same bytes, whatever their time, the umask that set their mode, and the time zone
-// ([RFC#0009] Requirement 18). Found in a review (#35, row 44): the archives kept the build's time and owner.
+// ([RFC#0009] Requirement 18), so the archives keep neither the build's time nor its owner.
 func TestReproducible(t *testing.T) {
 	for _, ext := range []string{".tar.gz", ".zip"} {
 		t.Run(ext, func(t *testing.T) {

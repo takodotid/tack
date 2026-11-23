@@ -29,7 +29,7 @@ func statusObjects() map[string][]client.Object {
 	}
 }
 
-// #35 row 48. The search for runs checks every site at once ([RFC#0007]
+// The search for runs checks every site at once ([RFC#0007]
 // Requirement 10): testenv.AtOnce fails a site checked alone.
 func TestStatusSearchChecksSitesAtOnce(t *testing.T) {
 	f := &wrapFactory{testFactory: newFactory(statusObjects()), wrap: func(c *testenv.Clients) kube.Clients {

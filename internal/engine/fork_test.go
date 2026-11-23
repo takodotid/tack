@@ -38,7 +38,7 @@ func rebuildOf(t *testing.T, sf *failoverv1.SiteFailover, site string) failoverv
 	return failoverv1.FollowUp{}
 }
 
-// #73 row 1, [RFC#0004] Requirement 15: a site loss records where the new
+// [RFC#0004] Requirement 15: a site loss records where the new
 // primary's history leaves the old one's: its position right before the
 // promotion, the timeline it was on, and its new timeline.
 func TestSiteLossRecordsTheFork(t *testing.T) {
@@ -90,7 +90,7 @@ func TestForkNotReadGoesOn(t *testing.T) {
 	}
 }
 
-// #73 row 1, item 2, [RFC#0004] Requirement 15: with the Workload's
+// [RFC#0004] Requirement 15: with the Workload's
 // snapshot, the run takes a cold volumeSnapshot Backup of the old primary
 // once its site answers, after its fence, and records it and the old
 // archive on the old site's Rebuild.

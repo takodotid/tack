@@ -13,7 +13,7 @@ Runbooks write these in capitals. Replace them with the real values.
 | `F_CLUSTER`, `T_CLUSTER`, `NS` | their CloudNativePG Clusters and its namespace, from the Workload file |
 | `SITE`, `SITE_CTX`, `CLUSTER` | the site the message names, its kube context and its Cluster |
 | `KIND`, `NAME` | an object the message names |
-| `LEDGER_NS` | the ledger namespace, `tack-system` by default |
+| `LEDGER_NS` | the ledger namespace |
 | `URL`, `BRANCH` | the Workload's Git URL and branch |
 | `BASE`, `HEAD`, `FIX` | the commits the message names, and a commit that fixes Git |
 

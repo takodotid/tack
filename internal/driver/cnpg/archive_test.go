@@ -41,7 +41,7 @@ func inTree(path, server string) map[string]any {
 	return map[string]any{"backup": map[string]any{"barmanObjectStore": store}}
 }
 
-// #74 row 2, [RFC#0004] Requirement 16: two sites that archive WAL to the
+// [RFC#0004] Requirement 16: two sites that archive WAL to the
 // same destination, the same path and server name, are refused in a
 // planned switchover, and warned of in a site loss. A shared path with
 // each Cluster's own server name is no clash.

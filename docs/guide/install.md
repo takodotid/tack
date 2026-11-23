@@ -51,7 +51,7 @@ To build from source: `make build` writes `bin/tack`.
 
 ## The CRD at every site
 
-Install the CRD with the Helm chart at `oci://ghcr.io/takodotid/charts/tack`. The chart can also create the operators' roles, off by default: [the chart's roles](../permissions.md#the-charts-roles).
+Install the CRD with the Helm chart at `oci://ghcr.io/takodotid/charts/tack`. The chart can also create the operators' roles: [the chart's roles](../permissions.md#the-charts-roles).
 
 Install the release in the ledger namespace (`spec.ledger.namespace` in the Workload file), so `--create-namespace` creates it. Tack never creates it, and without it `tack run` fails when it creates the ledger, before any step.
 

@@ -25,7 +25,7 @@ func (f *fixture) archives() {
 	}
 }
 
-// #74 row 1, [RFC#0004] Requirement 17: after the promotion, the run waits
+// [RFC#0004] Requirement 17: after the promotion, the run waits
 // until the new primary archives WAL of its new timeline, in both modes.
 func TestPromotionWaitsForArchiving(t *testing.T) {
 	for _, mode := range []failoverv1.Mode{failoverv1.ModePlanned, failoverv1.ModeSiteLoss} {

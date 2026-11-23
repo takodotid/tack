@@ -39,7 +39,7 @@ Each runbook names the extra access its `kubectl` commands need.
 
 ## The chart's roles
 
-With `rbac.create`, the chart creates roles that grant exactly the rows above, and row 16 only with `rbac.prune` too. By default it creates none ([RFC#0009](../rfcs/RFC0009.md#the-chart), Requirement 29).
+With `rbac.create`, the chart creates roles that grant exactly the rows above, and row 16 only with `rbac.prune` too ([RFC#0009](../rfcs/RFC0009.md#the-chart), Requirement 29).
 
 | Role | Kind, namespace | Rows |
 |---|---|---|
