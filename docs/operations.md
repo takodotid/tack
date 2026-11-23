@@ -4,8 +4,8 @@
 
 | Command | Shows |
 |---|---|
-| `tack status -f workload.yaml` | the workload's runs at every reachable site: site, run, mode, from, to, state, reason, start. A site that gave no answer follows with its error, its runs are not listed, and the command exits with code 1. With `-o yaml` those lines follow the ledgers as YAML comments, with `-o json` they go to stderr |
-| `tack status RUN -f workload.yaml` | one run: state, reason, message, the `tack` version that last wrote it, Git base and commit, captured values, held objects, when writes stopped and came back (`Writes down:`), the fork point of a site loss (`Fork:`), each phase and step with its attempts and last result, follow-ups, and the history. Each history entry has the version, user and flags of the `tack` that recorded it |
+| `tack status -f workload.yaml` | runs at every reachable site: site, run, mode, from, to, state, reason, start. A site with no answer follows with its error, and the command exits with code 1 |
+| `tack status RUN -f workload.yaml` | one run: state, reason, message, Git base and commit, captured values, held objects, `Writes down:`, `Fork:`, each phase and step, follow-ups, and the history |
 | `tack status [RUN] --context site-b` | the same from one context, without the Workload file. Add `--namespace` when the ledger namespace is not `tack-system` |
 | `tack status RUN -f workload.yaml -o yaml`, `-o json` | the whole `SiteFailover` object |
 | `tack abandon RUN -f workload.yaml --reason TEXT` | marks a run that must never go on: [runbooks/abandon-run.md](runbooks/abandon-run.md) |
@@ -14,14 +14,19 @@
 | `kubectl --context site-b -n tack-system get sfo -o custom-columns=NAME:.metadata.name,STATE:.status.state,REASON:.status.reason,ABANDONED:.status.abandoned.at,TAKEN-OVER-BY:.status.supersededBy` | the same time and run columns, `<none>` otherwise. Works with a CRD of any v1.3.0 or later release |
 | `kubectl --context site-b -n tack-system describe sfo RUN` | also the ledger's Events: each step's start and end, and each change of the run's state. They last as long as the API server keeps Events (1 h by default) |
 
+- The runs of a site that gave no answer are not listed. With `-o yaml` its error lines follow the ledgers as YAML comments, with `-o json` they go to stderr.
+- `tack status RUN` also prints the `tack` version that last wrote the run, and each step's attempts and last result. `Writes down:` is when writes stopped and came back ([How long writes stay down](#how-long-writes-stay-down)). `Fork:` is the fork point of a site loss. Each history entry has the version, user and flags of the `tack` that recorded it.
+
 A run's state:
 
 | State | Where | Meaning |
 |---|---|---|
 | `Running`, `Waiting`, `Stopped`, `Succeeded` | the ledger's `status.state`, and the State column of `get sfo` | A process that ended, such as in a killed terminal, can leave a run `Running`: `tack resume` continues it. |
 | `Abandoned` | `tack status`, when `status.abandoned` is set | The run never goes on. `get sfo` keeps its last state, such as `Stopped`, and fills the Abandoned column (CRD of v1.4.0). |
-| `TakenOver` | `tack status`, when another run took it over (`status.supersededBy`) | `get sfo` keeps its last state and fills the TakenOverBy column (CRD of the release after v1.5.0, [RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 15). If the mark did not land because the run's site gave no answer, TakenOverBy stays empty, and `tack status` still lists `TakenOver`. |
+| `TakenOver` | `tack status`, when another run took it over (`status.supersededBy`) | `get sfo` keeps its last state and fills the TakenOverBy column ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 15). If the mark did not land, TakenOverBy stays empty and `tack status` still lists `TakenOver`. |
 | `NotStarted` | `tack status`, when `status.state` is empty | The process ended between creating the ledger and its first write: no step ran. It cannot resume. Plan again, and start a new run with `--take-over RUN`. |
+
+TakenOverBy needs the CRD of the release after v1.5.0. The mark does not land when the run's site gave no answer.
 
 A step's state is `Pending`, `Running`, `Succeeded`, `Failed` or `Deferred` ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirements 9 and 11).
 
@@ -78,11 +83,15 @@ Most reasons go on with a plain `tack resume RUN -f workload.yaml` once the caus
 
 | Flag | When | How |
 |---|---|---|
-| `--accept-git-head SHA` | `GitChanged`; `GitDiffersFromLive` once Git is fixed; `FluxChanged` for an expected change ([runbooks/stop-reasons.md](runbooks/stop-reasons.md)) | Review the commits between the base and the new head, such as `git log --oneline 6dd30f7..a2c8b96`. Then `tack resume RUN -f workload.yaml --accept-git-head a2c8b96`. If the `GitChanged` message names one head, only that commit is accepted, or `HEAD` standing for it, and `tack status RUN` shows it. Otherwise `HEAD` is the branch head when `tack resume` starts: it prints that commit before it asks, and records it. Before the run's commit, the accepted head becomes the run's base. After it, the release checks Git against the accepted head, which must contain the run's commit. |
-| `--fence SITE` | `FencedSiteIsPrimary`, when its message offers the flag | Check the lost site that came back as primary. Then `tack resume RUN -f workload.yaml --fence a` declares the new primary there. If no step is left to fence the site, the message says so ([runbooks/stop-reasons.md](runbooks/stop-reasons.md#fencedsiteisprimary)). |
-| `--take-over RUN` | Another run of the workload can no longer finish, such as when its ledger is at a lost site. Without the flag, the new run is refused while that run is listed and not `Succeeded`, or stops on its holds. | `tack run -f workload.yaml --to b --mode site-loss --take-over RUN` takes over the holds of `RUN` and records it in the new ledger. `RUN` can then never resume. Repeat the flag for each run. |
-| `--force` | `tack abandon RUN` or `tack run --take-over RUN` was refused with `a tack process may still run the run` | The refusal names the process and the time to wait ([Interrupting a run](#interrupting-a-run)). For a run without a Lease, such as a v1.4.0 run, it names when the ledger was last written. Stop that process, or check that it ended, and wait. Pass `--force` only once a human has checked that no `tack` process runs `RUN`: a step in flight in such a process still changes the workload. |
+| `--accept-git-head SHA` | `GitChanged`; `GitDiffersFromLive` once Git is fixed; `FluxChanged` for an expected change ([runbooks/stop-reasons.md](runbooks/stop-reasons.md)) | Review the commits from the base to the new head, such as `git log --oneline 6dd30f7..a2c8b96`. Then `tack resume RUN -f workload.yaml --accept-git-head a2c8b96`. |
+| `--fence SITE` | `FencedSiteIsPrimary`, when its message offers the flag | Check the lost site that came back as primary. Then `tack resume RUN -f workload.yaml --fence a` declares the new primary there. |
+| `--take-over RUN` | Another run of the workload can no longer finish, such as when its ledger is at a lost site. | `tack run -f workload.yaml --to b --mode site-loss --take-over RUN` takes over the holds of `RUN` and records it in the new ledger. `RUN` can then never resume. |
+| `--force` | `tack abandon RUN` or `tack run --take-over RUN` was refused with `a tack process may still run the run` | Stop the process the refusal names, or check it ended, and wait ([Interrupting a run](#interrupting-a-run)). Use `--force` only after a human checked no `tack` process runs `RUN`. |
 
+- `--accept-git-head`: if the `GitChanged` message names one head, only that commit is accepted, or `HEAD` standing for it, and `tack status RUN` shows it. Otherwise `HEAD` is the branch head when `tack resume` starts: it prints that commit before it asks, and records it. Before the run's commit, the accepted head becomes the run's base. After it, the release checks Git against the accepted head, which must contain the run's commit.
+- `--fence`: if no step is left to fence the site, the message says so ([runbooks/stop-reasons.md](runbooks/stop-reasons.md#fencedsiteisprimary)).
+- `--take-over`: without it, the new run is refused while the other run is listed and not `Succeeded`, or stops on its holds. Repeat the flag for each run.
+- `--force`: the refusal names the process and the time to wait. For a run without a Lease, such as a v1.4.0 run, it names when the ledger was last written. A step in flight in a `tack` process still changes the workload, so check that no process runs `RUN` first.
 - A hold set outside Tack stops a run with `HeldByAnotherRun`. It stays until the operator removes it ([runbooks/abandon-run.md](runbooks/abandon-run.md#remove-a-hold-left-behind)).
 - After `--accept-git-head`, the check before release reports differences outside the run's own fields instead of stopping on them, and the check after release does not stop on a changed generation ([RFC#0005](../rfcs/RFC0005.md#requirements), Requirements 8 and 10).
 - Once its ledger exists, `tack run` searches for other runs again. If another run of the workload started at the same time, the run ends before any step, changes nothing, and is marked abandoned. Plan again once the other run is done.

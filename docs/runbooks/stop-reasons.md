@@ -21,9 +21,15 @@ Runbooks write these in capitals. Replace them with the real values.
 
 | Check | How |
 |---|---|
-| No other `tack` process runs `RUN`. | Ask the operators and check every script that runs `tack`: a `Running` ledger does not tell a live process from a dead one. The process holds a Lease that names it and its host: `kubectl --context T_CTX -n LEDGER_NS get lease RUN -o jsonpath='{.spec.holderIdentity} {.spec.renewTime}{"\n"}'`. No holder: the process ended. |
+| No other `tack` process runs `RUN`. | Ask the operators and check every script that runs `tack`. A live process holds a Lease that names it and its host. No holder: the process ended. |
 | Where the run stopped | `tack status RUN -f workload.yaml`: state, reason, message, and each step's state and last result. |
 | The workload has a primary | After a planned run demoted F and T is not primary yet, go to [no-primary-after-demotion.md](no-primary-after-demotion.md) first. |
+
+A `Running` ledger does not tell a live process from a dead one. Read the Lease:
+
+```sh
+kubectl --context T_CTX -n LEDGER_NS get lease RUN -o jsonpath='{.spec.holderIdentity} {.spec.renewTime}{"\n"}'
+```
 
 A stopped run keeps its objects held: Flux applies nothing to them, not even later Git changes. A run left `Running` by an ended process goes on with `tack resume RUN -f workload.yaml`.
 
@@ -98,9 +104,13 @@ First find which sites take writes: the [primary check](#primary-check) at each 
 | The message | When | Way on |
 |---|---|---|
 | `step S: site SITE answers as primary (...); it should be fenced. Check it, then resume with --fence SITE`, or `declares itself primary` | The read before the site's steps, for a site whose steps can wait for it, such as a lost site that is back. | `tack resume RUN -f workload.yaml --fence SITE`. Tack holds the site's objects, then declares the new primary there. Then [rebuild-old-primary.md](rebuild-old-primary.md). |
-| `step S: site SITE ... Promoting T gives two primaries, and no step of this run is left to fence SITE, so --fence cannot help` | Before `promote-T`, after F's demotion or fence: the site was made primary again outside the run, such as F by hand ([no-primary-after-demotion.md](no-primary-after-demotion.md), option 2). | The plan no longer fits the sites. Abandon the run ([abandon-run.md](abandon-run.md)), then plan a new run if the switch is still needed. Demoting F by hand does not help: the resume stops with `TokenMissing`. |
-| `step S: site SITE ..., and so does T, which this run promoted: two primaries. No step of this run is left to fence SITE, so --fence cannot help` | The same, after `promote-T`. Both sites may take writes. | Pick the site that keeps the writes. Declare its Cluster primary at the other site by hand, to stop writes there. Then abandon the run ([abandon-run.md](abandon-run.md)). The other site needs a [rebuild](rebuild-old-primary.md), and the writes it took are lost. |
-| `step S: site SITE ..., and this run fences it only after it promotes T`, or `..., and so does T, which this run promoted, until this run fences SITE` | A third site is primary, and the run declares T primary there only after the promotion. | Find out why SITE is primary. To go on anyway: `tack resume RUN -f workload.yaml --fence SITE`. SITE and T are then both primary until the run declares T at SITE. The writes SITE takes meanwhile are lost, and SITE needs a [rebuild](rebuild-old-primary.md). Otherwise abandon the run ([abandon-run.md](abandon-run.md)). |
+| `step S: site SITE ... Promoting T gives two primaries, and no step of this run is left to fence SITE, so --fence cannot help` | Before `promote-T`, after F's demotion or fence: the site was made primary again outside the run, such as F by hand ([no-primary-after-demotion.md](no-primary-after-demotion.md), option 2). | The plan no longer fits the sites. Abandon the run ([abandon-run.md](abandon-run.md)), then plan a new run if the switch is still needed. |
+| `step S: site SITE ..., and so does T, which this run promoted: two primaries. No step of this run is left to fence SITE, so --fence cannot help` | The same, after `promote-T`. Both sites may take writes. | Pick the site that keeps the writes, and declare its Cluster primary at the other site by hand. Then abandon the run ([abandon-run.md](abandon-run.md)) and [rebuild](rebuild-old-primary.md) the other site. |
+| `step S: site SITE ..., and this run fences it only after it promotes T`, or `..., and so does T, which this run promoted, until this run fences SITE` | A third site is primary, and the run declares T primary there only after the promotion. | Find out why SITE is primary. To go on anyway: `tack resume RUN -f workload.yaml --fence SITE`. Otherwise abandon the run ([abandon-run.md](abandon-run.md)). |
+
+- **No step left to fence SITE, before `promote-T`:** demoting F by hand does not help, because the resume stops with `TokenMissing`.
+- **No step left to fence SITE, after `promote-T`:** declaring the Cluster primary at the other site stops writes there. The writes that site took are lost.
+- **A third site that the run fences after the promotion:** with `--fence`, SITE and T are both primary until the run declares T at SITE. The writes SITE takes meanwhile are lost, and SITE needs a [rebuild](rebuild-old-primary.md).
 
 ## HeldByAnotherRun
 
@@ -134,8 +144,11 @@ Any other error. Fix the cause the message names, then `tack resume RUN -f workl
 | `... is forbidden: User ... cannot ...` | A missing permission. | Grant it ([Permissions](../permissions.md)), then resume. |
 | A `Wait` that timed out, such as `wait-demoted-F`, `wait-promoted-T` or `wait-pooler-T` | The workload did not reach the state in time. `wait-demoted-F` may never see a token: CloudNativePG skips it when F's shutdown outlasts `switchoverDelay` ([RFC#0004](../../rfcs/RFC0004.md#limitations), Limitations). | Check the object the step names, then resume. Without a token from F: [no-primary-after-demotion.md](no-primary-after-demotion.md). |
 | `step S: the read before the first Failover step: driver cnpg no longer allows the run: ...` | No Failover step ran yet, and the sites are no longer what the plan needs, such as a primary switched by hand while the run was stopped in Hold. | Resume when the sites are back as planned. Otherwise abandon the run ([abandon-run.md](abandon-run.md)) and plan again. |
-| `step git-commit: ...: the run would write ... The ledger's Git step does not match its Workload` | The Git step names another file, path or document than the Workload maps, or than the manifest that defines the object ([RFC#0006](../../rfcs/RFC0006.md#requirements), Requirement 15). Causes: a ledger written outside Tack, or a manifest moved in Git after the plan. Nothing was committed. | Find out who wrote the ledger ([Who may write ledgers](../permissions.md#who-may-write-ledgers)). Abandon the run: [abandon-run.md](abandon-run.md). |
+| `step git-commit: ...: the run would write ... The ledger's Git step does not match its Workload` | The Git step names another file, path or document than the Workload maps, or than the object's manifest ([RFC#0006](../../rfcs/RFC0006.md#requirements), Requirement 15). Nothing was committed. | Find out who wrote the ledger ([Who may write ledgers](../permissions.md#who-may-write-ledgers)). Abandon the run: [abandon-run.md](abandon-run.md). |
 | `verify-noop-SITE`, with a Kustomization not `Ready` | Flux did not end a reconcile with `ReconciliationSucceeded` within `timeouts.flux`. | Fix the Kustomization, then resume. |
 | `verify-noop-SITE`: `the Kustomization NS/NAME at site SITE is suspended (spec.suspend)` | A released object's Kustomization is suspended: Flux applies nothing to it. | Find out who suspended it, and why. Run `flux --context SITE_CTX resume kustomization NAME -n NS`, then resume the run. |
 | `routing-SITE` | Strait did not route to T's member alone within `timeouts.routing`. Every release is done. | Check the `SiteService` at that site, then resume. |
-| `... is no longer held by this run, so Flux may apply Git over the change` | Someone removed a hold during the run. | Find out who, and why. If the workload was also changed by hand, such as F promoted again, abandon the run ([abandon-run.md](abandon-run.md)). Otherwise hold the object again as the message says, then resume. |
+| `... is no longer held by this run, so Flux may apply Git over the change` | Someone removed a hold during the run. | Find out who, and why. If the workload was also changed by hand, abandon the run ([abandon-run.md](abandon-run.md)). Otherwise hold the object again as the message says, then resume. |
+
+- A `git-commit` mismatch comes from a ledger written outside Tack, or a manifest moved in Git after the plan.
+- A change by hand to the workload is, for example, F promoted again.

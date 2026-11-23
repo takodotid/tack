@@ -17,10 +17,13 @@ Each search for runs reads every ledger of the workload at each answering site, 
 |---|---|
 | Every site answers, and every run of the workload at every site is finished: `Succeeded` with no `Deferred` step, `Abandoned` or `TakenOver`. Otherwise prune deletes nothing. | A deleted newer run lets an older unfinished run resume on a plan that no longer fits the sites ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 18). |
 | Delete only a `Succeeded` run with no `Deferred` step. Keep `Abandoned` and `TakenOver` runs. | They record holds that may remain, and the take-over that ended them ([runbooks/abandon-run.md](runbooks/abandon-run.md), step 6). [Delete one by hand](#delete-a-run-by-hand). |
-| Keep the `--keep` newest runs that succeeded (at least 1; abandoned and taken-over runs do not count). Delete a run only once `--keep` of them were certainly created after it: at its own site in a later second, at another site 10 s or more later. Otherwise prune keeps it as `may be one of the N newest` and names the run the clocks cannot order it against. | The newest successful run records the last switch. Each site's API server sets creation time, to the second, by its own clock. |
+| Keep the `--keep` newest runs that succeeded (at least 1; abandoned and taken-over runs do not count). | The newest successful run records the last switch. |
+| Delete a run only once `--keep` of them were certainly created after it: at its own site in a later second, at another site 10 s or more later. | Each site's API server sets creation time, to the second, by its own clock. |
+| Otherwise keep the run as `may be one of the N newest`, and name the run the clocks cannot order it against. | Prune cannot tell which of the two runs is newer. |
 | Keep a run whose spec takes over a run that is kept, not abandoned, and not marked `status.supersededBy`. | Without it, that run would block every new run. |
 | Keep a run that a newer `tack` last wrote (`status.writtenBy`). A `tack` with no release version, such as `dev`, keeps every run a release wrote. | A newer release may need what it recorded. |
-| Keep a run with a follow-up `Rebuild` until its site's member, as the Workload file names it, was created again 10 s or more after the run's ledger (`metadata.creationTimestamp`). Prune reads the member only for such a run, and keeps the run when it cannot. | `tack plan` refuses a switchover to that member while such a run says it diverged ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 14). The 10 s cover the clock difference between two sites' API servers. |
+| Keep a run with a follow-up `Rebuild` until its site's member, as the Workload file names it, was created again 10 s or more after the run's ledger (`metadata.creationTimestamp`). | `tack plan` refuses a switchover to that member while such a run says it diverged ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 14). The 10 s cover the clock difference between two sites' API servers. |
+| Read the member only for such a run, and keep the run when it cannot be read. | The row above needs the member's creation time. |
 | Delete each ledger by name, only while it is still the object that was read. Stop at the first error. | A run or ledger written during the confirmation is not deleted from a stale list. |
 
 ## Delete a run by hand
@@ -29,9 +32,19 @@ For an abandoned or taken-over run whose record no longer matters, check each ro
 
 | Check | How |
 |---|---|
-| No object names `RUN` as its holder. | `tack status RUN -f workload.yaml` lists each object the run held. For each, `kubectl --context SITE_CTX -n NS get KIND NAME -o jsonpath='{.metadata.annotations.failover\.tako\.id/held-by}{"\n"}'` must print something other than `RUN`. Otherwise [remove the hold first](runbooks/abandon-run.md#remove-a-hold-left-behind). |
-| No follow-up `Rebuild`, or that site's member was created again 10 s or more after the run's ledger. | `tack status RUN -f workload.yaml` lists the follow-ups. `kubectl --context T_CTX -n tack-system get sfo RUN -o jsonpath='{.metadata.creationTimestamp}{"\n"}'` prints the ledger's creation time; `kubectl --context SITE_CTX -n NS get cluster MEMBER -o jsonpath='{.metadata.creationTimestamp}{"\n"}'` the member's. |
-| Its spec takes over no listed run that is neither abandoned nor marked `status.supersededBy`. | `kubectl --context T_CTX -n tack-system get sfo RUN -o jsonpath='{.spec.takeOver} {.spec.takeOvers}{"\n"}'` names the runs; look each up with `tack status`. Deleting `RUN` would make such a run block every new run. |
+| No object names `RUN` as its holder. | `tack status RUN -f workload.yaml` lists each object the run held. For each, the holder (below) must be something other than `RUN`. Otherwise [remove the hold first](runbooks/abandon-run.md#remove-a-hold-left-behind). |
+| No follow-up `Rebuild`, or that site's member was created again 10 s or more after the run's ledger. | `tack status RUN -f workload.yaml` lists the follow-ups. Compare the ledger's creation time with the member's (below). |
+| Its spec takes over no listed run that is neither abandoned nor marked `status.supersededBy`. | Look up each run the spec names (below) with `tack status`. Deleting `RUN` would make such a run block every new run. |
+
+```sh
+# holder of an object the run held
+kubectl --context SITE_CTX -n NS get KIND NAME -o jsonpath='{.metadata.annotations.failover\.tako\.id/held-by}{"\n"}'
+# creation time of the ledger, then of the member
+kubectl --context T_CTX -n tack-system get sfo RUN -o jsonpath='{.metadata.creationTimestamp}{"\n"}'
+kubectl --context SITE_CTX -n NS get cluster MEMBER -o jsonpath='{.metadata.creationTimestamp}{"\n"}'
+# runs the spec takes over
+kubectl --context T_CTX -n tack-system get sfo RUN -o jsonpath='{.spec.takeOver} {.spec.takeOvers}{"\n"}'
+```
 
 ```sh
 kubectl --context T_CTX -n tack-system delete sfo RUN

@@ -33,7 +33,9 @@
 | `--reason TEXT` | `abandon` | why the run is abandoned, recorded in its ledger |
 | `--keep N` | `prune` | keep this many of the newest runs that succeeded, 1 or more |
 | `--skill` | `tack` | print a guide for AI agents as a skill document, and exit |
-| `-v`, `--version` | `tack` | print the version. A build whose version names no release, such as `dev` from `go build -buildvcs=false` or from `go install` of v1.4.0 or older, refuses ledgers that a release wrote. |
+| `-v`, `--version` | `tack` | print the version. A build whose version names no release, such as `dev`, refuses ledgers that a release wrote. |
+
+A `dev` version comes from `go build -buildvcs=false`, or from `go install` of v1.4.0 or older.
 
 When to pass `--fence`, `--accept-git-head` and `--take-over`: [Stopped and waiting runs](../runbooks/stop-reasons.md).
 

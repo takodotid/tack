@@ -10,8 +10,10 @@ Each run is one `SiteFailover` object, its ledger, at the new primary's site. It
 | Name | `<workload>-<UTC yyyymmdd-hhmmss>`, from the plan's time, with `-2` to `-9` appended when the name is taken |
 | Label | `failover.tako.id/workload: <workload>` |
 | `spec` | the mode, `from` and `to`, a snapshot of the Workload file, every step, and the cluster of each site that answered the plan. Written at creation, never changed. |
-| `status` | the run's state and reason, each phase and step with its times and earlier attempts, captured values such as the demotion token, held objects, Git revisions, follow-ups, the fork point after a site loss, when writes stopped and came back, and the run's history |
+| `status` | the run's state and reason, each phase and step, captured values such as the demotion token, held objects, Git revisions, follow-ups, and the history |
 | The CRD | `failover.tako.id_sitefailovers.yaml`, in each release and in the chart: [Install](../guide/install.md#the-crd-at-every-site) |
+
+`status` also holds each step's times and earlier attempts, the fork point after a site loss, and when writes stopped and came back.
 
 [RFC#0003](../../rfcs/RFC0003.md#design) lists every field of `spec` and `status`.
 

@@ -14,10 +14,14 @@ If the old site still runs, its Cluster stays primary and takes writes, so there
 | Check | How |
 |---|---|
 | The old site is down, not only cut off from this host | Check from a second vantage point with another network path: another site, an out-of-band console, the provider's status page, monitoring. |
-| The old primary cannot take writes | Fence it out of band: stop its database nodes, cut its network at the edge, or power it off. Its Kubernetes API is not there to do it. What Tack's fence does: [operations.md](../operations.md#what-fencing-does). |
-| The old site's applications cannot write | A cut-off site's applications still reach their local primary, and Strait there still routes them to it, so their writes are lost to the new primary. Stop the applications or their Pooler out of band: scale them to 0 from a console that still reaches the site, cut the site's network at the edge, or power it off. Cutting off the whole site covers the database and its applications. |
+| The old primary cannot take writes | Fence it out of band: stop its database nodes, cut its network at the edge, or power it off. What Tack's fence does: [operations.md](../operations.md#what-fencing-does). |
+| The old site's applications cannot write | Stop the applications or their Pooler out of band, or cut the site's network at the edge or power it off. |
 | Clients no longer reach the old primary | With Strait, at each site that answers, the route names no member of the old site: `kubectl --context SITE -n NS get siteservice NAME -o jsonpath='{.status.route.members}'`. |
 | The new site is a healthy replica | `tack plan -f workload.yaml --to NEW --mode site-loss` shows it as a healthy `Replica`. |
+
+- The old site's Kubernetes API is not there to fence its primary.
+- A cut-off site's applications still reach their local primary, and Strait there still routes them to it, so their writes are lost to the new primary.
+- To stop the applications or their Pooler, scale them to 0 from a console that still reaches the site. Cutting off the whole site covers the database and its applications.
 
 ## Steps
 

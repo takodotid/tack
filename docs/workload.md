@@ -102,9 +102,13 @@ Quote a site name, or a context in `site:`, when YAML would read it as a boolean
 | `name` | yes | | The name used in `--to`, `--from`, `--fence` and the ledger. Unique. Lowercase letters, digits and `-`, starting and ending with a letter or digit, at most 63 characters. |
 | `kubeContext` | yes | | The kubeconfig context for this site. A missing context is an error: Tack never falls back to the current context. [One kubeconfig](#every-sites-context-in-one-kubeconfig) holds every site's context. |
 | `cnpg.cluster.namespace`, `cnpg.cluster.name` | yes | | The site's CloudNativePG `Cluster`. Each site's Cluster needs its own name. |
-| `cnpg.pooler.namespace`, `cnpg.pooler.name` | no | | The site's read-write `Pooler`. Tack also waits on the Deployment of the same name. Without it, Tack moves no Pooler at this site. Never name it `<cluster>-rw`, `<cluster>-ro` or `<cluster>-r`: the Cluster owns Services with those names, and CloudNativePG then never reconciles the Pooler. |
+| `cnpg.pooler.namespace`, `cnpg.pooler.name` | no | | The site's read-write `Pooler`. Tack also waits on the same-named Deployment. Without it, Tack moves no Pooler here. Never name it `<cluster>-rw`, `-ro` or `-r`. |
 | `cnpg.pooler.instances` | with a pooler | | The Pooler's instances while this site is primary, at least 1. While another site is primary, Tack sets it to 0. |
-| `cnpg.snapshot` | no | `false` | Take a cold snapshot of this Cluster's volumes when a site loss leaves it the old primary: once the site answers again, before anyone rebuilds the Cluster. It is a CloudNativePG `Backup` with `method: volumeSnapshot`, so the Cluster needs `spec.backup.volumeSnapshot` and the site needs VolumeSnapshot support. A failed Backup stops the run. Set it on every site, since any site can be the old primary. See [recover-old-primary-writes.md](runbooks/recover-old-primary-writes.md). |
+| `cnpg.snapshot` | no | `false` | Cold-snapshot this Cluster's volumes when a site loss leaves it the old primary. Set it on every site. A failed Backup stops the run. |
+
+The Cluster owns Services named `<cluster>-rw`, `<cluster>-ro` and `<cluster>-r`. A Pooler with one of those names is never reconciled by CloudNativePG.
+
+`cnpg.snapshot` takes the snapshot once the old primary's site answers again, before anyone rebuilds the Cluster. It is a CloudNativePG `Backup` with `method: volumeSnapshot`, so the Cluster needs `spec.backup.volumeSnapshot` and the site needs VolumeSnapshot support. Any site can be the old primary. See [recover-old-primary-writes.md](runbooks/recover-old-primary-writes.md).
 
 `tack plan` checks the live objects too. Each `Cluster` must set `.spec.replica.primary` and not `.spec.replica.enabled`. A Flux Kustomization must apply each `Cluster` and `Pooler`. [RFC#0004](../rfcs/RFC0004.md) and [RFC#0005](../rfcs/RFC0005.md) list every check.
 
@@ -124,11 +128,13 @@ KUBECONFIG=site-a.kubeconfig:site-b.kubeconfig tack plan -f workload.yaml --to b
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
-| `url` | yes | | The repository, as `git` takes it: SSH, HTTPS or a path. Access comes from the operator's `git` configuration ([Git access](permissions.md#git-access)). Tack refuses a URL with a password, and an HTTP or HTTPS URL with a user: set the user with `git config credential.<url>.username`. |
+| `url` | yes | | The repository, as `git` takes it: SSH, HTTPS or a path. Access comes from the operator's `git` configuration ([Git access](permissions.md#git-access)). Tack refuses a URL with a password. |
 | `branch` | yes | | The branch Flux applies. |
 | `author.name`, `author.email` | no | git's `user.name` and `user.email` | The author and committer of Tack's commit. Without `author`, git must have an identity configured. |
 | `fields[]` | no | | Mappings: where a field lives in the repository. A mapping wins over `find`. |
 | `find` | no | | Lets Tack find the manifest that defines an object, for every field without a mapping. |
+
+Tack also refuses an HTTP or HTTPS URL with a user: set the user with `git config credential.<url>.username`.
 
 Every field a run changes needs a mapping or `find`, or the plan fails. The exception is the removal of a used CloudNativePG promotion token: when neither covers it, the plan leaves that change out and says so. [RFC#0004](../rfcs/RFC0004.md) Requirement 8 lists the fields the `cnpg` driver changes. `tack plan` prints each with its file and path.
 
@@ -141,10 +147,10 @@ Every field a run changes needs a mapping or `find`, or the plan fails. The exce
 | `object.namespace` | no | any namespace | The live object's namespace. |
 | `field` | yes | | The field's path in the live object, such as `spec.instances`. |
 | `file` | yes | | The file, relative to the repository root. |
-| `path` | yes | | The field's path in the file. `a.b.c` is key `c` under `b` under `a`. `a[2].b` is key `b` of the third item of list `a`. Keys that contain dots cannot be addressed. |
+| `path` | yes | | The field's path in the file. `a.b.c` is key `c` under `b` under `a`. `a[2].b` is key `b` of the third list item of `a`. |
 | `document` | no | | The YAML document to edit, counting from 0. Required when the file holds several documents. |
 
-A mapping matches a change when site, kind, name and field match, and the namespace too if the mapping sets one. Two mappings that match the same change fail the plan. When Git answers at plan time, the file and the parent of `path` must exist in it.
+A mapping matches a change when site, kind, name and field match, and the namespace too if the mapping sets one. Two mappings that match the same change fail the plan. When Git answers at plan time, the file and the parent of `path` must exist in it. Keys that contain dots cannot be addressed by `path`.
 
 ### `spec.git.find`
 
@@ -185,9 +191,13 @@ Give each site's Cluster a WAL archive of its own from the start: its own `desti
 
 | Tack | Does |
 |---|---|
-| `tack plan` | Reads each site's destination: `spec.backup.barmanObjectStore`, or the `destinationPath` of the barman-cloud plugin's `ObjectStore`. Refuses a planned switchover when two sites that answer share one. For a site loss it only warns, since the fix is in Git, which may have gone with the lost site. Also warns when the new primary reports `ContinuousArchiving` `False`. |
-| `verify-archiving-<to>`, after the promotion | Waits up to `timeouts.archiving` until `ContinuousArchiving` is `True` and the new primary's last archived file is of its new timeline. A Cluster without an archive passes at once. On a timeout the run warns and records `CheckArchiving`: writes are back by then, and the operator fixes the archive. Until archiving works, no point-in-time recovery reaches past the promotion. |
+| `tack plan` | Reads each site's destination. Refuses a planned switchover when two sites that answer share one. Only warns for a site loss. |
+| `verify-archiving-<to>`, after the promotion | Waits up to `timeouts.archiving` for the new primary to archive its new timeline. Without an archive it passes at once. On a timeout it warns and records `CheckArchiving`. |
 | after a site loss | Records where the old primary archived, on its `Rebuild` follow-up. The old archive is kept, and the rebuilt Cluster gets a new destination ([rebuild-old-primary.md](runbooks/rebuild-old-primary.md)). |
+
+- A destination is `spec.backup.barmanObjectStore`, or the `destinationPath` of the barman-cloud plugin's `ObjectStore`.
+- For a site loss `tack plan` only warns, since the fix is in Git, which may have gone with the lost site. It also warns when the new primary reports `ContinuousArchiving` `False`.
+- Archiving works when `ContinuousArchiving` is `True` and the new primary's last archived file is of its new timeline. On a timeout, writes are back already and the operator fixes the archive. Until archiving works, no point-in-time recovery reaches past the promotion.
 
 ## Replay time
 
@@ -211,12 +221,16 @@ At each site, make two changes in Git:
 | Restarts PostgreSQL? | No. Each instance reads the named ConfigMaps whenever it reconciles its Cluster. |
 | Cost | One query, `pg_last_xact_replay_timestamp()`, at most once per `spec.monitoring.metricsQueriesTTL` (30 seconds by default), when something reads `/metrics`. |
 | Permissions | None more: Tack reads it with the `get` on `pods/proxy` ([Permissions](permissions.md)). |
-| Where kept | A site-loss run reads it again at `record-position-<to>`, right before the promotion, and keeps it in the ledger as `status.fork.lastCommit`. `tack status RUN` prints it on the `Fork:` line. Upgrade the CRD first ([Upgrade](guide/upgrade.md)). |
+| Where kept | A site-loss run reads it again at `record-position-<to>`, before the promotion, and keeps it in the ledger as `status.fork.lastCommit`. `tack status RUN` prints it on the `Fork:` line. |
+
+Upgrade the CRD first ([Upgrade](guide/upgrade.md)).
 
 | The plan prints | When |
 |---|---|
-| `last replayed commit <time> (<age> ago)` in the `Replay` column | the query answers. The time is the old primary's clock, to the millisecond; the age is by Tack's clock. In a site-loss plan it adds: the writes the old primary committed after that time are lost, and so may be a few committed just before it |
+| `last replayed commit <time> (<age> ago)` in the `Replay` column | the query answers. A site-loss plan adds: writes the old primary committed after that time are lost, and so may be a few just before it |
 | `(the clocks differ)` | the time is after Tack's clock |
 | `replayed no transaction since it started` | PostgreSQL returns NULL |
+
+The time is the old primary's clock, to the millisecond; the age is by Tack's clock.
 
 The time is that of the last commit the replica replayed. It does not mean every earlier commit is in the replica: PostgreSQL stamps a commit before it writes the commit record, so under concurrent writes a commit stamped just before another can come after it in the WAL and not be replayed yet. An old primary that took no writes after the time loses none. The value can be up to `metricsQueriesTTL` old.

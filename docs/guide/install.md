@@ -68,7 +68,9 @@ done
 | One way per cluster: the chart, or `kubectl apply --server-side` of the CRD. | The chart refuses a CRD that kubectl applied (`invalid ownership metadata`). To hand it to the chart, label it `app.kubernetes.io/managed-by=Helm`, annotate it `meta.helm.sh/release-name=tack` and `meta.helm.sh/release-namespace=tack-system`, then install. |
 | Upgrade with the same command. | With `--set` or `-f`, every value not given goes back to the chart's default, unless `--reset-then-reuse-values` is passed. `helm --kube-context "$ctx" -n tack-system get values tack` shows the current values. |
 | Before the first run, check at every site [who may write ledgers](../permissions.md#who-may-write-ledgers). | Writing a ledger is privileged, and the chart's roles take no access away. |
-| Never set `crds.keep=false` while the site holds a ledger that matters: a run that is not `Succeeded`, or a `Rebuild` follow-up not yet done. | `helm uninstall`, or an upgrade with `crds.install=false`, then deletes the CRD and every ledger. A lost `Rebuild` follow-up can send a planned run to a member that diverged ([RFC#0003](../../rfcs/RFC0003.md#requirements), Requirement 14). To undo it: `helm upgrade --reset-then-reuse-values --set crds.keep=true`. |
+| Never set `crds.keep=false` while the site holds a ledger that matters: a run that is not `Succeeded`, or a `Rebuild` follow-up not yet done. | `helm uninstall` or an upgrade with `crds.install=false` deletes the CRD and every ledger. A lost `Rebuild` follow-up can send a planned run to a diverged member ([RFC#0003](../../rfcs/RFC0003.md#requirements), Requirement 14). |
+
+To undo `crds.keep=false`: `helm upgrade --reset-then-reuse-values --set crds.keep=true`.
 
 `helm uninstall` with `crds.keep=true` (the default) leaves the CRD, every ledger and the namespace. Installing again under the same release name and namespace takes the CRD back. Without Helm, apply the CRD with `kubectl --context "$ctx" apply --server-side -f $NAME/failover.tako.id_sitefailovers.yaml`, then create the ledger namespace.
 
@@ -79,7 +81,9 @@ done
 | A kube context per site | All in one kubeconfig: the file `--kubeconfig` names, else the standard loading rules. One file per cluster: see [the Workload file](../workload.md#every-sites-context-in-one-kubeconfig). [Permissions](../permissions.md) lists what each context needs. |
 | Git access | The operator's `git` configuration. The branch must accept a push from those credentials: [Git access](../permissions.md#git-access). |
 | A Workload file | The sites, their contexts and the Git repository: [the Workload file](../workload.md). |
-| Clocks kept by NTP | Every site's API server and every host that runs `tack` stay within a few seconds of each other. Tack orders runs of different sites by ledger creation time, with a margin of 10 s ([RFC#0003](../../rfcs/RFC0003.md#requirements), Requirement 18). With clocks further apart, an older run can resume after a newer one, or `tack abandon` can mark a run that a process still runs. |
+| Clocks kept by NTP | Every site's API server and every host that runs `tack` stay within a few seconds of each other ([RFC#0003](../../rfcs/RFC0003.md#requirements), Requirement 18). |
+
+Tack orders runs of different sites by ledger creation time, with a margin of 10 s. With clocks further apart, an older run can resume after a newer one, or `tack abandon` can mark a run that a process still runs.
 
 ## Shell completion
 
