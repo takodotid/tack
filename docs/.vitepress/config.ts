@@ -86,16 +86,19 @@ function repositoryLinks(md: any) {
     });
 }
 
+/** A word of code of 25 characters or more. */
+const LONG_CODE = /\S{25,}/;
+
 /**
- * A word of code of 25 characters or more, such as a metric's name or a `custom-columns` list, may break, so that it
- * does not push a table off the page: after `_`, `.`, `/`, `,`, `=` or `:`, and anywhere when that is not enough, which
- * the class `long` allows in style.css. A shorter word never breaks.
+ * A long word of code, such as a metric's name or a `custom-columns` list, may break, so that it does not push a table
+ * off the page: after `_`, `.`, `/`, `,`, `=` or `:`, and anywhere when that is not enough, which the class `long`
+ * allows in style.css. A shorter word never breaks.
  */
 function longCode(md: MarkdownRenderer) {
     const render = md.renderer.rules.code_inline;
     if (!render) throw new Error("markdown-it has no rule for inline code");
     md.renderer.rules.code_inline = (tokens, idx, options, env, self) => {
-        if (!/\S{25,}/.test(tokens[idx].content)) return render(tokens, idx, options, env, self);
+        if (!LONG_CODE.test(tokens[idx].content)) return render(tokens, idx, options, env, self);
         tokens[idx].attrJoin("class", "long");
         return render(tokens, idx, options, env, self).replace(
             /^(<code[^>]*>)([\s\S]*)(<\/code>)$/,
@@ -107,7 +110,8 @@ function longCode(md: MarkdownRenderer) {
 /**
  * Each cell of a table carries its column's name in `data-label`, and each part of the table its role. On a phone
  * style.css sets a row's cells one under the other, each after its name; the roles keep the table a table to a screen
- * reader when it no longer looks like one.
+ * reader when it no longer looks like one. A cell that holds only one code with a long word is marked `key`, so that
+ * style.css gives its column room for it.
  */
 function tableLabels(md: MarkdownRenderer) {
     md.core.ruler.push("tack-table-labels", (state) => {
@@ -133,11 +137,16 @@ function tableLabels(md: MarkdownRenderer) {
                     token.attrSet("role", "columnheader");
                     break;
                 }
-                case "td_open":
+                case "td_open": {
                     token.attrSet("role", "cell");
                     if (heads[column]) token.attrSet("data-label", heads[column]);
+                    const words = state.tokens[i + 1]?.children ?? [];
+                    if (words.length === 1 && words[0].type === "code_inline" && LONG_CODE.test(words[0].content)) {
+                        token.attrJoin("class", "key");
+                    }
                     column++;
                     break;
+                }
             }
         });
     });
