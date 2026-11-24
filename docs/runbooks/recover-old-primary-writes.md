@@ -23,6 +23,8 @@ Access needed: `kubectl` with `create` on `clusters` and `pods/exec` in the old 
 | The data outlives the snapshot object | The VolumeSnapshotContent's `spec.deletionPolicy`. The VolumeSnapshot names its content in `status.boundVolumeSnapshotContentName`. Command 2 under this table. |
 | The fork point is recorded | `Fork:` names a position and a timeline |
 
+The two commands:
+
 ```sh
 # 1. The snapshot's owners
 kubectl --context OLD -n NS get volumesnapshot SNAPSHOT -o jsonpath='{.metadata.ownerReferences}'

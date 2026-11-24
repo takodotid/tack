@@ -110,7 +110,7 @@ function longCode(md: MarkdownRenderer) {
 /**
  * Each cell of a table carries its column's name in `data-label`, and each part of the table its role. On a phone
  * style.css sets a row's cells one under the other, each after its name; the roles keep the table a table to a screen
- * reader when it no longer looks like one. A cell that holds only one long word of code is marked `key`, so that
+ * reader when it no longer looks like one. A cell that holds only one code with a long word is marked `key`, so that
  * style.css gives its column room for it.
  */
 function tableLabels(md: MarkdownRenderer) {

@@ -455,8 +455,8 @@ html {
     .vp-doc table:not(:has(th:nth-child(3))) td:first-child {
         min-width: 13em;
     }
-    /* A cell that holds only one long word of code, marked by config.ts, keeps room for it on two lines, not four. */
-    .vp-doc td.key {
+    /* A cell that holds only one code with a long word, marked by config.ts, keeps 16rem for it, also in a first column. */
+    .vp-doc table tr td.key:nth-child(n) {
         min-width: 16rem;
     }
 }

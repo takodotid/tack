@@ -15,7 +15,7 @@ Every object of the run is held at both sites, so Flux applies nothing to them. 
 | F is demoted. | The [primary check](stop-reasons.md#primary-check) at F prints `T_CLUSTER`, and `false` for each instance. F's read-write Pooler runs no pod. | F is still primary, and this runbook does not apply. Resume the run. |
 | T has not promoted. | T's Cluster shows `F_CLUSTER` in `spec.replica.primary`, no `status.lastPromotionToken`, and `false` for each instance. The command is under this table. | T has promoted or is promoting: take option 1. Never promote F by hand then: that gives two primaries. |
 
-The check of T prints `F_CLUSTER`, nothing, `false`:
+The check of T:
 
 ```sh
 kubectl --context T_CTX -n NS get cluster T_CLUSTER -o jsonpath='{.spec.replica.primary} {.status.lastPromotionToken} {.status.instancesReportedState.*.isPrimary}{"\n"}'
