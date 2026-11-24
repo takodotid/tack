@@ -8,11 +8,17 @@ The rebuild deletes the old Cluster's data. Do it only when the new primary is h
 
 Without a snapshot, stop. `tack status RUN -f workload.yaml` must show `snapshot: Backup NS/NAME` on the old site's `Rebuild`. The old primary's writes after the fork point exist nowhere else: follow [recover-old-primary-writes.md](recover-old-primary-writes.md) first. Keep the snapshot's VolumeSnapshots until the data's owners are done.
 
-| Check | Command |
+| Check | How |
 |---|---|
 | The run succeeded and lists the follow-up | `tack status RUN -f workload.yaml` |
 | The new primary is healthy | `kubectl --context NEW -n NS get cluster NEW_CLUSTER` shows `Cluster in healthy state` |
-| The old site declares the new primary | `kubectl --context OLD -n NS get cluster OLD_CLUSTER -o jsonpath='{.spec.replica.primary}'` |
+| The old site declares the new primary | The old Cluster's `spec.replica.primary` names the new primary's Cluster. The command is under this table. |
+
+The old site's declared primary:
+
+```sh
+kubectl --context OLD -n NS get cluster OLD_CLUSTER -o jsonpath='{.spec.replica.primary}'
+```
 
 ## Steps
 

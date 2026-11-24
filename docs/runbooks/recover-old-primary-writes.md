@@ -19,9 +19,16 @@ Access needed: `kubectl` with `create` on `clusters` and `pods/exec` in the old 
 | Check | How |
 |---|---|
 | Tack recorded the snapshot | `tack status RUN -f workload.yaml` shows `snapshot: Backup NS/NAME` on the old site's `Rebuild`. **Without it, do not rebuild.** |
-| The snapshot survives the rebuild | `kubectl --context OLD -n NS get volumesnapshot SNAPSHOT -o jsonpath='{.metadata.ownerReferences}'` names no `Cluster` |
-| The data outlives the snapshot object | `kubectl --context OLD get volumesnapshotcontent CONTENT -o jsonpath='{.spec.deletionPolicy}'`; the VolumeSnapshot names its content in `status.boundVolumeSnapshotContentName` |
+| The snapshot survives the rebuild | The VolumeSnapshot's `metadata.ownerReferences` names no `Cluster`. Command 1 under this table. |
+| The data outlives the snapshot object | The VolumeSnapshotContent's `spec.deletionPolicy`. The VolumeSnapshot names its content in `status.boundVolumeSnapshotContentName`. Command 2 under this table. |
 | The fork point is recorded | `Fork:` names a position and a timeline |
+
+```sh
+# 1. The snapshot's owners
+kubectl --context OLD -n NS get volumesnapshot SNAPSHOT -o jsonpath='{.metadata.ownerReferences}'
+# 2. The deletion policy of its content
+kubectl --context OLD get volumesnapshotcontent CONTENT -o jsonpath='{.spec.deletionPolicy}'
+```
 
 If a check fails:
 

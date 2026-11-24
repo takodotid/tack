@@ -11,8 +11,14 @@
 | `tack abandon RUN -f workload.yaml --reason TEXT` | marks a run that must never go on: [runbooks/abandon-run.md](runbooks/abandon-run.md) |
 | `tack prune -f workload.yaml --keep N` | lists the workload's runs, and deletes the ledgers of old runs that succeeded: [Old ledgers](old-ledgers.md) |
 | `kubectl --context site-b -n tack-system get sfo` | the ledgers at one site: workload, mode, from, to, state, reason, abandoned (how long ago), phase, age, taken over by |
-| `kubectl --context site-b -n tack-system get sfo -o custom-columns=NAME:.metadata.name,STATE:.status.state,REASON:.status.reason,ABANDONED:.status.abandoned.at,TAKEN-OVER-BY:.status.supersededBy` | the same time and run columns, `<none>` otherwise. Works with a CRD of any v1.3.0 or later release |
+| `get sfo` with custom columns, under this table | the same time and run columns, `<none>` otherwise. Works with a CRD of any v1.3.0 or later release |
 | `kubectl --context site-b -n tack-system describe sfo RUN` | also the ledger's Events: each step's start and end, and each change of the run's state. They last as long as the API server keeps Events (1 h by default) |
+
+The custom columns:
+
+```sh
+kubectl --context site-b -n tack-system get sfo -o custom-columns=NAME:.metadata.name,STATE:.status.state,REASON:.status.reason,ABANDONED:.status.abandoned.at,TAKEN-OVER-BY:.status.supersededBy
+```
 
 - The runs of a site that gave no answer are not listed. With `-o yaml` its error lines follow the ledgers as YAML comments, with `-o json` they go to stderr.
 - `tack status RUN` also prints the `tack` version that last wrote the run, and each step's attempts and last result. `Writes down:` is when writes stopped and came back ([How long writes stay down](#how-long-writes-stay-down)). `Fork:` is the fork point of a site loss. Each history entry has the version, user and flags of the `tack` that recorded it.
