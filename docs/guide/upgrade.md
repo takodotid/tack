@@ -13,8 +13,8 @@ Then read the section of each release skipped over, newest first.
 ### v1.6.x to v1.7.0
 
 - **CRD:** new optional fields `spec.acceptBehind`, `status.fork` (with `status.fork.lastCommit`), `status.writes`, `status.steps[].earlier`, `wait.stall` of a step, `status.followUps[].snapshot` and `.archive`. In the Workload snapshot: `cnpg.snapshot`, `timeouts.snapshot` and `timeouts.archiving`. New step types: `Create` and `Record`.
-- A v1.6.x CRD drops `spec.acceptBehind` (`tack run --accept-behind` refuses to create a ledger there) and `status.fork.lastCommit` (the ledger loses the replay time).
-- Grant `get` on `pods` and `pods/proxy` in each member's namespace ([Permissions](../permissions.md); the chart's objects Role has it where `rbac.objects` names `clusters`). The plan reads each site's WAL position and each replica's replay lag with it. Without it, the plan only warns, and a site-loss run records no fork point.
+- A v1.6.x CRD does not know the step type `Record`, which every plan has: `tack run` refuses to create a ledger there.
+- Grant `get` on `pods` and `pods/proxy` in each member's namespace ([Permissions](../permissions.md), row 18, says what is lost without it; the chart's objects Role has it where `rbac.objects` names `clusters`).
 - To have a site-loss plan report the new primary's last replayed commit time, add the opt-in replay-time query to each Cluster ([Replay time](../workload.md#replay-time)).
 - A site-loss plan refuses a target that is behind another replica that answers, unless `--accept-behind` is passed ([RFC#0004](../../rfcs/RFC0004.md#requirements), Requirement 14).
 - A site-loss run records the fork point and the old primary's WAL archive. With `cnpg.snapshot`, it also snapshots the old primary, and needs `get` and `create` on `backups` ([Permissions](../permissions.md); the chart's objects Role has it where `rbac.objects` names `clusters`).
@@ -61,6 +61,13 @@ Then read the section of each release skipped over, newest first.
 - Grant `get` on the namespace `kube-system` at every site. The plan reads its UID to identify the site's cluster and fails with `forbidden` without it.
 - Tack refuses an `http` or `https` Git URL that holds a user, such as `https://user@git.example.com/gitops.git`. Move the user into git's configuration (`credential.<url>.username`). `ssh://git@git.example.com/gitops.git` and `git@git.example.com:gitops.git` still work.
 - A ledger written by v1.0.x or v1.1.x records each site's cluster in `status.fingerprints` on its first read, then checks it.
+
+## Roll back
+
+| Part | Rule |
+|---|---|
+| CLI | Roll back only once every run the newer CLI wrote is `Succeeded` or abandoned. An older CLI refuses to resume or abandon such a run. |
+| CRD | Never apply an older CRD at a site that holds a ledger the newer release wrote. The API server drops the fields that CRD does not know, such as a site loss's fork point and snapshot. |
 
 ## Upgrade from v0.1.x
 
