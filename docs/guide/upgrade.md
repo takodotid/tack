@@ -10,15 +10,15 @@ Upgrade the CRD before the CLI, and every operator's CLI together.
 
 Then read the section of each release skipped over, newest first.
 
-### Unreleased, after v1.6.0
+### v1.6.x to v1.7.0
 
 - **CRD:** new optional fields `spec.acceptBehind`, `status.fork` (with `status.fork.lastCommit`), `status.writes`, `status.steps[].earlier`, `wait.stall` of a step, `status.followUps[].snapshot` and `.archive`. In the Workload snapshot: `cnpg.snapshot`, `timeouts.snapshot` and `timeouts.archiving`. New step types: `Create` and `Record`.
 - A v1.6.x CRD drops `spec.acceptBehind` (`tack run --accept-behind` refuses to create a ledger there) and `status.fork.lastCommit` (the ledger loses the replay time).
-- Grant `get` on `pods` and `pods/proxy` in each member's namespace ([Permissions](../permissions.md); the chart's objects Role has it where `rbac.objects` names `clusters`). The plan reads each site's WAL position and each replica's replay lag with it, and only warns without it.
+- Grant `get` on `pods` and `pods/proxy` in each member's namespace ([Permissions](../permissions.md); the chart's objects Role has it where `rbac.objects` names `clusters`). The plan reads each site's WAL position and each replica's replay lag with it. Without it, the plan only warns, and a site-loss run records no fork point.
 - To have a site-loss plan report the new primary's last replayed commit time, add the opt-in replay-time query to each Cluster ([Replay time](../workload.md#replay-time)).
 - A site-loss plan refuses a target that is behind another replica that answers, unless `--accept-behind` is passed ([RFC#0004](../../rfcs/RFC0004.md#requirements), Requirement 14).
-- A site-loss run records the fork point and the old primary's WAL archive. With `cnpg.snapshot`, it also snapshots the old primary, and needs `get` and `create` on `backups` ([Permissions](../permissions.md)).
-- A planned switchover is refused when two sites archive WAL to the same destination. A site-loss plan warns instead ([WAL archives](../workload.md#wal-archives)). The check needs `get` on the barman-cloud `objectstores` the Clusters name.
+- A site-loss run records the fork point and the old primary's WAL archive. With `cnpg.snapshot`, it also snapshots the old primary, and needs `get` and `create` on `backups` ([Permissions](../permissions.md); the chart's objects Role has it where `rbac.objects` names `clusters`).
+- A planned switchover is refused when two sites archive WAL to the same destination. A site-loss plan warns instead ([WAL archives](../workload.md#wal-archives)). The check needs `get` on the barman-cloud `objectstores` the Clusters name. With the chart, list them in the new `rbac.objects[].objectStores`. Without the grant, the plan warns that it could not check.
 - After each promotion, the run waits up to `timeouts.archiving` for the new primary to archive WAL. If that time runs out, it warns and records the follow-up `CheckArchiving`.
 - In a planned run, the wait for the promotion stops once replay has stood still for 2 minutes short of the token ([How long writes stay down](../operations.md#how-long-writes-stay-down)).
 - A ledger written by v1.6.x resumes with the steps it planned.

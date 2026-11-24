@@ -26,7 +26,7 @@ A run's state:
 | `TakenOver` | `tack status`, when another run took it over (`status.supersededBy`) | `get sfo` keeps its last state and fills the TakenOverBy column ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirement 15). If the mark did not land, TakenOverBy stays empty and `tack status` still lists `TakenOver`. |
 | `NotStarted` | `tack status`, when `status.state` is empty | The process ended between creating the ledger and its first write: no step ran. It cannot resume. Plan again, and start a new run with `--take-over RUN`. |
 
-TakenOverBy needs the CRD of the release after v1.5.0. The mark does not land when the run's site gave no answer.
+TakenOverBy needs the CRD of v1.6.0 or later. The mark does not land when the run's site gave no answer.
 
 A step's state is `Pending`, `Running`, `Succeeded`, `Failed` or `Deferred` ([RFC#0003](../rfcs/RFC0003.md#requirements), Requirements 9 and 11).
 
