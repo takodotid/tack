@@ -9,7 +9,7 @@ Each release on the [releases page](https://github.com/takodotid/tack/releases) 
 On Linux and macOS:
 
 ```sh
-VERSION=v1.6.0
+VERSION=v1.7.0
 OS=linux      # or darwin
 ARCH=amd64    # or arm64
 NAME=tack-$VERSION-$OS-$ARCH
@@ -26,7 +26,7 @@ sudo cp $NAME/man/man1/*.1 /usr/local/share/man/man1/
 On Windows the archive is a `.zip` with `tack.exe`. In PowerShell:
 
 ```powershell
-$VERSION = "v1.6.0"
+$VERSION = "v1.7.0"
 $NAME = "tack-$VERSION-windows-amd64"    # or arm64
 $URL = "https://github.com/takodotid/tack/releases/download/$VERSION"
 Invoke-WebRequest "$URL/$NAME.zip" -OutFile "$NAME.zip" -UseBasicParsing

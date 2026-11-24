@@ -4,7 +4,7 @@ What the workflow checks, in order: [RFC0009, Releases](../../rfcs/RFC0009.md#re
 
 | Step | What to do |
 |---|---|
-| 1. Merge | Merge the release's pull request into `main`. The README and [Install](../guide/install.md) name the new version. |
+| 1. Merge | Merge the release's pull request into `main`. [Install](../guide/install.md) names the new version, and [Upgrade](../guide/upgrade.md) has its section. |
 | 2. Wait for CI | Wait until the `ci` run of the merge commit on `main` finishes with every job successful: `gh run list --workflow ci.yaml --branch main`. |
 | 3. Tag | Sign an annotated tag on that commit and push it: `git tag -s vX.Y.Z COMMIT -m "Tack vX.Y.Z"`, then `git push origin vX.Y.Z`. GitHub must show it as Verified. |
 | 4. Approve | If the environment `release` has reviewers, approve the run. |
