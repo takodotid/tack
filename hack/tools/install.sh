@@ -23,10 +23,10 @@ flux     v2.10.1  amd64  967365ff84aabc97871827ff33713ef0c09f62dd83c18759e3a5e39
 flux     v2.10.1  arm64  da18ddb25c9614405d9e2f13ad014fd660bfcbe7218674cabf9325db73f811e2
 helm     v4.3.2   amd64  d1c0278d46beab79582d7e50f5b3dc206944ba8e577cde618513fd07daa53983
 helm     v4.3.2   arm64  df31cb61680ef728f82c770e5280dd565617bee6b039d37e85c677288be4bbb0
-cosign   v3.1.4   amd64  424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa
-cosign   v3.1.4   arm64  ade83b7aac62e131cacfe96d958948b2150cc9efec46a570a2649b8e27dedad2
-vale     v3.28.1  amd64  068954ad869ebec24b8dec6ebcd1cbb1fd5f5a83e966a35baedfae8b2cdc093a
-vale     v3.28.1  arm64  af0ca36ec6133ba20093295591e43ed2823b2632520d1f3811293aa4cbe758f2
+cosign   v3.1.6   amd64  318a99ade4156a0c4113aa983b46c0a0830fa7896a096c63121ee47b610a94c6
+cosign   v3.1.6   arm64  bbb2ebc765f483cf9fac42da8763dddc2b55b350ee12ea0c44a520a6d6d52334
+vale     v3.29.0  amd64  00356ae1bacd1160aa415664f3ed0d34ce9ef5319c61d31123a97366ea1a2f64
+vale     v3.29.0  arm64  ffff63b3aaf97ca3c7e0a0c5226a8ddf7c21f21f1695e40461b0037d2189ba74
 '
 
 [[ $(uname -s) == Linux ]] || { echo "install.sh: the tools are pinned for Linux only" >&2; exit 1; }
